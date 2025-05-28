@@ -98,7 +98,7 @@ class Player:
 def preparar_baralhos():
     global baralhos
     baralhos = {}
-    for cor in COLORS:  # <-- aqui
+    for cor in COLORS: 
         baralhos[cor] = {}
         for tipo in CARD_TYPES:
             pasta = os.path.join(CARTAS_DIR, cor, tipo)
