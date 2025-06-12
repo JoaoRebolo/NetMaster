@@ -134,10 +134,10 @@ def move_player(player, steps):
 
     # Mostra nome da casa na cor certa
     cor_map = {
-        "green": "#00FF00",
-        "yellow": "#FFD600",
-        "red": "#FF0000",
-        "blue": "#0070FF",
+        "green": "#70AD47",
+        "yellow": "#F2BA0D",
+        "red": "#EE6F68",
+        "blue": "#43BEF2",
         "neutral": "#AAAAAA"
     }
     cor_hex = cor_map.get(casa_cor, "#FFFFFF")
