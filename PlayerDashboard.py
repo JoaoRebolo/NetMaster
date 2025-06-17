@@ -9,10 +9,10 @@ from Store import StoreWindow
 IMG_DIR = os.path.join(os.path.dirname(__file__), "img")
 COIN_IMG = os.path.join(IMG_DIR, "picoin.png")
 USER_ICONS = [
-    os.path.join(IMG_DIR, "red_user_button_icon.png"),
-    os.path.join(IMG_DIR, "green_user_button_icon.png"),
-    os.path.join(IMG_DIR, "blue_user_button_icon.png"),
-    os.path.join(IMG_DIR, "yellow_user_button_icon.png"),
+    os.path.join(IMG_DIR, "red_user_icon.png"),
+    os.path.join(IMG_DIR, "green_user_icon.png"),
+    os.path.join(IMG_DIR, "blue_user_icon.png"),
+    os.path.join(IMG_DIR, "yellow_user_icon.png"),
 ]
 
 # GPIO setup para botão KEY1
@@ -86,8 +86,16 @@ class PlayerDashboard(tk.Toplevel):
         self.progress_bars = {}
         self.title("")
         self.configure(bg="black")
+        self.player_name = player_name
+        self.saldo = saldo
+        self.other_players = other_players
+
+        # ADICIONA ISTO:
         screen_width = root.winfo_screenwidth()
         screen_height = root.winfo_screenheight()
+        self.screen_width = screen_width
+        self.screen_height = screen_height
+
         self.geometry(f"{screen_width}x{screen_height}+0+0")
         self.overrideredirect(True)
         self.attributes("-fullscreen", True)
@@ -112,6 +120,16 @@ class PlayerDashboard(tk.Toplevel):
 
         # Chama a tela de lançamento de dado
         self.show_dice_roll_screen(player_name, saldo, other_players, screen_width, screen_height)
+
+        self.inventory = {
+            "users": [],
+            "equipment": [],
+            "services": [],
+            "action": [],
+            "events": [],
+            "challenges": [],
+            "data": [],
+        }
 
     def animate_typing(self, label, text, delay=50, callback=None):
         def _type(i=0):
@@ -143,10 +161,10 @@ class PlayerDashboard(tk.Toplevel):
         # Ícones dos outros jogadores (esquerda)
         for idx, p in enumerate(other_players):
             if idx < len(USER_ICONS):
-                icon_img = ImageTk.PhotoImage(Image.open(USER_ICONS[idx]).resize((35,35)))
+                icon_img = ImageTk.PhotoImage(Image.open(USER_ICONS[idx]).resize((30,30)))
                 lbl = tk.Label(self, image=icon_img, bg=self.bar_color)
                 lbl.image = icon_img
-                lbl.place(x=5+idx*45, y=20)
+                lbl.place(x=5+idx*40, y=20)
 
         # Frame central para o dado e frases
         center_frame = tk.Frame(self, bg="black")
@@ -318,6 +336,84 @@ class PlayerDashboard(tk.Toplevel):
     def show_card_active(self, card_path):
         # Atualiza visualmente a carta como ativa
         pass
+
+    def adicionar_carta_inventario(self, carta_path, carta_tipo):
+        if carta_tipo in self.inventory:
+            self.inventory[carta_tipo].append(carta_path)
+
+    def show_inventory_page(self, carta_tipo):
+        # Limpa widgets (menos barra superior)
+        for widget in self.winfo_children():
+            if widget == self.topbar_label:
+                continue
+            widget.destroy()
+
+        screen_width = self.winfo_screenwidth()
+        # Título
+        title = tk.Label(self, text=carta_tipo.capitalize(), font=("Helvetica", 22, "bold"),
+                         fg="black", bg=self.bar_color)
+        title.place(relx=0.5, y=65, anchor="n")
+
+        # Mostra as cartas desse tipo
+        cartas = self.inventory.get(carta_tipo, [])
+        if cartas:
+            carta_path = cartas[-1]  # Mostra a última carta tirada
+            img = ImageTk.PhotoImage(Image.open(carta_path).resize((180, 260)))
+            carta_lbl = tk.Label(self, image=img, bg="black", cursor="hand2")
+            carta_lbl.image = img
+            carta_lbl.place(relx=0.5, rely=0.4, anchor="center")
+
+            def abrir_fullscreen(event=None):
+                self.show_card_fullscreen(carta_path, carta_tipo)
+            carta_lbl.bind("<Button-1>", abrir_fullscreen)
+        else:
+            tk.Label(self, text="Sem cartas!", font=("Helvetica", 16), bg="black", fg="white").place(relx=0.5, rely=0.5, anchor="center")
+
+        # Botão seta para voltar
+        seta_img = ImageTk.PhotoImage(Image.open(os.path.join(IMG_DIR, "arrow_left.png")).resize((48, 48)))
+        seta_btn = tk.Button(
+            self,
+            image=seta_img,
+            bg="black",
+            borderwidth=0,
+            command=lambda: self.show_dice_roll_screen(
+                self.player_name,
+                self.saldo,
+                self.other_players,
+                self.screen_width,
+                self.screen_height
+            )
+        )
+        seta_btn.image = seta_img
+        seta_btn.place(x=10, rely=0.9*self.winfo_screenheight(), anchor="sw")
+
+    def show_card_fullscreen(self, carta_path, carta_tipo):
+        print("DEBUG: PlayerDashboard.show_card_fullscreen chamado")
+        # Limpa widgets (menos barra superior)
+        for widget in self.winfo_children():
+            if widget == self.topbar_label:
+                continue
+            widget.destroy()
+
+        pil_img = Image.open(carta_path)
+        img_w, img_h = pil_img.size
+        max_w, max_h = self.winfo_screenwidth(), self.winfo_screenheight()
+        ratio = min(max_w/img_w, max_h/img_h)
+        new_w, new_h = int(img_w*ratio), int(img_h*ratio)
+        pil_img = pil_img.resize((new_w, new_h), Image.LANCZOS)
+
+        carta_img = ImageTk.PhotoImage(pil_img)
+        carta_real_lbl = tk.Label(self, image=carta_img, bg="black")
+        carta_real_lbl.image = carta_img
+        carta_real_lbl.place(relx=0.5, rely=0.5, anchor="center")
+
+        # Botão X para fechar
+        x_img_path = os.path.join(IMG_DIR, "X_button.png")
+        x_img = ImageTk.PhotoImage(Image.open(x_img_path).resize((48, 48)))
+        x_btn = tk.Label(self, image=x_img, bg="black", cursor="hand2")
+        x_btn.image = x_img
+        x_btn.place(relx=0.98, rely=0.02, anchor="ne")
+        x_btn.bind("<Button-1>", lambda e: self.show_inventory_page(carta_tipo))
 
 # Exemplo de uso isolado:
 if __name__ == "__main__":

@@ -331,6 +331,7 @@ class StoreWindow(tk.Toplevel):
         go_btn.pack(pady=(5, 0))
 
     def mostrar_carta_fullscreen(self, carta_path, casa_tipo):
+        print("DEBUG: Store.mostrar_carta_fullscreen chamado")
         # Limpa tudo da janela Store
         for widget in self.winfo_children():
             widget.destroy()
@@ -356,15 +357,23 @@ class StoreWindow(tk.Toplevel):
         def fechar():
             carta_real_lbl.destroy()
             x_btn.destroy()
-            # Se for data ou challenges, vai para o carrossel
+            # Guarda a carta no dashboard
             if casa_tipo in ["data", "challenges"]:
                 if hasattr(self.master, "adicionar_carta_carrossel"):
                     self.master.adicionar_carta_carrossel(carta_path)
-            # Se for da cor do jogador e for users, equipment, services, action, events, vai para o inventário
             elif casa_tipo in ["users", "equipment", "services", "action", "events"]:
                 if hasattr(self.master, "adicionar_carta_inventario"):
                     self.master.adicionar_carta_inventario(carta_path, casa_tipo)
             self.destroy()
+            # Volta ao dashboard e mostra a página inicial
+            if hasattr(self.master, "show_dice_roll_screen"):
+                self.master.show_dice_roll_screen(
+                    self.master.player_name,
+                    self.master.saldo,
+                    self.master.other_players,
+                    self.master.screen_width,
+                    self.master.screen_height
+                )
 
         x_btn = tk.Label(self, image=x_img, bg="black", cursor="hand2")
         x_btn.image = x_img

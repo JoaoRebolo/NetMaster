@@ -8,6 +8,8 @@ import random
 import string
 import itertools
 import netifaces
+from PlayerDashboard import PlayerDashboard, check_gpio_key
+from Store import StoreWindow
 
 LOCAL_PORT = 5050
 DISCOVERY_PORT = 5001
@@ -324,7 +326,7 @@ root.attributes("-fullscreen", True)
 
 # Carregar imagens dos logos e ícones
 print("A carregar logo NetMaster...")
-netmaster_img = ImageTk.PhotoImage(Image.open(os.path.join(IMG_DIR, "logo_netmaster_icon_v3.png")).resize((80,40)))
+netmaster_img = ImageTk.PhotoImage(Image.open(os.path.join(IMG_DIR, "logo_netmaster_icon_v3.png")).resize((100,40)))
 create_icon = ImageTk.PhotoImage(Image.open(os.path.join(IMG_DIR, "create_game_icon_button.png")).resize((100,100)))
 search_icon = ImageTk.PhotoImage(Image.open(os.path.join(IMG_DIR, "search_game_icon_button.png")).resize((100,100)))
 
@@ -383,10 +385,10 @@ def show_user_page(name):
         bf = tk.Frame(up, bg="black")
         bf.place(relx=0.5, rely=0.6, anchor="center")
         # ícones de cor
-        for color, fname in [("Red","red_user_button_icon.png"),
-                             ("Green","green_user_button_icon.png"),
-                             ("Blue","blue_user_button_icon.png"),
-                             ("Yellow","yellow_user_button_icon.png")]:
+        for color, fname in [("Red","red_user_icon.png"),
+                             ("Green","green_user_icon.png"),
+                             ("Blue","blue_user_icon.png"),
+                             ("Yellow","yellow_user_icon.png")]:
             icon = ImageTk.PhotoImage(Image.open(os.path.join(IMG_DIR, fname)).resize((65,65)))
             tk.Button(
                 bf,
@@ -409,81 +411,100 @@ def show_user_page(name):
 def open_color_page(color):
     global host_name, host_color, jogador
     host_color = color
-    # O nome já foi passado antes, guarda-o também
+    color_map = {
+    "green": "#70AD47",
+    "yellow": "#F2BA0D",
+    "red": "#EE6F68",
+    "blue": "#43BEF2"
+    }
+    bar_color = color_map.get(host_color.lower(), "#AAAAAA")
+    
     try:
         with open(USERNAME_FILE, "r") as f:
             host_name = f.read().strip()
     except:
         host_name = "Host"
-    # Cria o jogador aqui!
     jogador = Player(host_name, host_color.lower(), START_POSITIONS[host_color.lower()])
     cp = tk.Toplevel(root, bg="black")
     cp.overrideredirect(True)
     cp.geometry(f"{screen_width}x{screen_height}+0+0")
 
-    # Barra superior colorida
-    color_map = {
-        "Red": "#FF0000",
-        "Green": "#00FF00",
-        "Blue": "#0070FF",
-        "Yellow": "#FFD600"
-    }
-    bar_color = color_map.get(color, "white")
-    top_bar = tk.Frame(cp, bg=bar_color, height=55, width=screen_width)
-    top_bar.place(x=0, y=0, relwidth=1)
+    # Barra superior
+    topbar_img_path = os.path.join(IMG_DIR, f"TopBar_{host_color.lower()}.png")
+    img = Image.open(topbar_img_path).convert("RGBA")
+    img = img.resize((screen_width, 60), Image.LANCZOS)
+    topbar_img = ImageTk.PhotoImage(img)
+    cp.topbar_img = topbar_img
+    topbar_label = tk.Label(cp, image=topbar_img, bg="black", borderwidth=0, highlightthickness=0)
+    topbar_label.place(x=0, y=0, width=screen_width, height=60)
 
-    # Frame central (texto)
+    name_lbl = tk.Label(cp, text=host_name, font=("Helvetica", 18, "bold"), fg="black", bg=bar_color, bd=0)
+    name_lbl.place(relx=0.5, y=25, anchor="n")
+
+    COIN_IMG = os.path.join(IMG_DIR, "picoin.png")
+    coin_img = ImageTk.PhotoImage(Image.open(COIN_IMG).resize((24,24)))
+    cp.coin_img = coin_img
+    coin_lbl = tk.Label(cp, image=coin_img, bg=bar_color, bd=0)
+    coin_lbl.place(x=screen_width-100, y=30)
+    saldo_lbl = tk.Label(cp, text="1000", font=("Helvetica", 16, "bold"), fg="black", bg=bar_color, bd=0)
+    saldo_lbl.place(x=screen_width-70, y=30)
+
+    # Frame central (texto) - LOCAL!
     tf = tk.Frame(cp, bg="black")
-    tf.place(relx=0.5, rely=0.28, anchor="center")  # <-- alterado de 0.4 para 0.28
+    tf.place(relx=0.5, rely=0.28, anchor="center")
 
-    # Label "Great!" (igual à página inicial)
     great_lbl = tk.Label(tf, text="", font=("Helvetica", 18, "bold"), bg="black", fg="white", wraplength=int(screen_width*0.8), justify="center")
     great_lbl.pack(pady=(0,8))
-
-    # Label "How do you want to play?" (igual à página inicial)
     how_lbl = tk.Label(tf, text="", font=("Helvetica", 14), bg="black", fg="white", wraplength=int(screen_width*0.8), justify="center")
     how_lbl.pack(pady=(0,12))
 
-    # Função para mostrar os botões após a animação
+    local_icon = ImageTk.PhotoImage(Image.open(os.path.join(IMG_DIR, "local_game_icon_button.png")).resize((115, 130)))
+    remote_icon = ImageTk.PhotoImage(Image.open(os.path.join(IMG_DIR, "remote_game_icon_button.png")).resize((115, 130)))
+    cp.local_icon = local_icon
+    cp.remote_icon = remote_icon
+
     def show_play_buttons():
         btns_frame = tk.Frame(cp, bg="black")
-        btns_frame.place(relx=0.5, rely=0.7, anchor="center")  # <-- alterado de 0.78 para 0.7
-
-        local_icon = ImageTk.PhotoImage(Image.open(os.path.join(IMG_DIR, "local_game_icon_button.png")).resize((115, 130)))
-        remote_icon = ImageTk.PhotoImage(Image.open(os.path.join(IMG_DIR, "remote_game_icon_button.png")).resize((115, 130)))
-
+        btns_frame.place(relx=0.5, rely=0.7, anchor="center")
         def launch_local():
-            cp.destroy()  # Fecha a janela de escolha de cor/modo
-            show_host_turn_page(bar_color)
-
+            cp.destroy()
+            PlayerDashboard(
+                root,
+                player_color=host_color.lower(),
+                saldo=1000,
+                other_players=[c for c in ["red", "green", "blue", "yellow"] if c != host_color.lower()],
+                player_name=host_name
+            )
+            check_gpio_key(root)
         def launch_remote():
             cp.destroy()
-            show_host_turn_page(bar_color)
-
-        # Botões empilhados verticalmente
+            PlayerDashboard(
+                root,
+                player_color=host_color.lower(),
+                saldo=1000,
+                other_players=[c for c in ["red", "green", "blue", "yellow"] if c != host_color.lower()],
+                player_name=host_name
+            )
+            check_gpio_key(root)
         tk.Button(
             btns_frame,
-            image=local_icon,
+            image=cp.local_icon,
             bd=0,
             bg="black",
             activebackground="black",
             highlightthickness=0,
             command=launch_local
         ).pack(side=tk.TOP, pady=10)
-        cp.local_icon = local_icon  # manter referência
-
         tk.Button(
             btns_frame,
-            image=remote_icon,
+            image=cp.remote_icon,
             bd=0,
             bg="black",
             activebackground="black",
             highlightthickness=0,
             command=launch_remote
         ).pack(side=tk.TOP, pady=10)
-        cp.remote_icon = remote_icon  # manter referência
 
-    # Animação em cadeia
     animate_typing(great_lbl, "Great!", delay=60,
         callback=lambda: animate_typing(how_lbl, "How do you want to play?", delay=40, callback=show_play_buttons)
     )

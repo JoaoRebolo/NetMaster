@@ -8,10 +8,10 @@ IMG_DIR = os.path.join(os.path.dirname(__file__), "img")
 LOGO_IMG = os.path.join(IMG_DIR, "logo_netmaster_icon_v3.png")
 COIN_IMG = os.path.join(IMG_DIR, "picoin.png")
 USER_ICONS = [
-    os.path.join(IMG_DIR, "red_user_button_icon.png"),
-    os.path.join(IMG_DIR, "green_user_button_icon.png"),
-    os.path.join(IMG_DIR, "blue_user_button_icon.png"),
-    os.path.join(IMG_DIR, "yellow_user_button_icon.png"),
+    os.path.join(IMG_DIR, "red_user_icon.png"),
+    os.path.join(IMG_DIR, "green_user_icon.png"),
+    os.path.join(IMG_DIR, "blue_user_icon.png"),
+    os.path.join(IMG_DIR, "yellow_user_icon.png"),
 ]
 
 CARD_IMG = os.path.join(IMG_DIR, "cartas", "back_card.png")  # Exemplo
@@ -60,23 +60,18 @@ def mostrar_carta_fullscreen_root(root, carta_path, selected_card_idx=0):
         PlayerDashboard(root, player_color="green", saldo=1000, other_players=["red", "blue", "yellow"], selected_card_idx=selected_card_idx)
     x_btn.bind("<Button-1>", lambda e: fechar())
 
-def make_card_callback(parent, path):
+def make_card_callback(parent, idx):
     def callback(event):
-        # Descobre qual label foi clicado
-        clicked_label = event.widget
-        # Se já está selecionada (borda roxa), mostra em fullscreen
-        if getattr(clicked_label, "selected", False):
-            parent.try_mostrar_carta(path)
-            return
-        # Remove borda de todas as cartas
+        # Remove destaque de todas as cartas
         for lbl in parent.card_labels:
             lbl.config(highlightthickness=0)
             lbl.selected = False
-        # Adiciona borda roxa à carta clicada
+        # Destaca a carta clicada
+        clicked_label = event.widget
         clicked_label.config(highlightbackground="#8000FF", highlightcolor="#8000FF", highlightthickness=4)
         clicked_label.selected = True
-        # Atualiza barras de progresso conforme a carta
-        parent.update_progress_bars_for_card(path)
+        parent.selected_card_idx = idx
+        parent.update_progress_bars_for_card(idx)
     return callback
 
 class PlayerDashboard(tk.Toplevel):
@@ -102,50 +97,54 @@ class PlayerDashboard(tk.Toplevel):
         self.overrideredirect(True)  # Remove barra de título
         self.attributes("-fullscreen", True)  # Garante fullscreen (opcional)
 
+        # Definir bar_color para botões e barra inferior
         color_map = {
-            "green": "#00FF00",
-            "yellow": "#FFD600",
-            "red": "#FF0000",
-            "blue": "#0070FF"
+            "green": "#70AD47",
+            "yellow": "#F2BA0D",
+            "red": "#EE6F68",
+            "blue": "#43BEF2"
         }
-        
-        self.progress_bars = {}  # Guarda referências às barras
+        self.bar_color = color_map.get(player_color.lower(), "#AAAAAA")
+
         self.selected_card_idx = selected_card_idx
 
         bar_color = color_map.get(player_color.lower(), "#AAAAAA")
-        top_bar = tk.Frame(self, bg=bar_color, height=60)
-        top_bar.pack(fill="x", side="top", padx=0)
-        top_bar.pack_propagate(False)
+
+        # Barra superior com imagem
+        topbar_img_path = os.path.join(IMG_DIR, f"TopBar_{player_color.lower()}.png")
+        img = Image.open(topbar_img_path).convert("RGBA")
+        img = img.resize((screen_width, 60), Image.LANCZOS)
+        topbar_img = ImageTk.PhotoImage(img)
+        self.topbar_label = tk.Label(self, image=topbar_img, bg="black", borderwidth=0, highlightthickness=0)
+        self.topbar_label.image = topbar_img
+        self.topbar_label.pack(side="top", fill="x")
+
 
         # Ícones dos outros jogadores (esquerda)
-        icons_frame = tk.Frame(top_bar, bg=bar_color)
-        icons_frame.pack(side="left", padx=(0,0))  # Valor negativo aproxima da borda esquerda
         for idx, p in enumerate(other_players):
             if idx < len(USER_ICONS):
-                icon_img = ImageTk.PhotoImage(Image.open(USER_ICONS[idx]).resize((40,40)))
-                lbl = tk.Label(icons_frame, image=icon_img, bg=bar_color)
+                icon_img = ImageTk.PhotoImage(Image.open(USER_ICONS[idx]).resize((30,30)))
+                lbl = tk.Label(self, image=icon_img, bg=self.bar_color)
                 lbl.image = icon_img
-                lbl.pack(side="left", padx=0)
+                lbl.place(x=5+idx*40, y=20)
 
         # Nome do jogador (centro)
-        name_lbl = tk.Label(top_bar, text=player_name, font=("Helvetica", 18, "bold"), bg=bar_color, fg="black")
-        name_lbl.pack(side="left", expand=True, padx=10)
+        name_lbl = tk.Label(self, text=player_name, font=("Helvetica", 18, "bold"), bg=self.bar_color, fg="black", borderwidth=0)
+        name_lbl.place(relx=0.5, y=25, anchor="n")
 
         # Saldo (direita)
-        saldo_frame = tk.Frame(top_bar, bg=bar_color)
-        saldo_frame.pack(side="right", padx=10)
         coin_img = ImageTk.PhotoImage(Image.open(COIN_IMG).resize((24,24)))
-        coin_lbl = tk.Label(saldo_frame, image=coin_img, bg=bar_color)
+        coin_lbl = tk.Label(self, image=coin_img, bg=self.bar_color, borderwidth=0)
         coin_lbl.image = coin_img
-        coin_lbl.pack(side="left")
-        saldo_lbl = tk.Label(saldo_frame, text=f"{saldo}", font=("Helvetica", 16, "bold"), bg=bar_color, fg="black")
-        saldo_lbl.pack(side="left", padx=4)
+        coin_lbl.place(x=screen_width-100, y=30)
+        saldo_lbl = tk.Label(self, text=f"{saldo}", font=("Helvetica", 16, "bold"), bg=self.bar_color, fg="black", borderwidth=0)
+        saldo_lbl.place(x=screen_width-70, y=30)
 
         # --- NOVO LAYOUT ---
 
         # Espaço extra antes dos botões
         self.after(0, lambda: self.update())  # Garante update do layout antes de calcular altura
-        tk.Frame(self, height=20, bg="black").pack()  # Adiciona espaço vertical
+        tk.Frame(self, height=20, bg="black").pack()  # aumenta o height para mais espaço
 
         # 1. Botões grandes (layout igual ao carrossel)
         btns_frame = tk.Frame(self, bg="black")
@@ -188,7 +187,7 @@ class PlayerDashboard(tk.Toplevel):
             lbl = tk.Label(cards_container, image=img, bg="black")
             lbl.image = img
             lbl.grid(row=0, column=i, padx=2, pady=0)  # <-- Use grid para alinhamento
-            lbl.bind("<Button-1>", make_card_callback(self, self.cards[idx]))
+            lbl.bind("<Button-1>", make_card_callback(self, idx))
             if idx == self.selected_card_idx:
                 lbl.config(highlightbackground="#8000FF", highlightcolor="#8000FF", highlightthickness=4)
                 lbl.selected = True
@@ -196,29 +195,86 @@ class PlayerDashboard(tk.Toplevel):
                 lbl.config(highlightthickness=0)
                 lbl.selected = False
             self.card_labels.append(lbl)
+            
+                # Frame para as barras de progresso
+        self.progress_frame = tk.Frame(self, bg="black")
+        self.progress_frame.pack(pady=(10, 0))
 
-        # --- Tabela de valores por baixo das cartas ---
+        self.progress_bars = {}
+        self.progress_labels = {}
+
+        stats = ["To send", "Rxd", "Lost"]
+        for i, stat in enumerate(stats):
+            row = tk.Frame(self.progress_frame, bg="black")
+            row.pack(fill="x", pady=2)
+            # Label do nome da stat à esquerda
+            stat_lbl = tk.Label(row, text=stat, font=("Helvetica", 12, "bold"), bg="black", fg="white", width=8, anchor="w")
+            stat_lbl.pack(side="left")
+            # Barra de progresso
+            bar = ttk.Progressbar(row, orient="horizontal", length=240, mode="determinate", maximum=10)
+            bar.pack(side="left", fill="x", expand=True, padx=(4, 4))
+            self.progress_bars[stat] = bar
+            # Label do valor à direita da barra
+            value_lbl = tk.Label(row, text="0", font=("Helvetica", 12, "bold"), bg="black", fg="white", width=2, anchor="e")
+            value_lbl.pack(side="left", padx=(4, 0))
+            self.progress_labels[stat] = value_lbl
+
+        #Outra alternativa para mostrar os valores abaixo das cartas
+        """ # --- Tabela de valores por baixo das cartas ---
         stats_frame = tk.Frame(self, bg="black")
         stats_frame.pack(pady=(4, 0))
 
-        stats_labels = ["To send", "Rxd", "Lost"]
-        self.stats_value_labels = []
+        self.stats_value_labels = []  # <-- Adiciona esta linha ANTES do ciclo
 
-        for row, stat in enumerate(stats_labels):
-            legend = tk.Label(stats_frame, text=stat, font=("Helvetica", 12, "bold"), bg="black", fg="white", width=8, anchor="e")
-            legend.grid(row=row, column=0, padx=(0, 4), pady=0)
+        stats_labels = [("To send", "To\nsend"), ("Rxd", "Rxd"), ("Lost", "Lost")]
+
+        for row, (stat_key, stat_label) in enumerate(stats_labels):
+            legend = tk.Label(
+                stats_frame,
+                text=stat_label,
+                font=("Helvetica", 12, "bold"),
+                bg="black",
+                fg="white",
+                width=8,
+                height=2 if "\n" in stat_label else 1,
+                anchor="w"  # <-- Alinha o texto à esquerda dentro do label
+            )
+            # Espaçamento extra APÓS "To send"
+            if stat_key == "To send":
+                pady_val = (0, 6)
+            elif stat_key == "Rxd":
+                pady_val = (0, 6)
+            else:
+                pady_val = (0, 0)
+            legend.grid(row=row, column=0, padx=(0,0), pady=pady_val, sticky="w")  # <-- Alinha o label à esquerda na célula
             row_labels = []
             for col in range(4):
-                value = self.card_stats[col][stat]
-                val_lbl = tk.Label(stats_frame, text=str(value), font=("Helvetica", 12), bg="black", fg="white", width=card_width//10, anchor="center")
-                val_lbl.grid(row=row, column=col+1, padx=2, pady=0, sticky="nsew")
+                value = self.card_stats[col][stat_key]
+                # Ajusta o deslocamento horizontal de cada coluna:
+                if col == 0:
+                    col_padx = (0, 4)   # Mais espaço à direita da primeira coluna
+                elif col == 3:
+                    col_padx = (6, 2)   # Mais espaço à esquerda da última coluna
+                else:
+                    col_padx = (4, 4)   # Espaço igual entre colunas intermédias
+
+                val_lbl = tk.Label(
+                    stats_frame,
+                    text=str(value),
+                    font=("Helvetica", 12),
+                    bg="black",
+                    fg="white",
+                    width=card_width//10,
+                    anchor="w"
+                )
+                val_lbl.grid(row=row, column=col+1, padx=col_padx, pady=pady_val, sticky="w")
                 row_labels.append(val_lbl)
             self.stats_value_labels.append(row_labels)
 
         # Ajuste o grid para expandir igualmente
         for col in range(1, 5):
             stats_frame.grid_columnconfigure(col, weight=1)
-            cards_container.grid_columnconfigure(col-1, weight=1)
+            cards_container.grid_columnconfigure(col-1, weight=1) """
 
         # Barra fina da cor do jogador no fundo
         bottom_bar = tk.Frame(self, bg=bar_color, height=10)
@@ -229,6 +285,15 @@ class PlayerDashboard(tk.Toplevel):
         self.active_users = []        # Lista de users ativos (máx 4)
         self.max_users = 4
 
+    def update_progress_bars_for_card(self, card_idx):
+        stats = self.card_stats[card_idx]
+        for stat in ["To send", "Rxd", "Lost"]:
+            value = stats[stat]
+            self.progress_bars[stat]["value"] = value
+            self.progress_labels[stat]["text"] = str(value)
+
+        # Chama isto sempre que muda a carta selecionada:
+        self.update_progress_bars_for_card(self.selected_card_idx)
 
     def update_card_image(self):
         for i, lbl in enumerate(self.card_labels):
@@ -236,7 +301,7 @@ class PlayerDashboard(tk.Toplevel):
             img = ImageTk.PhotoImage(Image.open(self.cards[idx]).resize((85,120)))
             lbl.config(image=img)
             lbl.image = img
-            lbl.bind("<Button-1>", make_card_callback(self, self.cards[idx]))
+            lbl.bind("<Button-1>", make_card_callback(self, idx))
 
     def prev_card(self):
         self.card_idx = (self.card_idx - 1) % len(self.cards)
@@ -278,6 +343,13 @@ class PlayerDashboard(tk.Toplevel):
     def show_card_active(self, card_path):
         # Atualiza visualmente a carta como ativa
         pass
+
+    def update_progress_bars_for_card(self, card_idx):
+        stats = self.card_stats[card_idx]
+        for stat in ["To send", "Rxd", "Lost"]:
+            value = stats[stat]
+            self.progress_bars[stat]["value"] = value
+            self.progress_labels[stat]["text"] = str(value)
 
 # Exemplo de uso isolado:
 if __name__ == "__main__":
