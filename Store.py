@@ -365,14 +365,12 @@ class StoreWindow(tk.Toplevel):
                 if hasattr(self.master, "adicionar_carta_inventario"):
                     self.master.adicionar_carta_inventario(carta_path, casa_tipo)
             self.destroy()
-            # Volta ao dashboard e mostra a página inicial
-            if hasattr(self.master, "show_dice_roll_screen"):
-                self.master.show_dice_roll_screen(
+            # Volta ao dashboard e mostra a interface principal
+            if hasattr(self.master, "playerdashboard_interface"):
+                self.master.playerdashboard_interface(
                     self.master.player_name,
                     self.master.saldo,
-                    self.master.other_players,
-                    self.master.screen_width,
-                    self.master.screen_height
+                    self.master.other_players
                 )
 
         x_btn = tk.Label(self, image=x_img, bg="black", cursor="hand2")

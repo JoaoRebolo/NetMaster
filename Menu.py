@@ -8,7 +8,7 @@ import random
 import string
 import itertools
 import netifaces
-from PlayerDashboard import PlayerDashboard, check_gpio_key
+from PlayerDashboard_v3 import PlayerDashboard, check_gpio_key
 from Store import StoreWindow
 
 LOCAL_PORT = 5050
