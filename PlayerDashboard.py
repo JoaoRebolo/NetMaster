@@ -26,7 +26,7 @@ BOARD = [
     # Top row (left to right)
     ("start", "neutral"),      # 0 canto azul
     ("users", "blue"),         # 1
-    ("action", "neutral"),     # 2 (cinzento)
+    ("actions", "neutral"),     # 2 (cinzento)
     ("equipment", "blue"),     # 3
     ("challenges", "neutral"), # 4 (cinzento)
     ("data", "red"),           # 5
@@ -36,7 +36,7 @@ BOARD = [
     # Right column (top to bottom)
     ("start", "neutral"),      # 8 canto vermelho
     ("users", "red"),          # 9
-    ("action", "neutral"),     # 10 (cinzento)
+    ("actions", "neutral"),     # 10 (cinzento)
     ("equipment", "red"),      # 11
     ("challenges", "neutral"), # 12 (cinzento)
     ("data", "yellow"),        # 13
@@ -46,7 +46,7 @@ BOARD = [
     # Bottom row (right to left)
     ("start", "neutral"),      # 16 canto amarelo
     ("users", "yellow"),       # 17
-    ("action", "neutral"),     # 18 (cinzento)
+    ("actions", "neutral"),     # 18 (cinzento)
     ("equipment", "yellow"),   # 19
     ("challenges", "neutral"), # 20 (cinzento)
     ("data", "green"),         # 21
@@ -56,7 +56,7 @@ BOARD = [
     # Left column (bottom to top)
     ("start", "neutral"),      # 24 canto verde
     ("users", "green"),        # 25
-    ("action", "neutral"),     # 26 (cinzento)
+    ("actions", "neutral"),     # 26 (cinzento)
     ("equipment", "green"),    # 27
     ("challenges", "neutral"), # 28 (cinzento)
     ("data", "blue"),          # 29
@@ -285,26 +285,39 @@ class PlayerDashboard(tk.Toplevel):
                         dice_btn.config(image=img)
                         dice_btn.image = img
 
-                        # Esconde as frases
+                        # Esconde as frases imediatamente
                         lbl1.pack_forget()
                         lbl2.pack_forget()
-                        dice_btn.pack_forget()
 
-                        # Mostra só o nome da casa, centrado e colorido
                         steps = final
                         old = self.player_pos
                         new_pos = (old + steps) % NUM_CASAS
                         tipo, casa_cor = BOARD[new_pos]
-                        nome_lbl = tk.Label(center_frame, text=tipo.upper(), font=("Helvetica", 22, "bold"), fg=self.bar_color, bg="black", wraplength=int(screen_width*0.8), justify="center")
-                        nome_lbl.pack(pady=10)
                         self.player_pos = new_pos
 
-                        def abrir_store():
-                            # Só abre a Store se for casa da cor do jogador ou neutra
-                            if casa_cor == self.player_color.lower() or casa_cor == "neutral":
-                                StoreWindow(self, self.player_color, player_name, saldo, casa_tipo=tipo, casa_cor=casa_cor)
-                            center_frame.destroy()
-                        center_frame.after(2000, abrir_store)
+                        def mostrar_nome_casa(tipo, casa_cor):
+                            # Esconde o dado só agora
+                            dice_btn.pack_forget()
+                            cor_map = {
+                                "green": "#70AD47",
+                                "yellow": "#F2BA0D",
+                                "red": "#EE6F68",
+                                "blue": "#43BEF2",
+                                "neutral": "#AAAAAA"
+                            }
+                            cor = cor_map.get(casa_cor, "#FFFFFF")
+                            nome_lbl = tk.Label(center_frame, text=tipo.upper(), font=("Helvetica", 22, "bold"), fg=cor, bg="black")
+                            nome_lbl.pack(pady=10)
+
+                            def abrir_store():
+                                if casa_cor == self.player_color.lower() or casa_cor == "neutral":
+                                    StoreWindow(self, self.player_color, player_name, saldo, casa_tipo=tipo, casa_cor=casa_cor)
+                                center_frame.destroy()
+                            # Espera 2 segundos DEPOIS de mostrar o nome da casa
+                            center_frame.after(2000, abrir_store)
+
+                        # Espera 2 segundos ANTES de esconder o dado e mostrar o nome da casa
+                        center_frame.after(2000, lambda: mostrar_nome_casa(tipo, casa_cor))
 
                 animate()
 
