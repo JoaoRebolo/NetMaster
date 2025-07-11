@@ -31,7 +31,7 @@ keyboard_state = "uppercase"
 clients = []  # Lista de clientes conectados
 
 # Tipos de carta e cores
-CARD_TYPES = ["users", "action", "equipments", "challenges", "activities", "events", "service"]
+CARD_TYPES = ["users", "action", "equipment", "challenges", "activities", "events", "service"]
 COLORS = ["green", "yellow", "red", "blue", "neutral"]
 
 # Baralhos: dict do tipo {'green': {'users': [lista de paths], ...}, ...}
@@ -42,7 +42,7 @@ BOARD = [
     ("start", "neutral"),      # 0 canto azul
     ("users", "blue"),         # 1
     ("action", "neutral"),     # 2 (cinzento)
-    ("equipments", "blue"),     # 3
+    ("equipment", "blue"),     # 3
     ("challenges", "neutral"), # 4 (cinzento)
     ("activities", "red"),      # 5
     ("events", "neutral"),     # 6 (cinzento)
@@ -52,7 +52,7 @@ BOARD = [
     ("start", "neutral"),      # 8 canto vermelho
     ("users", "red"),          # 9
     ("action", "neutral"),     # 10 (cinzento)
-    ("equipments", "red"),      # 11
+    ("equipment", "red"),      # 11
     ("challenges", "neutral"), # 12 (cinzento)
     ("activities", "yellow"),   # 13
     ("events", "neutral"),     # 14 (cinzento)
@@ -62,7 +62,7 @@ BOARD = [
     ("start", "neutral"),      # 16 canto amarelo
     ("users", "yellow"),       # 17
     ("action", "neutral"),     # 18 (cinzento)
-    ("equipments", "yellow"),   # 19
+    ("equipment", "yellow"),   # 19
     ("challenges", "neutral"), # 20 (cinzento)
     ("activities", "green"),    # 21
     ("events", "neutral"),     # 22 (cinzento)
@@ -72,7 +72,7 @@ BOARD = [
     ("start", "neutral"),      # 24 canto verde
     ("users", "green"),        # 25
     ("action", "neutral"),     # 26 (cinzento)
-    ("equipments", "green"),    # 27
+    ("equipment", "green"),    # 27
     ("challenges", "neutral"), # 28 (cinzento)
     ("activities", "blue"),     # 29
     ("events", "neutral"),     # 30 (cinzento)
