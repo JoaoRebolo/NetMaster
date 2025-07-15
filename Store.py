@@ -99,7 +99,7 @@ def preparar_baralhos():
             cartas = []
             for nome in possible_names:
                 pasta = os.path.join(CARTAS_DIR, nome)
-                if os.path.exists(pasta):
+            if os.path.exists(pasta):
                     cartas = [os.path.join(pasta, f) for f in os.listdir(pasta) if f.lower().endswith((".png", ".jpg", ".jpeg"))]
                     if cartas:
                         print(f"DEBUG: Found {len(cartas)} cards in folder '{nome}' for type '{tipo}'")
@@ -556,10 +556,10 @@ class StoreWindow(tk.Toplevel):
                 if hasattr(self, btn_name):
                     btn = getattr(self, btn_name)
                     if btn and hasattr(btn, 'winfo_exists') and btn.winfo_exists():
-                        btn.config(highlightbackground="black", highlightcolor="black", highlightthickness=0)
+            btn.config(highlightbackground="black", highlightcolor="black", highlightthickness=0)
             # Esconde o frame de ação se existir
             if hasattr(self, 'action_frame') and self.action_frame and hasattr(self.action_frame, 'winfo_exists') and self.action_frame.winfo_exists():
-                self.action_frame.pack_forget()
+        self.action_frame.pack_forget()
             print("DEBUG: hide_action_buttons executado com sucesso")
         except (AttributeError, tk.TclError) as e:
             print(f"DEBUG: Erro em hide_action_buttons (ignorado): {e}")
@@ -873,7 +873,7 @@ class StoreWindow(tk.Toplevel):
                 # NÃO destruir a StoreWindow aqui!
                 # self.destroy()
             else:
-                from tkinter import messagebox
+        from tkinter import messagebox
                 messagebox.showwarning("Saldo insuficiente", "Não tens saldo suficiente para comprar esta carta!")
                 self.show_buy_page()
         def cancelar():
@@ -1120,8 +1120,8 @@ class StoreWindow(tk.Toplevel):
         # Verificar se o arquivo existe antes de tentar carregar
         if os.path.exists(verso_path):
             try:
-                img = ImageTk.PhotoImage(Image.open(verso_path).resize((220, 320)))
-                carta_lbl = tk.Label(center_frame, image=img, bg="black")
+        img = ImageTk.PhotoImage(Image.open(verso_path).resize((220, 320)))
+        carta_lbl = tk.Label(center_frame, image=img, bg="black")
                 carta_lbl.image = img  # Manter referência para evitar garbage collection
                 carta_lbl.pack(pady=(0, 12))
                 print(f"DEBUG: Imagem da carta verso carregada: {verso_path}")
@@ -1134,7 +1134,7 @@ class StoreWindow(tk.Toplevel):
             print(f"DEBUG: Arquivo de carta verso não encontrado: {verso_path}")
             # Criar um placeholder se o arquivo não existir
             carta_lbl = tk.Label(center_frame, text="🂠", font=("Helvetica", 60), fg="white", bg="black")
-            carta_lbl.pack(pady=(0, 12))
+        carta_lbl.pack(pady=(0, 12))
 
         def revelar_carta():
             carta_lbl.destroy()
@@ -1151,7 +1151,7 @@ class StoreWindow(tk.Toplevel):
             elif tipo == "challenges":
                 print(f"DEBUG: Tentar tirar carta do tipo 'challenges'")
                 carta_path = tirar_carta(casa_cor, "challenges")
-                if not carta_path:
+            if not carta_path:
                     # Tentar também 'challenge' no singular
                     carta_path = tirar_carta(casa_cor, "challenge")
             elif tipo == "activities":
@@ -1168,7 +1168,7 @@ class StoreWindow(tk.Toplevel):
                 # --- LÓGICA DE ATRIBUIÇÃO/ESCOLHA ---
                 if (tipo in ["actions", "events"] and casa_cor == "neutral"):
                     # Apenas mostrar fullscreen, adicionar ao inventário só no fechar do fullscreen
-                    self.mostrar_carta_fullscreen(carta_path, tipo)
+                self.mostrar_carta_fullscreen(carta_path, tipo)
                 elif (tipo == "challenges" and casa_cor == "neutral") or (tipo == "activities" and casa_cor == self.player_color):
                     # Perguntar ao jogador se quer ficar com a carta
                     self.mostrar_carta_fullscreen_escolha(carta_path, tipo)
@@ -1202,19 +1202,19 @@ class StoreWindow(tk.Toplevel):
         self.configure(bg="black")
 
         try:
-            pil_img = Image.open(carta_path)
-            img_w, img_h = pil_img.size
-            # Usa todo o ecrã (sem margem)
-            max_w, max_h = self.winfo_screenwidth(), self.winfo_screenheight()
-            ratio = min(max_w/img_w, max_h/img_h)
-            new_w, new_h = int(img_w*ratio), int(img_h*ratio)
+        pil_img = Image.open(carta_path)
+        img_w, img_h = pil_img.size
+        # Usa todo o ecrã (sem margem)
+        max_w, max_h = self.winfo_screenwidth(), self.winfo_screenheight()
+        ratio = min(max_w/img_w, max_h/img_h)
+        new_w, new_h = int(img_w*ratio), int(img_h*ratio)
             pil_img = pil_img.resize((new_w, new_h), Image.Resampling.LANCZOS)
 
-            carta_img = ImageTk.PhotoImage(pil_img)
-            carta_real_lbl = tk.Label(self, image=carta_img, bg="black")
+        carta_img = ImageTk.PhotoImage(pil_img)
+        carta_real_lbl = tk.Label(self, image=carta_img, bg="black")
             carta_real_lbl.image = carta_img  # Manter referência
-            carta_real_lbl.place(relx=0.5, rely=0.5, anchor="center")
-            
+        carta_real_lbl.place(relx=0.5, rely=0.5, anchor="center")
+
             print("DEBUG: Carta mostrada em fullscreen com sucesso")
         except Exception as e:
             print(f"DEBUG: ERRO ao carregar carta em fullscreen: {e}")
