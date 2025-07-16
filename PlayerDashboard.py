@@ -736,7 +736,7 @@ class PlayerDashboard(tk.Toplevel):
         tkinter.messagebox.showinfo("End Turn", "Turno terminado! Próximo jogador...")
         # Exemplo: pode-se limpar a interface ou chamar uma função para o próximo jogador
 
-    def show_inventory_matrix(self, tipos, page=0):
+    def show_inventory_matrix(self, tipos, page=0, back_callback=None):
         # Limpa widgets (menos barra superior)
         for widget in self.winfo_children():
             if widget == self.topbar_label:
@@ -790,13 +790,16 @@ class PlayerDashboard(tk.Toplevel):
         if total_pages > 1:
             seta_x = 0.90
             if page > 0:
-                seta_cima = tk.Button(self, text="▲", font=("Helvetica", 18, "bold"), bg="#222", fg="white", width=2, command=lambda: self.show_inventory_matrix(tipos, page-1))
+                seta_cima = tk.Button(self, text="▲", font=("Helvetica", 18, "bold"), bg="#222", fg="white", width=2, command=lambda: self.show_inventory_matrix(tipos, page-1, back_callback))
                 seta_cima.place(relx=seta_x, rely=0.38, anchor="center")
             if page < total_pages - 1:
-                seta_baixo = tk.Button(self, text="▼", font=("Helvetica", 18, "bold"), bg="#222", fg="white", width=2, command=lambda: self.show_inventory_matrix(tipos, page+1))
+                seta_baixo = tk.Button(self, text="▼", font=("Helvetica", 18, "bold"), bg="#222", fg="white", width=2, command=lambda: self.show_inventory_matrix(tipos, page+1, back_callback))
                 seta_baixo.place(relx=seta_x, rely=0.62, anchor="center")
         # Botão Back centrado na parte inferior
-        back_btn = tk.Button(self, text="Back", font=("Helvetica", 14, "bold"), bg="#005c75", fg="white", width=10, command=lambda: self.playerdashboard_interface(self.player_name, self.saldo, self.other_players))
+        if back_callback:
+            back_btn = tk.Button(self, text="Back", font=("Helvetica", 14, "bold"), bg="#005c75", fg="white", width=10, command=back_callback)
+        else:
+            back_btn = tk.Button(self, text="Back", font=("Helvetica", 14, "bold"), bg="#005c75", fg="white", width=10, command=lambda: self.playerdashboard_interface(self.player_name, self.saldo, self.other_players))
         back_btn.place(relx=0.5, rely=0.98, anchor="s")
 
     def show_card_fullscreen_inventory(self, carta_path, tipos, page=0):

@@ -625,6 +625,24 @@ class StoreWindow(tk.Toplevel):
         titulo = tipo_atual.capitalize()
         title_lbl = tk.Label(self, text=f"{titulo}", font=("Helvetica", 22, "bold"), fg="white", bg="black")
         title_lbl.pack(pady=(20, 10))
+        
+        # Card value info abaixo do título
+        value_info_frame = tk.Frame(self, bg="black")
+        value_info_frame.pack(pady=(0, 20))
+        
+        value_text_lbl = tk.Label(value_info_frame, text="Card value: ", 
+                                 font=("Helvetica", 16), fg="yellow", bg="black")
+        value_text_lbl.pack(side="left")
+        
+        self._valor_lbl = tk.Label(value_info_frame, text="?", 
+                                  font=("Helvetica", 16, "bold"), fg="yellow", bg="black")
+        self._valor_lbl.pack(side="left", padx=(5, 5))
+        
+        # Ícone da moeda
+        picoin_img = ImageTk.PhotoImage(Image.open(COIN_IMG).resize((24,24)))
+        self._picoin_lbl = tk.Label(value_info_frame, image=picoin_img, bg="black")
+        self._picoin_lbl.image = picoin_img  # type: ignore[attr-defined]
+        self._picoin_lbl.pack(side="left")
 
         # Obter cartas disponíveis para compra diretamente da pasta
         nomes_possiveis = [
@@ -656,13 +674,13 @@ class StoreWindow(tk.Toplevel):
             tk.Label(self, text="Sem cartas disponíveis para compra!", font=("Helvetica", 16), bg="black", fg="white").pack(pady=20)
             return
 
-        # Carrossel de cartas (duas cartas visíveis)
+        # Carrossel de cartas (duas cartas visíveis) - ajustado para compensar o card value
         self._buy_imgs = [None, None]
         self._buy_paths = cartas_disp
         self._buy_idx = 0  # índice da carta destacada
         self._fullscreen_open = False
         self._carrossel_frame = tk.Frame(self, bg="black")
-        self._carrossel_frame.pack(fill="x", pady=(60, 10))
+        self._carrossel_frame.pack(fill="x", pady=(20, 10))  # Reduzido de (60, 10) para (20, 10)
 
         # Setas em texto Unicode (agora com place)
         seta_esq = tk.Button(self._carrossel_frame, text="\u25C0", font=("Helvetica", 24, "bold"), bg="black", fg="white", bd=0, highlightthickness=0, activebackground="black", activeforeground="#FFD600", cursor="hand2", command=self._carrossel_prev)
@@ -702,33 +720,39 @@ class StoreWindow(tk.Toplevel):
         self._info_frame = tk.Frame(self, bg="black")
         self._info_frame.pack(side="bottom", pady=0, fill="x")
         # Frames para cada elemento
+        self.inventory_frame = tk.Frame(self._info_frame, width=frame_width, height=frame_height, bg="black")
         self.buy_frame = tk.Frame(self._info_frame, width=frame_width, height=frame_height, bg="black")
         self.picoin_frame = tk.Frame(self._info_frame, width=frame_width, height=frame_height, bg="black")
         self.voltar_frame = tk.Frame(self._info_frame, width=frame_width, height=frame_height, bg="black")
+        self.inventory_frame.pack_propagate(False)
         self.buy_frame.pack_propagate(False)
         self.picoin_frame.pack_propagate(False)
         self.voltar_frame.pack_propagate(False)
-        self.buy_frame.pack(side="left", padx=(20,10), pady=0)
+        self.inventory_frame.pack(side="left", padx=(20,10), pady=0)
+        self.buy_frame.pack(side="left", padx=10, pady=0)
         self.picoin_frame.pack(side="left", padx=10, pady=0, expand=True)
         self.voltar_frame.pack(side="left", padx=(10,40), pady=0)
-        # Botão Buy
+        # Botão Inventory (onde estava o Buy)
+        self._btn_inventory = tk.Button(self.inventory_frame, text="Inventory", font=("Helvetica", 14, "bold"), bg="#8A2BE2", fg="white", relief="flat", borderwidth=0, command=self._abrir_inventory)
+        self._btn_inventory.place(relx=0.5, rely=0.5, anchor="center")
+        # Botão Buy (alinhado com os outros botões)
         self._btn_buy = tk.Button(self.buy_frame, text="Buy", font=("Helvetica", 14, "bold"), bg="#4CAF50", fg="white", relief="flat", borderwidth=0, command=self._comprar_carta)
-        self._btn_buy.place(relx=0.5, rely=0.5, anchor="center")
-        # Picoin + valor (centrado)
-        self._picoin_center_frame = tk.Frame(self.picoin_frame, bg="black")
-        self._picoin_center_frame.pack(expand=True, fill="both")
-        self._picoin_labels_frame = tk.Frame(self._picoin_center_frame, bg="black")
-        self._picoin_labels_frame.place(relx=0.4, rely=0.5, anchor="center")
-        self._picoin_img = ImageTk.PhotoImage(Image.open(COIN_IMG).resize((24, 24)))
-        self._picoin_lbl = tk.Label(self._picoin_labels_frame, image=self._picoin_img, bg="black")
-        self._valor_lbl = tk.Label(self._picoin_labels_frame, text="", font=("Helvetica", 16, "bold"), fg="yellow", bg="black")
-        self._picoin_lbl.pack(side="left", padx=(0,4))
-        self._valor_lbl.pack(side="left")
-        # Botão Back
-        self._btn_voltar = tk.Button(self.voltar_frame, text="Back", font=("Helvetica", 14, "bold"), bg="#005c75", fg="white", relief="flat", borderwidth=0, command=self.voltar_para_store)
-        self._btn_voltar.place(relx=0.5, rely=0.5, anchor="center")
+        self._btn_buy.place(relx=0.5, rely=0.5, anchor="center")  # Alinhado com Inventory e Back
+        # Botão Back no canto inferior direito (fora do frame)
+        self._btn_voltar = tk.Button(self, text="Back", font=("Helvetica", 14, "bold"), bg="#005c75", fg="white", relief="flat", borderwidth=0, command=self.voltar_para_store)
+        self._btn_voltar.place(relx=0.98, rely=0.98, anchor="se")
 
         self._carrossel_update()
+
+    def _abrir_inventory(self):
+        """Abre a página de inventário do tipo correspondente usando a função sincronizada"""
+        tipo_atual = getattr(self, "current_card_type", None)
+        if tipo_atual:
+            print(f"DEBUG: Abrindo inventário sincronizado para compra - tipo: {tipo_atual}")
+            # Usar a nova função sincronizada que volta para a página de compra
+            self.show_inventory_matrix_buy([tipo_atual], 0, tipo_atual)
+        else:
+            print("DEBUG: Tipo de carta atual não definido")
 
     def _carrossel_prev(self):
         if not self._fullscreen_open:
@@ -1501,6 +1525,15 @@ class StoreWindow(tk.Toplevel):
         btn_x = tk.Button(self, text="✖", font=("Helvetica", 24, "bold"), bg="#AAAAAA", fg="white", width=2, height=1, borderwidth=0, highlightthickness=0, command=fechar, cursor="hand2", activebackground="#CCCCCC")
         btn_x.place(relx=0.98, rely=0, anchor="ne")
 
+        # Se for Challenge, adicionar botão Inventory centrado em cima
+        if casa_tipo in ["challenges", "challenge"]:
+            def abrir_inventory_challenge():
+                print("DEBUG: Abrindo inventário de challenges sincronizado")
+                # Usar a nova função sincronizada que volta para a carta fullscreen
+                self.show_inventory_matrix_challenges(["activities", "challenges"], 0, carta_path)
+            btn_inventory = tk.Button(self, text="Inventory", font=("Helvetica", 14, "bold"), bg="#8A2BE2", fg="white", relief="flat", borderwidth=0, command=abrir_inventory_challenge)
+            btn_inventory.place(relx=0.5, rely=0, anchor="n")
+
     def mostrar_carta_fullscreen_escolha(self, carta_path, carta_tipo):
         # Mostra a carta em fullscreen e pergunta se quer ficar com ela
         for widget in self.winfo_children():
@@ -1516,6 +1549,14 @@ class StoreWindow(tk.Toplevel):
         carta_real_lbl = tk.Label(self, image=carta_img, bg="black")
         carta_real_lbl.image = carta_img  # Manter referência para evitar garbage collection
         carta_real_lbl.place(relx=0.5, rely=0.5, anchor="center")
+        # Botão Inventory centrado no topo se for Challenge
+        if carta_tipo in ["challenges", "challenge"]:
+            def abrir_inventory_challenge():
+                print("DEBUG: Abrindo inventário de challenges sincronizado (escolha)")
+                # Usar a nova função sincronizada que volta para a carta fullscreen
+                self.show_inventory_matrix_challenges(["activities", "challenges"], 0, carta_path)
+            btn_inventory = tk.Button(self, text="Inventory", font=("Helvetica", 14, "bold"), bg="#8A2BE2", fg="white", relief="flat", borderwidth=0, command=abrir_inventory_challenge)
+            btn_inventory.place(relx=0.5, rely=0, anchor="n")
         # Botões Sim/Não
         def aceitar():
             tipo_inv = carta_tipo
@@ -1617,18 +1658,12 @@ class StoreWindow(tk.Toplevel):
         x_btn.place(relx=1, rely=0, anchor="ne")  # Volta ao canto superior direito
         
         # Botão piccoin para vender
-        try:
-            picoin_img = ImageTk.PhotoImage(Image.open(COIN_IMG).resize((48,48)))
-            def abrir_confirm():
-                self.confirmar_venda_carta(carta_path, carta_tipo, player_dashboard)
-            btn_picoin = tk.Button(self, image=picoin_img, bg="#4CAF50", borderwidth=0, command=abrir_confirm, cursor="hand2")
-            btn_picoin.image = picoin_img  # type: ignore[attr-defined]
-            btn_picoin.place(relx=1, rely=1, anchor="se")
-        except Exception as e:
-            print(f"DEBUG: Erro ao criar botão picoin: {e}")
-            # Criar um botão alternativo se não conseguir carregar a imagem
-            btn_picoin = tk.Button(self, text="SELL", font=("Helvetica", 12, "bold"), bg="#4CAF50", fg="white", command=lambda: self.confirmar_venda_carta(carta_path, carta_tipo, player_dashboard), cursor="hand2")
-            btn_picoin.place(relx=0.98, rely=0.98, anchor="se")
+        picoin_img = ImageTk.PhotoImage(Image.open(COIN_IMG).resize((48,48)))
+        def abrir_confirm():
+            self.confirmar_venda_carta(carta_path, carta_tipo, player_dashboard)
+        btn_picoin = tk.Button(self, image=picoin_img, bg="#4CAF50", borderwidth=0, command=abrir_confirm, cursor="hand2")
+        btn_picoin.image = picoin_img  # Manter referência para evitar garbage collection
+        btn_picoin.place(relx=1, rely=1, anchor="se")
         
         # Força update final
         self.update_idletasks()
@@ -2020,3 +2055,359 @@ class StoreWindow(tk.Toplevel):
             print(f"DEBUG: ERRO em rebuild_store_interface: {e}")
             import traceback
             traceback.print_exc()
+
+    def show_inventory_matrix_challenges(self, tipos, page=0, carta_fullscreen_path=None):
+        """
+        Página de inventário Activities/Challenges sincronizada para casas de Challenges.
+        O botão Back volta para a carta fullscreen de Challenge.
+        """
+        print(f"DEBUG: show_inventory_matrix_challenges chamado - tipos: {tipos}, page: {page}")
+        
+        # Limpa todos os widgets da Store
+        for widget in self.winfo_children():
+            widget.destroy()
+        self.configure(bg="black")
+        
+        # Sincronizar inventário com o PlayerDashboard
+        if hasattr(self, 'dashboard') and self.dashboard and hasattr(self.dashboard, 'inventario'):
+            self.inventario = self.dashboard.inventario
+            print("DEBUG: Inventário sincronizado com PlayerDashboard")
+        
+        screen_width = self.winfo_screenwidth()
+        screen_height = self.winfo_screenheight()
+        
+        # Barra superior com imagem Store_awning.png
+        try:
+            awning_img = ImageTk.PhotoImage(Image.open(AWNING_IMG).resize((screen_width, 50)))
+            awning_label = tk.Label(self, image=awning_img, bg="black")
+            awning_label.image = awning_img
+            awning_label.pack(pady=(0, 10), fill="x")
+        except Exception as e:
+            print(f"DEBUG: Erro ao carregar awning: {e}")
+            # Fallback para barra simples
+            header_frame = tk.Frame(self, bg="#DC8392", height=50)
+            header_frame.pack(fill="x", pady=(0, 10))
+            header_frame.pack_propagate(False)
+        
+        # Título
+        if len(tipos) == 1:
+            title_str = tipos[0].capitalize()
+        else:
+            title_str = "Activities / Challenges"
+        title = tk.Label(self, text=title_str, font=("Helvetica", 22, "bold"), fg="white", bg="black")
+        title.place(relx=0.5, y=65, anchor="n")
+        
+        # Junta todas as cartas dos tipos (sincronizada com PlayerDashboard)
+        cartas = []
+        for t in tipos:
+            if hasattr(self, 'inventario') and self.inventario and t in self.inventario:
+                cartas += self.inventario[t]
+        
+        print(f"DEBUG: Total de cartas encontradas: {len(cartas)}")
+        
+        # Paginação
+        cards_per_page = 4
+        total_pages = max(1, (len(cartas) + cards_per_page - 1) // cards_per_page)
+        page = max(0, min(page, total_pages - 1))
+        start_idx = page * cards_per_page
+        end_idx = start_idx + cards_per_page
+        cartas_page = cartas[start_idx:end_idx]
+        
+        # Frame para as cartas
+        matriz_frame = tk.Frame(self, bg="black")
+        matriz_frame.place(relx=0.5, rely=0.5, anchor="center")
+        n_col = 2
+        card_w, card_h = 85, 120
+        
+        # Manter referências das imagens
+        self._challenge_inv_imgs = []
+        
+        for idx, carta_path in enumerate(cartas_page):
+            row = idx // n_col
+            col = idx % n_col
+            try:
+                img = ImageTk.PhotoImage(Image.open(carta_path).resize((card_w, card_h)))
+                self._challenge_inv_imgs.append(img)
+            except Exception as e:
+                print(f"DEBUG: Erro ao carregar carta {carta_path}: {e}")
+                continue
+            
+            carta_lbl = tk.Label(matriz_frame, image=img, bg="black", cursor="hand2")
+            carta_lbl.image = img
+            carta_lbl.grid(row=row, column=col, padx=8, pady=8)
+            # Callback para mostrar carta fullscreen
+            carta_lbl.bind("<Button-1>", lambda e, p=carta_path: self.show_card_fullscreen_inventory_challenges(p, tipos, page, carta_fullscreen_path))
+        
+        # Mensagem se não houver cartas
+        if not cartas_page:
+            empty_lbl = tk.Label(self, text="No cards available", font=("Helvetica", 18), fg="gray", bg="black")
+            empty_lbl.place(relx=0.5, rely=0.5, anchor="center")
+        
+        # Setas de navegação à direita
+        if total_pages > 1:
+            seta_x = 0.90
+            if page > 0:
+                seta_cima = tk.Button(self, text="▲", font=("Helvetica", 18, "bold"), bg="#222", fg="white", width=2, 
+                                    command=lambda: self.show_inventory_matrix_challenges(tipos, page-1, carta_fullscreen_path))
+                seta_cima.place(relx=seta_x, rely=0.38, anchor="center")
+            if page < total_pages - 1:
+                seta_baixo = tk.Button(self, text="▼", font=("Helvetica", 18, "bold"), bg="#222", fg="white", width=2, 
+                                     command=lambda: self.show_inventory_matrix_challenges(tipos, page+1, carta_fullscreen_path))
+                seta_baixo.place(relx=seta_x, rely=0.62, anchor="center")
+        
+        # Botão Back centrado na parte inferior - volta para a carta fullscreen de Challenge
+        def voltar_carta_challenge():
+            print("DEBUG: Voltando para carta fullscreen de Challenge com botões de aceitar/recusar")
+            if carta_fullscreen_path and os.path.exists(carta_fullscreen_path):
+                self.mostrar_carta_fullscreen_escolha(carta_fullscreen_path, "challenges")
+            else:
+                print("DEBUG: Carta fullscreen path não encontrado, voltando para store")
+                self.voltar_para_store()
+        
+        back_btn = tk.Button(self, text="Back", font=("Helvetica", 14, "bold"), bg="#005c75", fg="white", width=10, 
+                           command=voltar_carta_challenge)
+        back_btn.place(relx=0.5, rely=0.98, anchor="s")
+        
+        # Atualizar display
+        self.update_idletasks()
+        self.update()
+        
+        print("DEBUG: show_inventory_matrix_challenges terminado com sucesso")
+
+    def show_card_fullscreen_inventory_challenges(self, carta_path, tipos, page=0, carta_fullscreen_path=None):
+        """
+        Mostra uma carta do inventário em fullscreen com botão Back para voltar ao inventário de challenges.
+        """
+        print(f"DEBUG: show_card_fullscreen_inventory_challenges chamado - carta_path: {carta_path}")
+        
+        # Limpa widgets
+        for widget in self.winfo_children():
+            widget.destroy()
+        self.configure(bg="black")
+        
+        # Carregar e mostrar a carta
+        try:
+            pil_img = Image.open(carta_path)
+            img_w, img_h = pil_img.size
+            max_w, max_h = self.winfo_screenwidth(), self.winfo_screenheight()
+            ratio = min(max_w/img_w, max_h/img_h)
+            new_w, new_h = int(img_w*ratio), int(img_h*ratio)
+            pil_img = pil_img.resize((new_w, new_h), Image.Resampling.LANCZOS)
+            
+            carta_img = ImageTk.PhotoImage(pil_img)
+            carta_real_lbl = tk.Label(self, image=carta_img, bg="black", borderwidth=0, highlightthickness=0)
+            carta_real_lbl.image = carta_img
+            carta_real_lbl.place(relx=0.5, rely=0.5, anchor="center")
+            
+        except Exception as e:
+            print(f"DEBUG: Erro ao carregar carta: {e}")
+            # Mostrar placeholder em caso de erro
+            error_lbl = tk.Label(self, text="Error loading card", font=("Helvetica", 20), fg="red", bg="black")
+            error_lbl.place(relx=0.5, rely=0.5, anchor="center")
+        
+        # Botão X para voltar ao inventário
+        def voltar_inventario():
+            print("DEBUG: Voltando ao inventário de challenges")
+            self.show_inventory_matrix_challenges(tipos, page, carta_fullscreen_path)
+        
+        x_btn = tk.Button(self, text="✖", font=("Helvetica", 24, "bold"), bg="#AAAAAA", fg="white", width=2, height=1, 
+                         borderwidth=0, highlightthickness=0, command=voltar_inventario, cursor="hand2", activebackground="#CCCCCC")
+        x_btn.place(relx=0.98, rely=0, anchor="ne")
+        
+        print("DEBUG: show_card_fullscreen_inventory_challenges terminado com sucesso")
+
+    def show_inventory_matrix_buy(self, tipos, page=0, current_card_type=None):
+        """
+        Página de inventário sincronizada para páginas de compra.
+        O botão Back volta para a página de compra.
+        """
+        print(f"DEBUG: show_inventory_matrix_buy chamado - tipos: {tipos}, page: {page}, current_card_type: {current_card_type}")
+        
+        # Limpa todos os widgets da Store
+        for widget in self.winfo_children():
+            widget.destroy()
+        self.configure(bg="black")
+        
+        # Sincronizar inventário com o PlayerDashboard
+        if hasattr(self, 'dashboard') and self.dashboard and hasattr(self.dashboard, 'inventario'):
+            self.inventario = self.dashboard.inventario
+            print("DEBUG: Inventário sincronizado com PlayerDashboard")
+        
+        screen_width = self.winfo_screenwidth()
+        screen_height = self.winfo_screenheight()
+        
+        # Barra superior com imagem TopBar da cor do jogador
+        try:
+            topbar_img_path = os.path.join(IMG_DIR, f"TopBar_{self.player_color}.png")
+            topbar_img = ImageTk.PhotoImage(Image.open(topbar_img_path).resize((screen_width, 60)))
+            topbar_label = tk.Label(self, image=topbar_img, bg="black", borderwidth=0, highlightthickness=0)
+            topbar_label.image = topbar_img  # type: ignore[attr-defined]
+            topbar_label.pack(side="top", fill="x")
+            
+            # Nome do jogador centralizado sobre a imagem
+            name_lbl = tk.Label(self, text=self.player_name, 
+                               font=("Helvetica", 18, "bold"), bg=self.player_color_hex, fg="black")
+            name_lbl.place(relx=0.5, y=25, anchor="n")
+            
+            # Saldo e piccoin na barra superior, à direita
+            coin_img = ImageTk.PhotoImage(Image.open(COIN_IMG).resize((24, 24)))
+            coin_lbl = tk.Label(self, image=coin_img, bg=self.player_color_hex)
+            coin_lbl.image = coin_img  # type: ignore[attr-defined]
+            coin_lbl.place(x=screen_width-100, y=30)
+            
+            # Usar o saldo do jogador em vez do saldo da Store
+            saldo_jogador = self.dashboard.saldo if self.dashboard else self.saldo
+            saldo_lbl = tk.Label(self, text=f"{saldo_jogador}", 
+                               font=("Helvetica", 16, "bold"), fg="black", bg=self.player_color_hex)
+            saldo_lbl.place(x=screen_width-70, y=30)
+            
+        except Exception as e:
+            print(f"DEBUG: Erro ao carregar TopBar, usando header simples: {e}")
+            # Fallback para header simples se não conseguir carregar a imagem
+            header_frame = tk.Frame(self, bg=self.player_color_hex, height=60)
+            header_frame.pack(fill="x", pady=0)
+            header_frame.pack_propagate(False)
+            
+            name_lbl = tk.Label(header_frame, text=self.player_name, 
+                               font=("Helvetica", 18, "bold"), bg=self.player_color_hex, fg="black")
+            name_lbl.place(relx=0.5, rely=0.5, anchor="center")
+            
+            coin_img = ImageTk.PhotoImage(Image.open(COIN_IMG).resize((24, 24)))
+            coin_lbl = tk.Label(header_frame, image=coin_img, bg=self.player_color_hex)
+            coin_lbl.image = coin_img  # type: ignore[attr-defined]
+            coin_lbl.place(x=screen_width-100, rely=0.5, anchor="w")
+            
+            # Usar o saldo do jogador em vez do saldo da Store
+            saldo_jogador = self.dashboard.saldo if self.dashboard else self.saldo
+            saldo_lbl = tk.Label(header_frame, text=f"{saldo_jogador}", 
+                               font=("Helvetica", 16, "bold"), bg=self.player_color_hex, fg="black")
+            saldo_lbl.place(x=screen_width-70, rely=0.5, anchor="w")
+        
+        # Título
+        if len(tipos) == 1:
+            title_str = tipos[0].capitalize()
+        else:
+            title_str = " / ".join([t.capitalize() for t in tipos])
+        title = tk.Label(self, text=title_str, font=("Helvetica", 22, "bold"), fg="white", bg="black")
+        title.place(relx=0.5, y=75, anchor="n")  # Ajustado para ficar abaixo da TopBar
+        
+        # Junta todas as cartas dos tipos (sincronizada com PlayerDashboard)
+        cartas = []
+        for t in tipos:
+            if hasattr(self, 'inventario') and self.inventario and t in self.inventario:
+                cartas += self.inventario[t]
+        
+        print(f"DEBUG: Total de cartas encontradas: {len(cartas)}")
+        
+        # Paginação
+        cards_per_page = 4
+        total_pages = max(1, (len(cartas) + cards_per_page - 1) // cards_per_page)
+        page = max(0, min(page, total_pages - 1))
+        start_idx = page * cards_per_page
+        end_idx = start_idx + cards_per_page
+        cartas_page = cartas[start_idx:end_idx]
+        
+        # Frame para as cartas
+        matriz_frame = tk.Frame(self, bg="black")
+        matriz_frame.place(relx=0.5, rely=0.5, anchor="center")
+        n_col = 2
+        card_w, card_h = 85, 120
+        
+        # Manter referências das imagens
+        self._buy_inv_imgs = []
+        
+        for idx, carta_path in enumerate(cartas_page):
+            row = idx // n_col
+            col = idx % n_col
+            try:
+                img = ImageTk.PhotoImage(Image.open(carta_path).resize((card_w, card_h)))
+                self._buy_inv_imgs.append(img)
+            except Exception as e:
+                print(f"DEBUG: Erro ao carregar carta {carta_path}: {e}")
+                continue
+            
+            carta_lbl = tk.Label(matriz_frame, image=img, bg="black", cursor="hand2")
+            carta_lbl.image = img
+            carta_lbl.grid(row=row, column=col, padx=8, pady=8)
+            # Callback para mostrar carta fullscreen
+            carta_lbl.bind("<Button-1>", lambda e, p=carta_path: self.show_card_fullscreen_inventory_buy(p, tipos, page, current_card_type))
+        
+        # Mensagem se não houver cartas
+        if not cartas_page:
+            empty_lbl = tk.Label(self, text="No cards available", font=("Helvetica", 18), fg="gray", bg="black")
+            empty_lbl.place(relx=0.5, rely=0.5, anchor="center")
+        
+        # Setas de navegação à direita
+        if total_pages > 1:
+            seta_x = 0.90
+            if page > 0:
+                seta_cima = tk.Button(self, text="▲", font=("Helvetica", 18, "bold"), bg="#222", fg="white", width=2, 
+                                    command=lambda: self.show_inventory_matrix_buy(tipos, page-1, current_card_type))
+                seta_cima.place(relx=seta_x, rely=0.38, anchor="center")
+            if page < total_pages - 1:
+                seta_baixo = tk.Button(self, text="▼", font=("Helvetica", 18, "bold"), bg="#222", fg="white", width=2, 
+                                     command=lambda: self.show_inventory_matrix_buy(tipos, page+1, current_card_type))
+                seta_baixo.place(relx=seta_x, rely=0.62, anchor="center")
+        
+        # Botão Back centrado na parte inferior - volta para a página de compra
+        def voltar_pagina_compra():
+            print("DEBUG: Voltando para página de compra")
+            if current_card_type:
+                # Restaurar o tipo atual e mostrar a página de compra
+                self.current_card_type = current_card_type
+                self.show_buy_page()
+            else:
+                print("DEBUG: Tipo de carta não encontrado, voltando para store")
+                self.voltar_para_store()
+        
+        back_btn = tk.Button(self, text="Back", font=("Helvetica", 14, "bold"), bg="#005c75", fg="white", width=10, 
+                           command=voltar_pagina_compra)
+        back_btn.place(relx=0.5, rely=0.98, anchor="s")
+        
+        # Atualizar display
+        self.update_idletasks()
+        self.update()
+        
+        print("DEBUG: show_inventory_matrix_buy terminado com sucesso")
+
+    def show_card_fullscreen_inventory_buy(self, carta_path, tipos, page=0, current_card_type=None):
+        """
+        Mostra uma carta do inventário em fullscreen com botão Back para voltar ao inventário de compra.
+        """
+        print(f"DEBUG: show_card_fullscreen_inventory_buy chamado - carta_path: {carta_path}")
+        
+        # Limpa widgets
+        for widget in self.winfo_children():
+            widget.destroy()
+        self.configure(bg="black")
+        
+        # Carregar e mostrar a carta
+        try:
+            pil_img = Image.open(carta_path)
+            img_w, img_h = pil_img.size
+            max_w, max_h = self.winfo_screenwidth(), self.winfo_screenheight()
+            ratio = min(max_w/img_w, max_h/img_h)
+            new_w, new_h = int(img_w*ratio), int(img_h*ratio)
+            pil_img = pil_img.resize((new_w, new_h), Image.Resampling.LANCZOS)
+            
+            carta_img = ImageTk.PhotoImage(pil_img)
+            carta_real_lbl = tk.Label(self, image=carta_img, bg="black", borderwidth=0, highlightthickness=0)
+            carta_real_lbl.image = carta_img
+            carta_real_lbl.place(relx=0.5, rely=0.5, anchor="center")
+            
+        except Exception as e:
+            print(f"DEBUG: Erro ao carregar carta: {e}")
+            # Mostrar placeholder em caso de erro
+            error_lbl = tk.Label(self, text="Error loading card", font=("Helvetica", 20), fg="red", bg="black")
+            error_lbl.place(relx=0.5, rely=0.5, anchor="center")
+        
+        # Botão X para voltar ao inventário
+        def voltar_inventario():
+            print("DEBUG: Voltando ao inventário de compra")
+            self.show_inventory_matrix_buy(tipos, page, current_card_type)
+        
+        x_btn = tk.Button(self, text="✖", font=("Helvetica", 24, "bold"), bg="#AAAAAA", fg="white", width=2, height=1, 
+                         borderwidth=0, highlightthickness=0, command=voltar_inventario, cursor="hand2", activebackground="#CCCCCC")
+        x_btn.place(relx=0.98, rely=0, anchor="ne")
+        
+        print("DEBUG: show_card_fullscreen_inventory_buy terminado com sucesso")
