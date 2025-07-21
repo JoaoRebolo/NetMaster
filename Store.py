@@ -74,42 +74,65 @@ def check_gpio_key(root):
     root.after(100, lambda: check_gpio_key(root))
 
 # Carregar baralhos como no Menu.py
+# Carregar baralhos adaptado à nova estrutura: cartas/[tipo]/Residential-level/[cor]/
 def preparar_baralhos():
     baralhos = {}
     for cor in COLORS:
         baralhos[cor] = {}
         for tipo in CARD_TYPES:
-            # Tentar diferentes variações do nome da pasta
-            possible_names = [tipo]
-            if tipo == "actions":
-                possible_names.extend(["action", "actions"])
-            elif tipo == "equipments":
-                possible_names.extend(["equipment", "equipments"])
-            elif tipo == "services":
-                possible_names.extend(["service", "services"])
-            elif tipo == "activities":
-                possible_names.extend(["activity", "activities"])
-            elif tipo == "events":
-                possible_names.extend(["event", "events"])
-            elif tipo == "challenges":
-                possible_names.extend(["challenge", "challenges"])
-            elif tipo == "users":
-                possible_names.extend(["user", "users"])
-            
             cartas = []
-            for nome in possible_names:
-                pasta = os.path.join(CARTAS_DIR, nome)
-            if os.path.exists(pasta):
-                    cartas = [os.path.join(pasta, f) for f in os.listdir(pasta) if f.lower().endswith((".png", ".jpg", ".jpeg"))]
-                    if cartas:
-                        print(f"DEBUG: Found {len(cartas)} cards in folder '{nome}' for type '{tipo}'")
-                        break
+            
+            # Mapear nomes de tipos para pastas
+            folder_name = tipo
+            if tipo == "actions":
+                folder_name = "actions"  # Se existir pasta actions
+            elif tipo == "equipments":
+                folder_name = "equipments"
+            elif tipo == "services":
+                folder_name = "services" 
+            elif tipo == "activities":
+                folder_name = "activities"
+            elif tipo == "events":
+                folder_name = "events"
+            elif tipo == "challenges":
+                folder_name = "challenges"
+            elif tipo == "users":
+                folder_name = "users"
+            
+            # Estrutura: cartas/[tipo]/Residential-level/
+            base_path = os.path.join(CARTAS_DIR, folder_name, "Residential-level")
+            
+            # Para tipos que têm cores (equipments, services, users)
+            if folder_name in ["equipments", "services", "users"]:
+                # Mapear cores do jogo para nomes de pastas
+                color_folder = cor.capitalize()  # blue -> Blue, etc.
+                if cor == "neutral":
+                    # Para neutral, tentar todas as cores disponíveis
+                    for test_color in ["Blue", "Green", "Red", "Yellow"]:
+                        color_path = os.path.join(base_path, test_color)
+                        if os.path.exists(color_path):
+                            card_files = [os.path.join(color_path, f) for f in os.listdir(color_path) 
+                                        if f.lower().endswith((".png", ".jpg", ".jpeg"))]
+                            cartas.extend(card_files)
+                else:
+                    color_path = os.path.join(base_path, color_folder)
+                    if os.path.exists(color_path):
+                        cartas = [os.path.join(color_path, f) for f in os.listdir(color_path) 
+                                if f.lower().endswith((".png", ".jpg", ".jpeg"))]
+            else:
+                # Para tipos sem cores (challenges, events, activities, actions)
+                if os.path.exists(base_path):
+                    cartas = [os.path.join(base_path, f) for f in os.listdir(base_path) 
+                            if f.lower().endswith((".png", ".jpg", ".jpeg"))]
+            
             if cartas:
                 random.shuffle(cartas)
                 baralhos[cor][tipo] = cartas.copy()
+                print(f"DEBUG: Found {len(cartas)} cards for '{folder_name}' color '{cor}'")
             else:
                 baralhos[cor][tipo] = []
-                print(f"DEBUG: No cards found for type '{tipo}' in color '{cor}'")
+                print(f"DEBUG: No cards found for type '{folder_name}' color '{cor}' at {base_path}")
+    
     print("Cartas neutral/actions:", len(baralhos.get("neutral", {}).get("actions", [])))
     return baralhos
 

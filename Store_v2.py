@@ -1,12 +1,50 @@
 import tkinter as tk
 from PIL import Image, ImageTk
 import os
-import RPi.GPIO as GPIO
+try:
+    import RPi.GPIO as GPIO
+except ImportError:
+    # Mock para ambiente de desenvolvimento sem GPIO
+    class MockGPIO:
+        BCM = "BCM"
+        IN = "IN"
+        PUD_UP = "PUD_UP"
+        LOW = False
+        @staticmethod
+        def setmode(mode): pass
+        @staticmethod  
+        def setup(pin, mode, pull_up_down=None): pass
+        @staticmethod
+        def input(pin): return True
+        @staticmethod
+        def cleanup(): pass
+    GPIO = MockGPIO()
 import random
 import glob
 
-IMG_DIR = "/home/joao_rebolo/netmaster_menu/img"
-CARTAS_DIR = os.path.join(IMG_DIR, "cartas")
+IMG_DIR = os.path.join(os.path.dirname(__file__), "img")
+
+# Detectar automaticamente onde estão as cartas
+def detect_cartas_base_dir():
+    """Detecta automaticamente o diretório base das cartas"""
+    possible_dirs = [
+        # Raspberry Pi
+        "/home/joao_rebolo/netmaster_menu/img/cartas",
+        # Desenvolvimento local
+        "/Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level",
+        # Fallback local
+        os.path.join(os.path.dirname(__file__), "img", "cartas")
+    ]
+    
+    for dir_path in possible_dirs:
+        if os.path.exists(dir_path):
+            print(f"DEBUG: Usando diretório de cartas: {dir_path}")
+            return dir_path
+    
+    print("DEBUG: Nenhum diretório de cartas encontrado!")
+    return possible_dirs[0]  # fallback
+
+CARTAS_BASE_DIR = detect_cartas_base_dir()
 COIN_IMG = os.path.join(IMG_DIR, "picoin.png")
 AWNING_IMG = os.path.join(IMG_DIR, "Store_awning_v2.png")
 
@@ -73,43 +111,90 @@ def check_gpio_key(root):
         root.destroy()
     root.after(100, lambda: check_gpio_key(root))
 
-# Carregar baralhos como no Menu.py
+# Carregar baralhos adaptado à nova estrutura: cartas/[tipo]/Residential-level/[cor]/
 def preparar_baralhos():
     baralhos = {}
     for cor in COLORS:
         baralhos[cor] = {}
         for tipo in CARD_TYPES:
-            # Tentar diferentes variações do nome da pasta
-            possible_names = [tipo]
-            if tipo == "actions":
-                possible_names.extend(["action", "actions"])
-            elif tipo == "equipments":
-                possible_names.extend(["equipment", "equipments"])
-            elif tipo == "services":
-                possible_names.extend(["service", "services"])
-            elif tipo == "activities":
-                possible_names.extend(["activity", "activities"])
-            elif tipo == "events":
-                possible_names.extend(["event", "events"])
-            elif tipo == "challenges":
-                possible_names.extend(["challenge", "challenges"])
-            elif tipo == "users":
-                possible_names.extend(["user", "users"])
-            
             cartas = []
-            for nome in possible_names:
-                pasta = os.path.join(CARTAS_DIR, nome)
-                if os.path.exists(pasta):
-                    cartas = [os.path.join(pasta, f) for f in os.listdir(pasta) if f.lower().endswith((".png", ".jpg", ".jpeg"))]
-                    if cartas:
-                        print(f"DEBUG: Found {len(cartas)} cards in folder '{nome}' for type '{tipo}'")
-                        break
+            
+            # Tentar múltiplas estruturas de pastas
+            possible_paths = []
+            
+            # Para cartas que têm cores específicas (equipments, services, users, activities)
+            if tipo in ["equipments", "services", "users", "activities"]:
+                # Mapear cor do jogador para diferentes formatos de nome
+                color_variants = []
+                if cor == "blue":
+                    color_variants = ["Blue", "blue", "BLUE"]
+                elif cor == "green": 
+                    color_variants = ["Green", "green", "GREEN"]
+                elif cor == "red":
+                    color_variants = ["Red", "red", "RED"]
+                elif cor == "yellow":
+                    color_variants = ["Yellow", "yellow", "YELLOW"]
+                else:  # neutral - adicionar todas as cores
+                    color_variants = ["Blue", "Green", "Red", "Yellow", "blue", "green", "red", "yellow"]
+                
+                if cor != "neutral":
+                    # Estruturas possíveis para cores específicas:
+                    for color_var in color_variants:
+                        # 1. cartas/[tipo]/Residential-level/[cor]/
+                        possible_paths.append(os.path.join(CARTAS_BASE_DIR, tipo, "Residential-level", color_var))
+                        # 2. cartas/Residential-[tipo]-[cor]/
+                        possible_paths.append(os.path.join(CARTAS_BASE_DIR, f"Residential-{tipo}-{color_var}"))
+                        # 3. cartas/[tipo]/[cor]/
+                        possible_paths.append(os.path.join(CARTAS_BASE_DIR, tipo, color_var))
+                else:
+                    # Para neutral, tentar todas as cores
+                    for color_var in color_variants:
+                        possible_paths.append(os.path.join(CARTAS_BASE_DIR, tipo, "Residential-level", color_var))
+                        possible_paths.append(os.path.join(CARTAS_BASE_DIR, f"Residential-{tipo}-{color_var}"))
+                        possible_paths.append(os.path.join(CARTAS_BASE_DIR, tipo, color_var))
+            else:
+                # Para cartas sem cor específica (challenges, events, actions)
+                # Estruturas possíveis:
+                possible_paths = [
+                    # 1. cartas/[tipo]/Residential-level/
+                    os.path.join(CARTAS_BASE_DIR, tipo, "Residential-level"),
+                    # 2. cartas/Residential-[tipo]/
+                    os.path.join(CARTAS_BASE_DIR, f"Residential-{tipo}"),
+                    # 3. cartas/[tipo]/
+                    os.path.join(CARTAS_BASE_DIR, tipo)
+                ]
+            
+            # Tentar encontrar cartas em qualquer uma das estruturas possíveis
+            for path in possible_paths:
+                if os.path.exists(path):
+                    try:
+                        card_files = [os.path.join(path, f) for f in os.listdir(path) 
+                                    if f.lower().endswith((".png", ".jpg", ".jpeg"))]
+                        if card_files:
+                            cartas.extend(card_files)
+                            print(f"DEBUG: Found {len(card_files)} cards at {path}")
+                    except Exception as e:
+                        print(f"DEBUG: Error reading {path}: {e}")
+                        continue
+            
+            # Remover duplicatas mantendo ordem
+            seen = set()
+            unique_cartas = []
+            for carta in cartas:
+                if carta not in seen:
+                    seen.add(carta)
+                    unique_cartas.append(carta)
+            cartas = unique_cartas
+            
             if cartas:
                 random.shuffle(cartas)
                 baralhos[cor][tipo] = cartas.copy()
+                print(f"DEBUG: Total {len(cartas)} cards for '{tipo}' color '{cor}'")
             else:
                 baralhos[cor][tipo] = []
-                print(f"DEBUG: No cards found for type '{tipo}' in color '{cor}'")
+                print(f"DEBUG: No cards found for type '{tipo}' color '{cor}'")
+                print(f"DEBUG: Tried paths: {possible_paths}")
+    
     print("Cartas neutral/actions:", len(baralhos.get("neutral", {}).get("actions", [])))
     return baralhos
 
@@ -169,6 +254,8 @@ class StoreWindow(tk.Toplevel):
         coin_lbl = tk.Label(self, image=coin_img, bg="#DC8392")
         coin_lbl.image = coin_img  # type: ignore[attr-defined]
         coin_lbl.place(x=root.winfo_screenwidth()-100, y=12)
+        
+        # Awning = Store, portanto mostra saldo da Store
         saldo_lbl = tk.Label(self, text=f"{self.saldo}", font=("Helvetica", 16, "bold"), fg="black", bg="#DC8392")
         saldo_lbl.place(x=root.winfo_screenwidth()-70, y=12)
         self.coin_img = coin_img  # manter referência
@@ -311,6 +398,11 @@ class StoreWindow(tk.Toplevel):
         self.btn_buy = btn_buy
         self.btn_sell = btn_sell
         self.btn_skip = btn_skip
+
+        # Variáveis para controlar estado de navegação
+        self.current_card_type = None  # Tipo de carta atual para compra
+        self.current_sell_type = None  # Tipo de carta sendo vendida
+        self.current_sell_page = 0     # Página atual de venda
 
         # Inicia verificação do botão físico KEY1
         self.check_gpio_key()
@@ -614,6 +706,8 @@ class StoreWindow(tk.Toplevel):
         coin_lbl = tk.Label(self, image=coin_img, bg="#DC8392")
         coin_lbl.image = coin_img  # type: ignore[attr-defined]
         coin_lbl.place(x=self.winfo_screenwidth()-100, y=12)
+        
+        # Awning = Store, portanto mostra saldo da Store
         saldo_lbl = tk.Label(self, text=f"{self.saldo}", font=("Helvetica", 16, "bold"), fg="black", bg="#DC8392")
         saldo_lbl.place(x=self.winfo_screenwidth()-70, y=12)
 
@@ -644,33 +738,28 @@ class StoreWindow(tk.Toplevel):
         self._picoin_lbl.image = picoin_img  # type: ignore[attr-defined]
         self._picoin_lbl.pack(side="left")
 
-        # Obter cartas disponíveis para compra diretamente da pasta
-        nomes_possiveis = [
-            tipo_atual,
-            tipo_atual + 's' if not tipo_atual.endswith('s') else tipo_atual[:-1],
-        ]
-        mapeamentos = {
-            "users": ["users", "user"],
-            "user": ["user", "users"],
-            "equipments": ["equipments", "equipment"],
-            "equipment": ["equipment", "equipments"],
-            "services": ["services", "service"],
-            "service": ["service", "services"],
-            "activities": ["activities", "activity"],
-            "activity": ["activity", "activities"],
-        }
-        if tipo_atual in mapeamentos:
-            nomes_possiveis = mapeamentos[tipo_atual] + nomes_possiveis
-        nomes_possiveis = list(dict.fromkeys(nomes_possiveis))
+        # Obter cartas disponíveis para compra do baralho do jogador
+        print(f"DEBUG: Buscando cartas para tipo '{tipo_atual}' e cor '{self.player_color}'")
+        
+        # Verificar se o tipo existe nos baralhos
         cartas_disp = []
-        for nome in nomes_possiveis:
-            pasta = os.path.join(CARTAS_DIR, nome)
-            if os.path.exists(pasta):
-                cartas_disp = glob.glob(os.path.join(pasta, "*.png")) + glob.glob(os.path.join(pasta, "*.jpg")) + glob.glob(os.path.join(pasta, "*.jpeg"))
-                if cartas_disp:
-                    break
-
+        if self.player_color in baralhos and tipo_atual in baralhos[self.player_color]:
+            cartas_disp = baralhos[self.player_color][tipo_atual].copy()
+            print(f"DEBUG: Encontradas {len(cartas_disp)} cartas no baralho do jogador")
+        
+        # Se não houver cartas da cor do jogador, tentar neutral
+        if not cartas_disp and "neutral" in baralhos and tipo_atual in baralhos["neutral"]:
+            cartas_disp = baralhos["neutral"][tipo_atual].copy()
+            print(f"DEBUG: Encontradas {len(cartas_disp)} cartas no baralho neutral")
+        
+        # Debug adicional
+        print(f"DEBUG: Baralhos disponíveis para {self.player_color}:")
+        if self.player_color in baralhos:
+            for tipo, cartas in baralhos[self.player_color].items():
+                print(f"  {tipo}: {len(cartas)} cartas")
+        
         if not cartas_disp:
+            print(f"DEBUG: Nenhuma carta encontrada para {tipo_atual}")
             tk.Label(self, text="Sem cartas disponíveis para compra!", font=("Helvetica", 16), bg="black", fg="white").pack(pady=20)
             return
 
@@ -862,12 +951,18 @@ class StoreWindow(tk.Toplevel):
         coin_lbl = tk.Label(self, image=coin_img, bg="#DC8392")
         coin_lbl.image = coin_img  # type: ignore[attr-defined]
         coin_lbl.place(x=self.winfo_screenwidth()-100, y=12)
-        saldo_lbl = tk.Label(self, text=f"{self.saldo}", font=("Helvetica", 16, "bold"), fg="black", bg="#DC8392")
+        
+        # Usar o saldo do Player em vez do saldo da Store também na barra superior
+        player_saldo = self.dashboard.saldo if self.dashboard else self.saldo
+        saldo_lbl = tk.Label(self, text=f"{player_saldo}", font=("Helvetica", 16, "bold"), fg="black", bg="#DC8392")
         saldo_lbl.place(x=self.winfo_screenwidth()-70, y=12)
         confirm_frame = tk.Frame(self, bg="black")
         confirm_frame.pack(expand=True)
         tk.Label(confirm_frame, text="Are you sure you want to buy?", font=("Helvetica", 16, "bold"), fg="white", bg="black").pack(pady=(40, 20))
-        tk.Label(confirm_frame, text=f"Your balance: {self.saldo}", font=("Helvetica", 16), fg="yellow", bg="black").pack(pady=(0, 10))
+        
+        # Usar o saldo do Player em vez do saldo da Store
+        player_saldo = self.dashboard.saldo if self.dashboard else self.saldo
+        tk.Label(confirm_frame, text=f"Your balance: {player_saldo}", font=("Helvetica", 16), fg="yellow", bg="black").pack(pady=(0, 10))
         
         # Valor da carta
         value_frame = tk.Frame(confirm_frame, bg="black")
@@ -896,11 +991,11 @@ class StoreWindow(tk.Toplevel):
             # Executa a compra
             if valor is not None and self.dashboard and self.dashboard.saldo >= valor:
                 print(f"DEBUG: Antes da compra - Store: {self.saldo}, Player: {self.dashboard.saldo}, Valor: {valor}")
-                # O saldo da Store AUMENTA (recebe o pagamento)
-                self.saldo += valor
+                # IMPORTANTE: O Player paga pela carta e a Store recebe o pagamento
                 # O saldo do Player DIMINUI (paga pela carta)
-                if self.dashboard:
-                    self.dashboard.saldo -= valor
+                self.dashboard.saldo -= valor
+                # A Store recebe o pagamento
+                self.saldo += valor
                 print(f"DEBUG: Depois da compra - Store: {self.saldo}, Player: {self.dashboard.saldo}")
                 # Garantir tipo correto para inventário
                 tipo_inv = self.current_card_type
@@ -914,14 +1009,9 @@ class StoreWindow(tk.Toplevel):
                 if self.dashboard and hasattr(self.dashboard, 'adicionar_carta_inventario'):
                     self.dashboard.adicionar_carta_inventario(carta_path, tipo_inv)
                 print(f"DEBUG: Carta guardada no inventario do PlayerDashboard: {tipo_inv} -> {carta_path}")
-                # Voltar imediatamente ao dashboard
-                if self.dashboard:
-                    self.dashboard.playerdashboard_interface(
-                        self.dashboard.player_name,
-                    self.dashboard.saldo,
-                        self.dashboard.other_players
-                    )
-                self.update()
+                # ALTERAÇÃO: Voltar à página de compra em vez da dashboard
+                self.show_buy_page()
+                print("DEBUG: Voltando à página de compra após confirmação")
                 # NÃO destruir a StoreWindow aqui!
                 # self.destroy()
             else:
@@ -1002,6 +1092,10 @@ class StoreWindow(tk.Toplevel):
     def show_sell_inventory(self, carta_tipo):
         """Mostra o inventário do tipo selecionado para venda usando o mesmo layout do PlayerDashboard"""
         print(f"DEBUG: show_sell_inventory chamado com carta_tipo={carta_tipo}")
+        
+        # Guardar estado atual da venda
+        self.current_sell_type = carta_tipo
+        self.current_sell_page = 0
         
         # Limpa todos os widgets da janela Store
         for widget in self.winfo_children():
@@ -1161,6 +1255,10 @@ class StoreWindow(tk.Toplevel):
     def show_sell_inventory_paginated(self, carta_tipo, page=0):
         """Versão paginada do show_sell_inventory usando o mesmo layout do PlayerDashboard"""
         print(f"DEBUG: show_sell_inventory_paginated chamado com carta_tipo={carta_tipo}, page={page}")
+        
+        # Guardar estado atual da venda
+        self.current_sell_type = carta_tipo
+        self.current_sell_page = page
         
         # Limpa todos os widgets da janela Store
         for widget in self.winfo_children():
@@ -1387,9 +1485,9 @@ class StoreWindow(tk.Toplevel):
         center_frame = tk.Frame(self, bg="black")
         center_frame.pack(expand=True)
 
-        verso_path = os.path.join(CARTAS_DIR, "back_card.png")
+        verso_path = os.path.join(IMG_DIR, "cartas", "back_card.png")
         if not os.path.exists(verso_path):
-            verso_path = os.path.join(CARTAS_DIR, "verso.png")
+            verso_path = os.path.join(IMG_DIR, "verso.png")
 
         # Verificar se o arquivo existe antes de tentar carregar
         if os.path.exists(verso_path):
@@ -1823,8 +1921,15 @@ class StoreWindow(tk.Toplevel):
             
             print(f"DEBUG: Venda confirmada - Player saldo: {player_dashboard.saldo}, Store saldo: {self.saldo}")
             
-            # Volta à página inicial da Store
-            self.voltar_para_store()
+            # ALTERAÇÃO: Volta à página de venda em vez da página inicial da Store
+            if hasattr(self, 'current_sell_type') and self.current_sell_type:
+                # Volta à página de venda do mesmo tipo
+                self.show_sell_inventory_paginated(self.current_sell_type, getattr(self, 'current_sell_page', 0))
+                print(f"DEBUG: Voltando à página de venda de {self.current_sell_type}")
+            else:
+                # Fallback para a página inicial da Store se não houver tipo guardado
+                self.voltar_para_store()
+                print("DEBUG: Voltando à página inicial da Store (fallback)")
         
         def cancelar():
             print("DEBUG: Venda cancelada - voltando à visualização da carta")
@@ -1880,6 +1985,8 @@ class StoreWindow(tk.Toplevel):
             coin_lbl = tk.Label(self, image=coin_img, bg="#DC8392")
             coin_lbl.image = coin_img  # type: ignore[attr-defined]
             coin_lbl.place(x=screen_width-100, y=12)
+            
+            # Awning = Store, portanto mostra saldo da Store
             saldo_lbl = tk.Label(self, text=f"{self.saldo}", font=("Helvetica", 16, "bold"), fg="black", bg="#DC8392")
             saldo_lbl.place(x=screen_width-70, y=12)
             self.coin_img = coin_img  # manter referência

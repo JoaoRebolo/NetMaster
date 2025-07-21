@@ -31,7 +31,7 @@ keyboard_state = "uppercase"
 clients = []  # Lista de clientes conectados
 
 # Tipos de carta e cores
-CARD_TYPES = ["users", "action", "equipments", "challenges", "activities", "events", "service"]
+CARD_TYPES = ["users", "actions", "equipments", "challenges", "activities", "events", "services"]
 COLORS = ["green", "yellow", "red", "blue", "neutral"]
 
 # Baralhos: dict do tipo {'green': {'users': [lista de paths], ...}, ...}
@@ -41,7 +41,7 @@ BOARD = [
     # Top row (left to right)
     ("start", "neutral"),      # 0 canto azul
     ("users", "blue"),         # 1
-    ("action", "neutral"),     # 2 (cinzento)
+    ("actions", "neutral"),     # 2 (cinzento)
     ("equipments", "blue"),     # 3
     ("challenges", "neutral"), # 4 (cinzento)
     ("activities", "red"),      # 5
@@ -51,7 +51,7 @@ BOARD = [
     # Right column (top to bottom)
     ("start", "neutral"),      # 8 canto vermelho
     ("users", "red"),          # 9
-    ("action", "neutral"),     # 10 (cinzento)
+    ("actions", "neutral"),     # 10 (cinzento)
     ("equipments", "red"),      # 11
     ("challenges", "neutral"), # 12 (cinzento)
     ("activities", "yellow"),   # 13
@@ -61,7 +61,7 @@ BOARD = [
     # Bottom row (right to left)
     ("start", "neutral"),      # 16 canto amarelo
     ("users", "yellow"),       # 17
-    ("action", "neutral"),     # 18 (cinzento)
+    ("actions", "neutral"),     # 18 (cinzento)
     ("equipments", "yellow"),   # 19
     ("challenges", "neutral"), # 20 (cinzento)
     ("activities", "green"),    # 21
@@ -71,7 +71,7 @@ BOARD = [
     # Left column (bottom to top)
     ("start", "neutral"),      # 24 canto verde
     ("users", "green"),        # 25
-    ("action", "neutral"),     # 26 (cinzento)
+    ("actions", "neutral"),     # 26 (cinzento)
     ("equipments", "green"),    # 27
     ("challenges", "neutral"), # 28 (cinzento)
     ("activities", "blue"),     # 29
@@ -103,12 +103,44 @@ def preparar_baralhos():
     for cor in COLORS:
         baralhos[cor] = {}
         for tipo in CARD_TYPES:
-            # Procurar cartas em img/cartas/[tipo]/
-            pasta = os.path.join(CARTAS_DIR, tipo)
-            if os.path.exists(pasta):
-                cartas = [os.path.join(pasta, f) for f in os.listdir(pasta) if f.lower().endswith(('.png', '.jpg', '.jpeg'))]
+            cartas = []
+            
+            # Mapear nomes de tipos para pastas (ajustar inconsistências)
+            folder_name = tipo
+            if tipo == "actions":
+                folder_name = "actions"  # Se existir pasta actions
+            elif tipo == "services":
+                folder_name = "services"
+            
+            # Estrutura: cartas/[tipo]/Residential-level/
+            base_path = os.path.join(CARTAS_DIR, folder_name, "Residential-level")
+            
+            # Para tipos que têm cores (equipments, services, users)
+            if folder_name in ["equipments", "services", "users"]:
+                # Mapear cores do jogo para nomes de pastas
+                color_folder = cor.capitalize()  # blue -> Blue, etc.
+                if cor == "neutral":
+                    # Para neutral, tentar todas as cores disponíveis
+                    for test_color in ["Blue", "Green", "Red", "Yellow"]:
+                        color_path = os.path.join(base_path, test_color)
+                        if os.path.exists(color_path):
+                            card_files = [os.path.join(color_path, f) for f in os.listdir(color_path) 
+                                        if f.lower().endswith((".png", ".jpg", ".jpeg"))]
+                            cartas.extend(card_files)
+                else:
+                    color_path = os.path.join(base_path, color_folder)
+                    if os.path.exists(color_path):
+                        cartas = [os.path.join(color_path, f) for f in os.listdir(color_path) 
+                                if f.lower().endswith((".png", ".jpg", ".jpeg"))]
+            else:
+                # Para tipos sem cores (challenges, events, activities, actions)
+                if os.path.exists(base_path):
+                    cartas = [os.path.join(base_path, f) for f in os.listdir(base_path) 
+                            if f.lower().endswith((".png", ".jpg", ".jpeg"))]
+            
+            if cartas:
                 random.shuffle(cartas)
-                baralhos[cor][tipo] = cartas.copy()  # copia para cada cor
+                baralhos[cor][tipo] = cartas.copy()
             else:
                 baralhos[cor][tipo] = []
 preparar_baralhos()

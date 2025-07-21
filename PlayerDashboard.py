@@ -2,11 +2,50 @@ import tkinter as tk
 from tkinter import ttk
 from PIL import Image, ImageTk
 import os
-import RPi.GPIO as GPIO
+try:
+    import RPi.GPIO as GPIO
+except ImportError:
+    # Mock para ambiente de desenvolvimento sem GPIO
+    class MockGPIO:
+        BCM = "BCM"
+        IN = "IN"
+        PUD_UP = "PUD_UP"
+        LOW = False
+        @staticmethod
+        def setmode(mode): pass
+        @staticmethod  
+        def setup(pin, mode, pull_up_down=None): pass
+        @staticmethod
+        def input(pin): return True
+        @staticmethod
+        def cleanup(): pass
+    GPIO = MockGPIO()
 import random
 from Store_v2 import StoreWindow
 
 IMG_DIR = os.path.join(os.path.dirname(__file__), "img")
+
+# Detectar automaticamente onde estão as cartas
+def detect_cartas_base_dir():
+    """Detecta automaticamente o diretório base das cartas"""
+    possible_dirs = [
+        # Raspberry Pi
+        "/home/joao_rebolo/netmaster_menu/img/cartas",
+        # Desenvolvimento local
+        "/Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level",
+        # Fallback local
+        os.path.join(os.path.dirname(__file__), "img", "cartas")
+    ]
+    
+    for dir_path in possible_dirs:
+        if os.path.exists(dir_path):
+            print(f"DEBUG: Usando diretório de cartas: {dir_path}")
+            return dir_path
+    
+    print("DEBUG: Nenhum diretório de cartas encontrado!")
+    return possible_dirs[0]  # fallback
+
+CARTAS_BASE_DIR = detect_cartas_base_dir()
 COIN_IMG = os.path.join(IMG_DIR, "picoin.png")
 USER_ICONS = [
     os.path.join(IMG_DIR, "red_user_icon.png"),
@@ -27,7 +66,7 @@ BOARD = [
     ("start", "neutral"),      # 0 canto azul
     ("users", "blue"),         # 1
     ("actions", "neutral"),     # 2 (cinzento)
-    ("equipment", "blue"),     # 3
+    ("equipments", "blue"),     # 3
     ("challenges", "neutral"), # 4 (cinzento)
     ("activities", "red"),      # 5
     ("events", "neutral"),     # 6 (cinzento)
@@ -37,7 +76,7 @@ BOARD = [
     ("start", "neutral"),      # 8 canto vermelho
     ("users", "red"),          # 9
     ("actions", "neutral"),     # 10 (cinzento)
-    ("equipment", "red"),      # 11
+    ("equipments", "red"),      # 11
     ("challenges", "neutral"), # 12 (cinzento)
     ("activities", "yellow"),   # 13
     ("events", "neutral"),     # 14 (cinzento)
@@ -47,7 +86,7 @@ BOARD = [
     ("start", "neutral"),      # 16 canto amarelo
     ("users", "yellow"),       # 17
     ("actions", "neutral"),     # 18 (cinzento)
-    ("equipment", "yellow"),   # 19
+    ("equipments", "yellow"),   # 19
     ("challenges", "neutral"), # 20 (cinzento)
     ("activities", "green"),    # 21
     ("events", "neutral"),     # 22 (cinzento)
@@ -57,7 +96,7 @@ BOARD = [
     ("start", "neutral"),      # 24 canto verde
     ("users", "green"),        # 25
     ("actions", "neutral"),     # 26 (cinzento)
-    ("equipment", "green"),    # 27
+    ("equipments", "green"),    # 27
     ("challenges", "neutral"), # 28 (cinzento)
     ("activities", "blue"),     # 29
     ("events", "neutral"),     # 30 (cinzento)
@@ -156,7 +195,7 @@ class PlayerDashboard(tk.Toplevel):
             "users": [],
             "equipments": [],
             "services": [],
-            "action": [],
+            "actions": [],
             "events": [],
             "challenges": [],
             "activities": [],
@@ -170,9 +209,7 @@ class PlayerDashboard(tk.Toplevel):
 
         self.geometry(f"{screen_width}x{screen_height}+0+0")
         self.overrideredirect(True)
-        self.attributes("-fullscreen", True)
-
-        # Definir bar_color para botões e barra inferior
+        self.attributes("-fullscreen", True)        # Definir bar_color para botões e barra inferior
         color_map = {
             "green": "#70AD47",
             "yellow": "#F2BA0D",
@@ -183,26 +220,96 @@ class PlayerDashboard(tk.Toplevel):
         
         self.selected_card_idx = selected_card_idx
         self.store_window = None
-        # Cartas de teste para o inventário
-        test_img_dir = os.path.join(os.path.dirname(__file__), "img", "cartas")
-        # Adiciona 4 cartas normais + 2 cartas extra de Activities e Challenges para testar as setas
-        for tipo in ["users", "equipments", "services", "action", "events", "challenges", "activities"]:
-            pasta = os.path.join(test_img_dir, tipo)
-            if os.path.exists(pasta):
-                imgs = [os.path.join(pasta, f) for f in os.listdir(pasta) if f.lower().endswith(('.png', '.jpg', '.jpeg'))]
+        
+        # Cargas de cartas usando a nova estrutura: cartas/[tipo]/Residential-level/[cor]/
+        def load_cards_from_new_structure(card_type, player_color):
+            """Carrega cartas da nova estrutura de pastas"""
+            cards = []
+            
+            # Tentar múltiplas estruturas de pastas
+            possible_paths = []
+            
+            # Para cartas que têm cores específicas (equipments, services, users, activities)
+            if card_type in ["equipments", "services", "users", "activities"]:
+                # Mapear cor do jogador para diferentes formatos de nome
+                color_variants = []
+                if player_color == "blue":
+                    color_variants = ["Blue", "blue", "BLUE"]
+                elif player_color == "green": 
+                    color_variants = ["Green", "green", "GREEN"]
+                elif player_color == "red":
+                    color_variants = ["Red", "red", "RED"]
+                elif player_color == "yellow":
+                    color_variants = ["Yellow", "yellow", "YELLOW"]
+                else:
+                    color_variants = ["Blue", "blue"]  # default
+                
+                # Estruturas possíveis:
+                for color_var in color_variants:
+                    # 1. cartas/[tipo]/Residential-level/[cor]/
+                    possible_paths.append(os.path.join(CARTAS_BASE_DIR, card_type, "Residential-level", color_var))
+                    # 2. cartas/Residential-[tipo]-[cor]/
+                    possible_paths.append(os.path.join(CARTAS_BASE_DIR, f"Residential-{card_type}-{color_var}"))
+                    # 3. cartas/[tipo]/[cor]/
+                    possible_paths.append(os.path.join(CARTAS_BASE_DIR, card_type, color_var))
+            else:
+                # Para cartas sem cor específica (challenges, events, actions)
+                possible_paths = [
+                    # 1. cartas/[tipo]/Residential-level/
+                    os.path.join(CARTAS_BASE_DIR, card_type, "Residential-level"),
+                    # 2. cartas/Residential-[tipo]/
+                    os.path.join(CARTAS_BASE_DIR, f"Residential-{card_type}"),
+                    # 3. cartas/[tipo]/
+                    os.path.join(CARTAS_BASE_DIR, card_type)
+                ]
+            
+            # Tentar encontrar cartas em qualquer uma das estruturas possíveis
+            for path in possible_paths:
+                if os.path.exists(path):
+                    try:
+                        card_files = [os.path.join(path, f) for f in os.listdir(path) 
+                                    if f.lower().endswith(('.png', '.jpg', '.jpeg'))]
+                        if card_files:
+                            cards.extend(card_files)
+                            break  # Para no primeiro caminho que funcionar
+                    except Exception as e:
+                        continue
+            
+            return cards
+        
+        # Carregamento de cartas para inventário
+        for tipo in ["users", "equipments", "services", "actions", "events", "challenges", "activities"]:
+            # Tentar nova estrutura primeiro
+            cartas = load_cards_from_new_structure(tipo, self.player_color)
+            
+            # Se não encontrar, tentar estrutura antiga como fallback
+            if not cartas:
+                pasta = os.path.join(IMG_DIR, "cartas", tipo)
+                if os.path.exists(pasta):
+                    cartas = [os.path.join(pasta, f) for f in os.listdir(pasta) 
+                             if f.lower().endswith(('.png', '.jpg', '.jpeg'))]
+            
+            # Adicionar cartas ao inventário
+            if cartas:
                 if tipo in ["activities", "challenges"]:
                     # Adiciona 4 primeiras cartas normalmente
-                    for img in imgs[:4]:
+                    for img in cartas[:4]:
                         self.inventario[tipo].append(img)
                     # Adiciona mais 2 cartas extra se existirem
-                    # for img in imgs[4:6]:
-                    #     self.inventario[tipo].append(/home/joao_rebolo/netmaster_menu/img/cartas/activities/Activity_1.png)
-                    #     self.inventario[tipo].append(/home/joao_rebolo/netmaster_menu/img/cartas/activities/Activity_5.png)
-                    
-                    self.inventario[tipo].append('/home/joao_rebolo/netmaster_menu/img/cartas/activities/Activity_1.png')
-                    self.inventario[tipo].append('/home/joao_rebolo/netmaster_menu/img/cartas/activities/Activity_5.png')    
+                    if tipo == "activities" and len(cartas) >= 6:
+                        self.inventario[tipo].append(cartas[4])
+                        self.inventario[tipo].append(cartas[5])
+                    elif tipo == "activities":
+                        # Fallback para cartas específicas se não houver suficientes
+                        activities_path = os.path.join(IMG_DIR, "cartas", "activities", "Residential-level")
+                        if os.path.exists(activities_path):
+                            activity_files = [f for f in os.listdir(activities_path) if f.lower().endswith('.png')]
+                            if len(activity_files) >= 2:
+                                self.inventario[tipo].append(os.path.join(activities_path, activity_files[0]))
+                                self.inventario[tipo].append(os.path.join(activities_path, activity_files[1]))
                 else:
-                    for img in imgs[:2]:
+                    # Para outros tipos, adicionar apenas 2 cartas
+                    for img in cartas[:2]:
                         self.inventario[tipo].append(img)
 
         # --- BARRA SUPERIOR COM IMAGEM ---
@@ -452,7 +559,7 @@ class PlayerDashboard(tk.Toplevel):
             self.action_buttons.append(btn)
             # Associar inventário correto
             if inv_key == "actions_events":
-                btn.config(command=lambda: self.show_inventory_matrix(["action", "events"]))
+                btn.config(command=lambda: self.show_inventory_matrix(["actions", "events"]))
             else:
                 btn.config(command=lambda k=inv_key: self.show_inventory_matrix([k]))
 
