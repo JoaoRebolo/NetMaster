@@ -1,0 +1,317 @@
+<<< WARNING: using fake raspberry pi interfaces >>>
+<<< WARNING: using fake raspberry pi interfaces >>>
+<<< Using: <class 'fake_rpi.RPi._GPIO'> >>>
+<<< Using: <class 'fake_rpi.RPi._GPIO'> >>>
+DEBUG: Usando diretório de cartas: /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level
+fake_rpi.RPi._GPIO.setmode(11,)
+fake_rpi.RPi._GPIO.setup(23, 1)
+DEBUG: Found 5 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-users-Green
+DEBUG: Found 5 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-users-green
+DEBUG: Found 5 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-users-GREEN
+DEBUG: Total 15 cards for 'users' color 'green'
+DEBUG: Found 38 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-actions
+DEBUG: Total 38 cards for 'actions' color 'green'
+DEBUG: Found 12 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-equipments-Green
+DEBUG: Found 12 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-equipments-green
+DEBUG: Found 12 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-equipments-GREEN
+DEBUG: Total 36 cards for 'equipments' color 'green'
+DEBUG: Found 14 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-challenges
+DEBUG: Total 14 cards for 'challenges' color 'green'
+DEBUG: Found 12 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-activities-Green
+DEBUG: Found 12 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-activities-green
+DEBUG: Found 12 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-activities-GREEN
+DEBUG: Total 36 cards for 'activities' color 'green'
+DEBUG: Found 220 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-events
+DEBUG: Total 220 cards for 'events' color 'green'
+DEBUG: Found 7 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-services-Green
+DEBUG: Found 7 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-services-green
+DEBUG: Found 7 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-services-GREEN
+DEBUG: Total 21 cards for 'services' color 'green'
+DEBUG: Found 5 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-users-Yellow
+DEBUG: Found 5 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-users-yellow
+DEBUG: Found 5 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-users-YELLOW
+DEBUG: Total 15 cards for 'users' color 'yellow'
+DEBUG: Found 38 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-actions
+DEBUG: Total 38 cards for 'actions' color 'yellow'
+DEBUG: Found 12 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-equipments-Yellow
+DEBUG: Found 12 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-equipments-yellow
+DEBUG: Found 12 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-equipments-YELLOW
+DEBUG: Total 36 cards for 'equipments' color 'yellow'
+DEBUG: Found 14 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-challenges
+DEBUG: Total 14 cards for 'challenges' color 'yellow'
+DEBUG: Found 12 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-activities-Yellow
+DEBUG: Found 12 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-activities-yellow
+DEBUG: Found 12 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-activities-YELLOW
+DEBUG: Total 36 cards for 'activities' color 'yellow'
+DEBUG: Found 220 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-events
+DEBUG: Total 220 cards for 'events' color 'yellow'
+DEBUG: Found 7 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-services-Yellow
+DEBUG: Found 7 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-services-yellow
+DEBUG: Found 7 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-services-YELLOW
+DEBUG: Total 21 cards for 'services' color 'yellow'
+DEBUG: Found 5 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-users-Red
+DEBUG: Found 5 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-users-red
+DEBUG: Found 5 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-users-RED
+DEBUG: Total 15 cards for 'users' color 'red'
+DEBUG: Found 38 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-actions
+DEBUG: Total 38 cards for 'actions' color 'red'
+DEBUG: Found 12 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-equipments-Red
+DEBUG: Found 12 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-equipments-red
+DEBUG: Found 12 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-equipments-RED
+DEBUG: Total 36 cards for 'equipments' color 'red'
+DEBUG: Found 14 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-challenges
+DEBUG: Total 14 cards for 'challenges' color 'red'
+DEBUG: Found 12 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-activities-Red
+DEBUG: Found 12 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-activities-red
+DEBUG: Found 12 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-activities-RED
+DEBUG: Total 36 cards for 'activities' color 'red'
+DEBUG: Found 220 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-events
+DEBUG: Total 220 cards for 'events' color 'red'
+DEBUG: Found 7 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-services-Red
+DEBUG: Found 7 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-services-red
+DEBUG: Found 7 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-services-RED
+DEBUG: Total 21 cards for 'services' color 'red'
+DEBUG: Found 5 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-users-Blue
+DEBUG: Found 5 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-users-blue
+DEBUG: Found 5 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-users-BLUE
+DEBUG: Total 15 cards for 'users' color 'blue'
+DEBUG: Found 38 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-actions
+DEBUG: Total 38 cards for 'actions' color 'blue'
+DEBUG: Found 12 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-equipments-Blue
+DEBUG: Found 12 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-equipments-blue
+DEBUG: Found 12 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-equipments-BLUE
+DEBUG: Total 36 cards for 'equipments' color 'blue'
+DEBUG: Found 14 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-challenges
+DEBUG: Total 14 cards for 'challenges' color 'blue'
+DEBUG: Found 12 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-activities-Blue
+DEBUG: Found 12 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-activities-blue
+DEBUG: Found 12 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-activities-BLUE
+DEBUG: Total 36 cards for 'activities' color 'blue'
+DEBUG: Found 220 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-events
+DEBUG: Total 220 cards for 'events' color 'blue'
+DEBUG: Found 7 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-services-Blue
+DEBUG: Found 7 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-services-blue
+DEBUG: Found 7 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-services-BLUE
+DEBUG: Total 21 cards for 'services' color 'blue'
+DEBUG: Found 5 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-users-Blue
+DEBUG: Found 5 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-users-Green
+DEBUG: Found 5 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-users-Red
+DEBUG: Found 5 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-users-Yellow
+DEBUG: Found 5 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-users-blue
+DEBUG: Found 5 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-users-green
+DEBUG: Found 5 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-users-red
+DEBUG: Found 5 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-users-yellow
+DEBUG: Total 40 cards for 'users' color 'neutral'
+DEBUG: Found 38 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-actions
+DEBUG: Total 38 cards for 'actions' color 'neutral'
+DEBUG: Found 12 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-equipments-Blue
+DEBUG: Found 12 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-equipments-Green
+DEBUG: Found 12 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-equipments-Red
+DEBUG: Found 12 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-equipments-Yellow
+DEBUG: Found 12 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-equipments-blue
+DEBUG: Found 12 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-equipments-green
+DEBUG: Found 12 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-equipments-red
+DEBUG: Found 12 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-equipments-yellow
+DEBUG: Total 96 cards for 'equipments' color 'neutral'
+DEBUG: Found 14 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-challenges
+DEBUG: Total 14 cards for 'challenges' color 'neutral'
+DEBUG: Found 12 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-activities-Blue
+DEBUG: Found 12 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-activities-Green
+DEBUG: Found 12 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-activities-Red
+DEBUG: Found 12 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-activities-Yellow
+DEBUG: Found 12 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-activities-blue
+DEBUG: Found 12 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-activities-green
+DEBUG: Found 12 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-activities-red
+DEBUG: Found 12 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-activities-yellow
+DEBUG: Total 96 cards for 'activities' color 'neutral'
+DEBUG: Found 220 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-events
+DEBUG: Total 220 cards for 'events' color 'neutral'
+DEBUG: Found 7 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-services-Blue
+DEBUG: Found 7 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-services-Green
+DEBUG: Found 7 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-services-Red
+DEBUG: Found 7 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-services-Yellow
+DEBUG: Found 7 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-services-blue
+DEBUG: Found 7 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-services-green
+DEBUG: Found 7 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-services-red
+DEBUG: Found 7 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-services-yellow
+DEBUG: Total 56 cards for 'services' color 'neutral'
+Cartas neutral/actions: 38
+DEBUG: Usando diretório de cartas: /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level
+fake_rpi.RPi._GPIO.setmode(11,)
+fake_rpi.RPi._GPIO.setup(23, 1)
+DEBUG: Usando diretório de cartas: /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level
+fake_rpi.RPi._GPIO.setmode(11,)
+fake_rpi.RPi._GPIO.setup(23, 1)
+DEBUG: Found 5 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-users-Green
+DEBUG: Found 5 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-users-green
+DEBUG: Found 5 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-users-GREEN
+DEBUG: Total 15 cards for 'users' color 'green'
+DEBUG: Found 38 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-actions
+DEBUG: Total 38 cards for 'actions' color 'green'
+DEBUG: Found 12 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-equipments-Green
+DEBUG: Found 12 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-equipments-green
+DEBUG: Found 12 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-equipments-GREEN
+DEBUG: Total 36 cards for 'equipments' color 'green'
+DEBUG: Found 14 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-challenges
+DEBUG: Total 14 cards for 'challenges' color 'green'
+DEBUG: Found 12 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-activities-Green
+DEBUG: Found 12 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-activities-green
+DEBUG: Found 12 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-activities-GREEN
+DEBUG: Total 36 cards for 'activities' color 'green'
+DEBUG: Found 220 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-events
+DEBUG: Total 220 cards for 'events' color 'green'
+DEBUG: Found 7 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-services-Green
+DEBUG: Found 7 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-services-green
+DEBUG: Found 7 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-services-GREEN
+DEBUG: Total 21 cards for 'services' color 'green'
+DEBUG: Found 5 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-users-Yellow
+DEBUG: Found 5 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-users-yellow
+DEBUG: Found 5 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-users-YELLOW
+DEBUG: Total 15 cards for 'users' color 'yellow'
+DEBUG: Found 38 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-actions
+DEBUG: Total 38 cards for 'actions' color 'yellow'
+DEBUG: Found 12 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-equipments-Yellow
+DEBUG: Found 12 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-equipments-yellow
+DEBUG: Found 12 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-equipments-YELLOW
+DEBUG: Total 36 cards for 'equipments' color 'yellow'
+DEBUG: Found 14 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-challenges
+DEBUG: Total 14 cards for 'challenges' color 'yellow'
+DEBUG: Found 12 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-activities-Yellow
+DEBUG: Found 12 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-activities-yellow
+DEBUG: Found 12 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-activities-YELLOW
+DEBUG: Total 36 cards for 'activities' color 'yellow'
+DEBUG: Found 220 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-events
+DEBUG: Total 220 cards for 'events' color 'yellow'
+DEBUG: Found 7 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-services-Yellow
+DEBUG: Found 7 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-services-yellow
+DEBUG: Found 7 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-services-YELLOW
+DEBUG: Total 21 cards for 'services' color 'yellow'
+DEBUG: Found 5 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-users-Red
+DEBUG: Found 5 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-users-red
+DEBUG: Found 5 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-users-RED
+DEBUG: Total 15 cards for 'users' color 'red'
+DEBUG: Found 38 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-actions
+DEBUG: Total 38 cards for 'actions' color 'red'
+DEBUG: Found 12 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-equipments-Red
+DEBUG: Found 12 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-equipments-red
+DEBUG: Found 12 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-equipments-RED
+DEBUG: Total 36 cards for 'equipments' color 'red'
+DEBUG: Found 14 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-challenges
+DEBUG: Total 14 cards for 'challenges' color 'red'
+DEBUG: Found 12 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-activities-Red
+DEBUG: Found 12 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-activities-red
+DEBUG: Found 12 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-activities-RED
+DEBUG: Total 36 cards for 'activities' color 'red'
+DEBUG: Found 220 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-events
+DEBUG: Total 220 cards for 'events' color 'red'
+DEBUG: Found 7 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-services-Red
+DEBUG: Found 7 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-services-red
+DEBUG: Found 7 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-services-RED
+DEBUG: Total 21 cards for 'services' color 'red'
+DEBUG: Found 5 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-users-Blue
+DEBUG: Found 5 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-users-blue
+DEBUG: Found 5 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-users-BLUE
+DEBUG: Total 15 cards for 'users' color 'blue'
+DEBUG: Found 38 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-actions
+DEBUG: Total 38 cards for 'actions' color 'blue'
+DEBUG: Found 12 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-equipments-Blue
+DEBUG: Found 12 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-equipments-blue
+DEBUG: Found 12 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-equipments-BLUE
+DEBUG: Total 36 cards for 'equipments' color 'blue'
+DEBUG: Found 14 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-challenges
+DEBUG: Total 14 cards for 'challenges' color 'blue'
+DEBUG: Found 12 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-activities-Blue
+DEBUG: Found 12 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-activities-blue
+DEBUG: Found 12 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-activities-BLUE
+DEBUG: Total 36 cards for 'activities' color 'blue'
+DEBUG: Found 220 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-events
+DEBUG: Total 220 cards for 'events' color 'blue'
+DEBUG: Found 7 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-services-Blue
+DEBUG: Found 7 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-services-blue
+DEBUG: Found 7 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-services-BLUE
+DEBUG: Total 21 cards for 'services' color 'blue'
+DEBUG: Found 5 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-users-Blue
+DEBUG: Found 5 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-users-Green
+DEBUG: Found 5 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-users-Red
+DEBUG: Found 5 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-users-Yellow
+DEBUG: Found 5 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-users-blue
+DEBUG: Found 5 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-users-green
+DEBUG: Found 5 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-users-red
+DEBUG: Found 5 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-users-yellow
+DEBUG: Total 40 cards for 'users' color 'neutral'
+DEBUG: Found 38 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-actions
+DEBUG: Total 38 cards for 'actions' color 'neutral'
+DEBUG: Found 12 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-equipments-Blue
+DEBUG: Found 12 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-equipments-Green
+DEBUG: Found 12 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-equipments-Red
+DEBUG: Found 12 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-equipments-Yellow
+DEBUG: Found 12 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-equipments-blue
+DEBUG: Found 12 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-equipments-green
+DEBUG: Found 12 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-equipments-red
+DEBUG: Found 12 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-equipments-yellow
+DEBUG: Total 96 cards for 'equipments' color 'neutral'
+DEBUG: Found 14 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-challenges
+DEBUG: Total 14 cards for 'challenges' color 'neutral'
+DEBUG: Found 12 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-activities-Blue
+DEBUG: Found 12 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-activities-Green
+DEBUG: Found 12 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-activities-Red
+DEBUG: Found 12 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-activities-Yellow
+DEBUG: Found 12 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-activities-blue
+DEBUG: Found 12 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-activities-green
+DEBUG: Found 12 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-activities-red
+DEBUG: Found 12 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-activities-yellow
+DEBUG: Total 96 cards for 'activities' color 'neutral'
+DEBUG: Found 220 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-events
+DEBUG: Total 220 cards for 'events' color 'neutral'
+DEBUG: Found 7 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-services-Blue
+DEBUG: Found 7 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-services-Green
+DEBUG: Found 7 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-services-Red
+DEBUG: Found 7 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-services-Yellow
+DEBUG: Found 7 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-services-blue
+DEBUG: Found 7 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-services-green
+DEBUG: Found 7 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-services-red
+DEBUG: Found 7 cards at /Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level/Residential-services-yellow
+DEBUG: Total 56 cards for 'services' color 'neutral'
+Cartas neutral/actions: 38
+fake_rpi.RPi._GPIO.setmode(11,)
+fake_rpi.RPi._GPIO.setup(23, 1)
+DEBUG: Baralhos carregados:
+green/users: 0 cartas
+green/actions: 0 cartas
+green/equipments: 0 cartas
+green/challenges: 0 cartas
+green/activities: 0 cartas
+green/events: 0 cartas
+green/services: 0 cartas
+yellow/users: 0 cartas
+yellow/actions: 0 cartas
+yellow/equipments: 0 cartas
+yellow/challenges: 0 cartas
+yellow/activities: 0 cartas
+yellow/events: 0 cartas
+yellow/services: 0 cartas
+red/users: 0 cartas
+red/actions: 0 cartas
+red/equipments: 0 cartas
+red/challenges: 0 cartas
+red/activities: 0 cartas
+red/events: 0 cartas
+red/services: 0 cartas
+blue/users: 0 cartas
+blue/actions: 0 cartas
+blue/equipments: 0 cartas
+blue/challenges: 0 cartas
+blue/activities: 0 cartas
+blue/events: 0 cartas
+blue/services: 0 cartas
+neutral/users: 0 cartas
+neutral/actions: 0 cartas
+neutral/equipments: 0 cartas
+neutral/challenges: 0 cartas
+neutral/activities: 0 cartas
+neutral/events: 0 cartas
+neutral/services: 0 cartas
+A carregar logo NetMaster...
+A iniciar aplicação NetMaster...
+fake_rpi.RPi._GPIO.input(23,)
+fake_rpi.RPi._GPIO.cleanup()

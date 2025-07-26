@@ -1,6 +1,15 @@
 from PIL import Image, ImageTk, UnidentifiedImageError
 import os
-import RPi.GPIO as GPIO
+try:
+    import RPi.GPIO as GPIO
+except ModuleNotFoundError:
+    print("<<< WARNING: using fake raspberry pi interfaces >>>")
+    import fake_rpi
+    import sys
+    sys.modules['RPi'] = fake_rpi.RPi
+    sys.modules['RPi.GPIO'] = fake_rpi.RPi.GPIO
+    import RPi.GPIO as GPIO
+    print(f"<<< Using: {type(GPIO)} >>>")
 import tkinter as tk  # Importação do tkinter
 import threading
 import socket
@@ -358,9 +367,9 @@ root.attributes("-fullscreen", True)
 
 # Carregar imagens dos logos e ícones
 print("A carregar logo NetMaster...")
-netmaster_img = ImageTk.PhotoImage(Image.open(os.path.join(IMG_DIR, "logo_netmaster_icon_v3.png")).resize((100,40)))
-create_icon = ImageTk.PhotoImage(Image.open(os.path.join(IMG_DIR, "create_game_icon_button.png")).resize((100,100)))
-search_icon = ImageTk.PhotoImage(Image.open(os.path.join(IMG_DIR, "search_game_icon_button.png")).resize((100,100)))
+# netmaster_img = ImageTk.PhotoImage(Image.open(os.path.join(IMG_DIR, "logo_netmaster_icon_v3.png")).resize((100,40)))
+# create_icon = ImageTk.PhotoImage(Image.open(os.path.join(IMG_DIR, "create_game_icon_button.png")).resize((100,100)))
+# search_icon = ImageTk.PhotoImage(Image.open(os.path.join(IMG_DIR, "search_game_icon_button.png")).resize((100,100)))
 
 # Definição de open_name_input
 def open_name_input():
@@ -370,7 +379,8 @@ def open_name_input():
     user_window.geometry(f"{screen_width}x{screen_height}+0+0")
 
     # Só o logo NetMaster ao centro
-    tk.Label(user_window, image=netmaster_img, bg="black").place(relx=0.5, y=10, anchor="n")
+    # tk.Label(user_window, image=netmaster_img, bg="black").place(relx=0.5, y=10, anchor="n")
+    tk.Label(user_window, text="NetMaster", font=("Helvetica", 20, "bold"), bg="black", fg="white").place(relx=0.5, y=10, anchor="n")
 
     tf = tk.Frame(user_window, bg="black")
     tf.place(relx=0.5, rely=0.32, anchor="center")
@@ -404,7 +414,8 @@ def show_user_page(name):
     up.overrideredirect(True)
     up.geometry(f"{screen_width}x{screen_height}+0+0")
 
-    tk.Label(up, image=netmaster_img, bg="black").place(relx=0.5, y=10, anchor="n")
+    # tk.Label(up, image=netmaster_img, bg="black").place(relx=0.5, y=10, anchor="n")
+    tk.Label(up, text="NetMaster", font=("Helvetica", 20, "bold"), bg="black", fg="white").place(relx=0.5, y=10, anchor="n")
 
     tf = tk.Frame(up, bg="black")
     tf.place(relx=0.5, rely=0.36, anchor="center")
@@ -717,7 +728,8 @@ def show_main_menu():
     # Barra superior com logo NetMaster ao centro
     top_bar = tk.Frame(main_win, bg="black", height=60, width=screen_width)
     top_bar.place(x=0, y=0, relwidth=1)
-    tk.Label(top_bar, image=netmaster_img, bg="black").place(relx=0.5, y=10, anchor="n")
+    # tk.Label(top_bar, image=netmaster_img, bg="black").place(relx=0.5, y=10, anchor="n")
+    tk.Label(top_bar, text="NetMaster", font=("Helvetica", 20, "bold"), bg="black", fg="white").place(relx=0.5, y=10, anchor="n")
 
     # Texto inicial
     init_tf = tk.Frame(main_win, bg="black")
@@ -734,20 +746,18 @@ def show_main_menu():
         btn_frame.place(relx=0.5, rely=0.68, anchor="center")
         tk.Button(
             btn_frame,
-            image=create_icon,
-            bd=0,
-            bg="black",
-            activebackground="black",
-            highlightthickness=0,
+            text="Create Game",
+            font=("Helvetica", 16, "bold"),
+            bg="#4CAF50",
+            fg="white",
             command=lambda: [main_win.destroy(), open_name_input()]
         ).pack(side=tk.TOP, pady=10)
         tk.Button(
             btn_frame,
-            image=search_icon,
-            bd=0,
-            bg="black",
-            activebackground="black",
-            highlightthickness=0,
+            text="Search Game",
+            font=("Helvetica", 16, "bold"),
+            bg="#2196F3",
+            fg="white",
             command=lambda: [main_win.destroy(), open_name_input()]  # ou outra função para "Join Game"
         ).pack(side=tk.TOP, pady=10)
 
