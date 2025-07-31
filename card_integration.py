@@ -61,7 +61,7 @@ class CardFileManager:
         Retorna o caminho para cartas de users baseado no ambiente
         """
         if self.environment == "raspberry_pi":
-            return os.path.join(self.base_dir, "img", "cartas", "Users", "Residential-level", color)
+            return os.path.join(self.base_dir, "img", "cartas", "users", "Residential-level", color)
         else:
             return os.path.join(self.base_dir, "Users", "Residential-level", color)
     
@@ -70,7 +70,7 @@ class CardFileManager:
         Retorna o caminho para cartas de equipments baseado no ambiente
         """
         if self.environment == "raspberry_pi":
-            return os.path.join(self.base_dir, "img", "cartas", "Equipments", "Residential-level", color)
+            return os.path.join(self.base_dir, "img", "cartas", "equipments", "Residential-level", color)
         else:
             return os.path.join(self.base_dir, "Equipments", "Residential-level", color)
     
@@ -79,7 +79,7 @@ class CardFileManager:
         Retorna o caminho para cartas Services baseado no ambiente
         """
         if self.environment == "raspberry_pi":
-            return os.path.join(self.base_dir, "img", "cartas", "Services", "Residential-level", color)
+            return os.path.join(self.base_dir, "img", "cartas", "services", "Residential-level", color)
         else:
             return os.path.join(self.base_dir, "Services", "Residential-level", color)
     
@@ -88,7 +88,7 @@ class CardFileManager:
         Retorna o caminho para cartas de activities baseado no ambiente
         """
         if self.environment == "raspberry_pi":
-            return os.path.join(self.base_dir, "img", "cartas", "Activities", "Residential-level", color)
+            return os.path.join(self.base_dir, "img", "cartas", "activities", "Residential-level", color)
         else:
             return os.path.join(self.base_dir, "Activities", "Residential-level", color)
     
@@ -97,7 +97,7 @@ class CardFileManager:
         Retorna o caminho para cartas de challenges baseado no ambiente
         """
         if self.environment == "raspberry_pi":
-            return os.path.join(self.base_dir, "img", "cartas", "Challenges", "Residential-level")
+            return os.path.join(self.base_dir, "img", "cartas", "challenges", "Residential-level")
         else:
             return os.path.join(self.base_dir, "Challenges", "Residential-level")
     
@@ -106,7 +106,7 @@ class CardFileManager:
         Retorna o caminho para cartas de actions baseado no ambiente
         """
         if self.environment == "raspberry_pi":
-            return os.path.join(self.base_dir, "img", "cartas", "Actions", "Residential-level")
+            return os.path.join(self.base_dir, "img", "cartas", "actions", "Residential-level")
         else:
             return os.path.join(self.base_dir, "Actions", "Residential-level")
     
@@ -115,7 +115,7 @@ class CardFileManager:
         Retorna o caminho para cartas de events baseado no ambiente
         """
         if self.environment == "raspberry_pi":
-            return os.path.join(self.base_dir, "img", "cartas", "Events", "Residential-level")
+            return os.path.join(self.base_dir, "img", "cartas", "events", "Residential-level")
         else:
             return os.path.join(self.base_dir, "Events", "Residential-level")
     
@@ -592,7 +592,7 @@ def main():
         ("activities", "activity_1_red"),
         ("challenges", "challenge_1"),
         ("actions", "action_1"),
-        ("events", "event_1")
+        ("events", "event_367")
     ]
     
     for card_type, card_id in test_cases:

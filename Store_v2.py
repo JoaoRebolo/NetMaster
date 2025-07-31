@@ -3,6 +3,7 @@ from PIL import Image, ImageTk
 import os
 import re
 import traceback
+from card_integration import IntegratedCardDatabase
 try:
     import RPi.GPIO as GPIO
 except ImportError:
@@ -250,6 +251,42 @@ class StoreWindow(tk.Toplevel):
         self.cartas = copy.deepcopy(baralhos)
         print(f"DEBUG: [__init__] Baralho da Store inicializado e sincronizado com estado global")
         print(f"DEBUG: [__init__] Challenges neutral disponíveis: {len(self.cartas.get('neutral', {}).get('challenges', []))}")
+        
+        # IMPORTANTE: Sincronização inicial - remover cartas já no inventário do jogador
+        if dashboard and hasattr(dashboard, 'inventario') and dashboard.inventario:
+            print(f"DEBUG: [__init__] Iniciando sincronização com inventário do jogador...")
+            total_removidas = 0
+            for tipo_carta, cartas_inventario in dashboard.inventario.items():
+                if cartas_inventario:  # Se há cartas deste tipo no inventário
+                    print(f"DEBUG: [__init__] Verificando tipo '{tipo_carta}' - {len(cartas_inventario)} cartas no inventário")
+                    
+                    # Remover do baralho da cor do jogador
+                    if (self.player_color in self.cartas and tipo_carta in self.cartas[self.player_color]):
+                        for carta_path in cartas_inventario:
+                            if carta_path in self.cartas[self.player_color][tipo_carta]:
+                                self.cartas[self.player_color][tipo_carta].remove(carta_path)
+                                total_removidas += 1
+                                print(f"DEBUG: [__init__] Removida do baralho {self.player_color}/{tipo_carta}: {os.path.basename(carta_path)}")
+                    
+                    # Remover do baralho neutral
+                    if ("neutral" in self.cartas and tipo_carta in self.cartas["neutral"]):
+                        for carta_path in cartas_inventario:
+                            if carta_path in self.cartas["neutral"][tipo_carta]:
+                                self.cartas["neutral"][tipo_carta].remove(carta_path)
+                                total_removidas += 1
+                                print(f"DEBUG: [__init__] Removida do baralho neutral/{tipo_carta}: {os.path.basename(carta_path)}")
+            
+            print(f"DEBUG: [__init__] Sincronização inicial completa - {total_removidas} cartas removidas dos baralhos da Store")
+        else:
+            print(f"DEBUG: [__init__] Sem inventário para sincronizar ou inventário vazio")
+        
+        # Inicializar base de dados de cartas integrada
+        try:
+            self.card_database = IntegratedCardDatabase(".")
+            print("DEBUG: [__init__] Base de dados de cartas inicializada com sucesso")
+        except Exception as e:
+            print(f"DEBUG: [__init__] Erro ao inicializar base de dados de cartas: {e}")
+            self.card_database = None
         
         # Debug dos baralhos para verificar sincronização
         if 'neutral' in baralhos and 'challenges' in baralhos['neutral']:
@@ -745,30 +782,73 @@ class StoreWindow(tk.Toplevel):
         title_lbl = tk.Label(self, text=f"{titulo}", font=("Helvetica", 22, "bold"), fg="white", bg="black")
         title_lbl.pack(pady=(20, 10))
 
-        # Obter cartas disponíveis para compra do baralho do jogador
-        print(f"DEBUG: Buscando cartas para tipo '{tipo_atual}' e cor '{self.player_color}'")
+        # Obter cartas disponíveis para compra do baralho LOCAL da Store (sincronizado)
+        print(f"DEBUG: Buscando cartas para tipo '{tipo_atual}' e cor '{self.player_color}' no baralho LOCAL da Store")
         
-        # Verificar se o tipo existe nos baralhos
+        # Verificar se o tipo existe nos baralhos LOCAIS da Store
         cartas_disp = []
-        if self.player_color in baralhos and tipo_atual in baralhos[self.player_color]:
-            cartas_disp = baralhos[self.player_color][tipo_atual].copy()
-            print(f"DEBUG: Encontradas {len(cartas_disp)} cartas no baralho do jogador")
+        if (hasattr(self, 'cartas') and self.player_color in self.cartas and 
+            tipo_atual in self.cartas[self.player_color]):
+            cartas_disp = self.cartas[self.player_color][tipo_atual].copy()
+            print(f"DEBUG: Encontradas {len(cartas_disp)} cartas no baralho LOCAL do jogador")
         
-        # Se não houver cartas da cor do jogador, tentar neutral
-        if not cartas_disp and "neutral" in baralhos and tipo_atual in baralhos["neutral"]:
-            cartas_disp = baralhos["neutral"][tipo_atual].copy()
-            print(f"DEBUG: Encontradas {len(cartas_disp)} cartas no baralho neutral")
+        # Se não houver cartas da cor do jogador, tentar neutral no baralho LOCAL
+        if (not cartas_disp and hasattr(self, 'cartas') and "neutral" in self.cartas and 
+            tipo_atual in self.cartas["neutral"]):
+            cartas_disp = self.cartas["neutral"][tipo_atual].copy()
+            print(f"DEBUG: Encontradas {len(cartas_disp)} cartas no baralho LOCAL neutral")
         
-        # Debug adicional
-        print(f"DEBUG: Baralhos disponíveis para {self.player_color}:")
-        if self.player_color in baralhos:
-            for tipo, cartas in baralhos[self.player_color].items():
+        # Debug adicional do baralho LOCAL
+        print(f"DEBUG: Baralhos LOCAL disponíveis para {self.player_color}:")
+        if hasattr(self, 'cartas') and self.player_color in self.cartas:
+            for tipo, cartas in self.cartas[self.player_color].items():
                 print(f"  {tipo}: {len(cartas)} cartas")
+        else:
+            print(f"  Nenhum baralho LOCAL encontrado para {self.player_color}")
         
         if not cartas_disp:
             print(f"DEBUG: Nenhuma carta encontrada para {tipo_atual}")
             tk.Label(self, text="Sem cartas disponíveis para compra!", font=("Helvetica", 16), bg="black", fg="white").pack(pady=20)
             return
+
+        # IMPORTANTE: Filtrar cartas que já estão no inventário do jogador (sincronização completa)
+        if self.dashboard and hasattr(self.dashboard, 'inventario') and tipo_atual in self.dashboard.inventario:
+            cartas_no_inventario = self.dashboard.inventario[tipo_atual]
+            cartas_antes_filtro = len(cartas_disp)
+            cartas_disp = [carta for carta in cartas_disp if carta not in cartas_no_inventario]
+            cartas_depois_filtro = len(cartas_disp)
+            print(f"DEBUG: SINCRONIZAÇÃO - Filtrado cartas do inventário: {cartas_antes_filtro} → {cartas_depois_filtro} (removidas {cartas_antes_filtro - cartas_depois_filtro} cartas)")
+            
+            if cartas_antes_filtro != cartas_depois_filtro:
+                print(f"DEBUG: Cartas removidas do inventário:")
+                for carta in cartas_no_inventario:
+                    print(f"  - {os.path.basename(carta)}")
+        else:
+            print(f"DEBUG: Sem inventário para filtrar ou tipo '{tipo_atual}' não existe no inventário")
+
+        # Verificar se ainda há cartas disponíveis após filtrar o inventário
+        if not cartas_disp:
+            print(f"DEBUG: Todas as cartas {tipo_atual} já estão no inventário do jogador")
+            tk.Label(self, text="Todas as cartas já estão no seu inventário!", font=("Helvetica", 16), bg="black", fg="white").pack(pady=20)
+            return
+
+        # Filtrar User_1.png das páginas de compra (conforme solicitado)
+        if tipo_atual.lower() == "users":
+            cartas_antes = len(cartas_disp)
+            cartas_disp = [carta for carta in cartas_disp if not os.path.basename(carta).startswith("User_1.")]
+            cartas_depois = len(cartas_disp)
+            if cartas_antes != cartas_depois:
+                print(f"DEBUG: Filtrado User_1.png - cartas antes: {cartas_antes}, depois: {cartas_depois}")
+
+        # Ordenar cartas por número (User_1, User_2, User_3, etc.)
+        def extrair_numero_carta(carta_path):
+            import re
+            nome = os.path.basename(carta_path)
+            match = re.search(r'_(\d+)\.', nome)
+            return int(match.group(1)) if match else float('inf')  # Cartas sem número vão para o fim
+        
+        cartas_disp.sort(key=extrair_numero_carta)
+        print(f"DEBUG: Cartas ordenadas por número: {[os.path.basename(c) for c in cartas_disp[:5]]}")  # Mostra os primeiros 5
 
         # === SISTEMA GRID IGUAL À PÁGINA DE VENDA ===
         # Paginação
@@ -973,7 +1053,7 @@ class StoreWindow(tk.Toplevel):
             carta_real_lbl = tk.Label(self, text="Erro ao carregar carta", font=("Helvetica", 20), fg="red", bg="black")
             carta_real_lbl.place(relx=0.5, rely=0.5, anchor="center")
         
-        # Botão X para voltar à página de compra (no canto superior direito)
+        # Botão X para voltar à página de compra (movido para canto superior esquerdo)
         def fechar():
             print("DEBUG: Botão X pressionado - voltando à página de compra")
             try:
@@ -985,66 +1065,256 @@ class StoreWindow(tk.Toplevel):
                 self.voltar_para_store()
                 
         x_btn = tk.Button(self, text="✖", font=("Helvetica", 24, "bold"), bg="#AAAAAA", fg="white", width=2, height=1, borderwidth=0, highlightthickness=0, command=fechar, cursor="hand2", activebackground="#CCCCCC")
-        x_btn.place(relx=1, rely=0, anchor="ne")  # Canto superior direito
+        x_btn.place(relx=0.02, rely=0, anchor="nw")  # Canto superior esquerdo
         
-        # Botão piccoin para comprar (só mostra se não for casa de outro jogador)
+        # Botão checkmark (✓) para comprar no canto superior direito (só mostra se não for casa de outro jogador)
         if not self.other_player_house:
-            try:
-                picoin_img = ImageTk.PhotoImage(Image.open(COIN_IMG).resize((48,48)))
-                def comprar():
-                    # Definir a carta selecionada e chamar confirmação de compra
-                    self._selected_card_idx = carta_idx
-                    self._comprar_carta()
-                btn_picoin = tk.Button(self, image=picoin_img, bg="#F44336", borderwidth=0, command=comprar, cursor="hand2", activebackground="#D32F2F")
-                btn_picoin.image = picoin_img  # Manter referência para evitar garbage collection
-                btn_picoin.place(relx=1, rely=1, anchor="se")  # Canto inferior direito
-            except Exception as e:
-                print(f"DEBUG: Erro ao carregar ícone da moeda: {e}")
-                # Botão alternativo se não conseguir carregar a imagem
-                def comprar():
-                    self._selected_card_idx = carta_idx
-                    self._comprar_carta()
-                btn_picoin = tk.Button(self, text="BUY", font=("Helvetica", 12, "bold"), 
-                                      bg="#F44336", fg="white", command=comprar, cursor="hand2")
-                btn_picoin.place(relx=1, rely=1, anchor="se")
+            def comprar():
+                # Definir a carta selecionada e chamar confirmação de compra
+                self._selected_card_idx = carta_idx
+                self._comprar_carta()
+            btn_comprar = tk.Button(self, text="✓", font=("Helvetica", 24, "bold"), bg="#4CAF50", fg="white", width=2, height=1, borderwidth=0, highlightthickness=0, command=comprar, cursor="hand2", activebackground="#43A047")
+            btn_comprar.place(relx=0.98, rely=0, anchor="ne")  # Canto superior direito
         else:
             print("DEBUG: Casa de outro jogador - botão de compra ocultado")
-        
-        # Botão de venda para Activities (só mostra se NÃO for casa de outro jogador)
-        if getattr(self, 'current_card_type', None) == 'activities' and not self.other_player_house:
-            try:
-                sell_picoin_img = ImageTk.PhotoImage(Image.open(COIN_IMG).resize((48,48)))
-                def vender():
-                    print("DEBUG: Botão de venda Activities pressionado")
-                    # Ir para página de venda de Activities
-                    self.sell_action()
-                btn_sell = tk.Button(self, image=sell_picoin_img, bg="#4CAF50", borderwidth=0, command=vender, cursor="hand2", activebackground="#43A047")
-                btn_sell.image = sell_picoin_img  # Manter referência para evitar garbage collection
-                btn_sell.place(relx=0, rely=1, anchor="sw")  # Canto inferior esquerdo
-                print("DEBUG: Botão de venda Activities adicionado")
-            except Exception as e:
-                print(f"DEBUG: Erro ao carregar ícone da moeda para venda: {e}")
-                # Botão alternativo se não conseguir carregar a imagem
-                def vender():
-                    print("DEBUG: Botão de venda Activities pressionado (fallback)")
-                    self.sell_action()
-                btn_sell = tk.Button(self, text="SELL", font=("Helvetica", 12, "bold"), 
-                                    bg="#4CAF50", fg="white", command=vender, cursor="hand2")
-                btn_sell.place(relx=0, rely=1, anchor="sw")
-        elif getattr(self, 'current_card_type', None) == 'activities' and self.other_player_house:
-            print("DEBUG: Casa de outro jogador - botão de venda Activities ocultado")
         
         # Força update final
         self.update_idletasks()
         self.update()
 
     def _extrair_valor_carta(self, carta_path):
+        """
+        Extrai o valor de compra da carta usando a base de dados integrada
+        """
+        print(f"DEBUG: [_extrair_valor_carta] Iniciando extração para: {carta_path}")
+        
+        if not self.card_database:
+            print(f"DEBUG: [_extrair_valor_carta] Base de dados não inicializada, usando fallback")
+            # Fallback para extração do nome do arquivo se não houver base de dados
+            import re
+            nome = os.path.basename(carta_path)
+            match = re.search(r'_(\d+)\.', nome)
+            if match:
+                valor = int(match.group(1))
+                print(f"DEBUG: [_extrair_valor_carta] Valor extraído do nome (fallback): {valor}")
+                return valor
+            print(f"DEBUG: [_extrair_valor_carta] Fallback falhou - retornando None")
+            return None
+        
+        try:
+            # Extrair informações do caminho do arquivo
+            nome_arquivo = os.path.basename(carta_path)
+            print(f"DEBUG: [_extrair_valor_carta] Nome do arquivo: {nome_arquivo}")
+            
+            tipo_carta = self._get_card_type_from_path(carta_path)
+            print(f"DEBUG: [_extrair_valor_carta] Tipo da carta detectado: {tipo_carta}")
+            
+            if not tipo_carta:
+                print(f"DEBUG: [_extrair_valor_carta] ERRO: Não foi possível determinar o tipo da carta: {carta_path}")
+                return None
+            
+            # Mapear arquivo para ID da carta na base de dados
+            card_id = self._map_file_to_card_id(carta_path, tipo_carta)
+            print(f"DEBUG: [_extrair_valor_carta] Card ID mapeado: {card_id}")
+            
+            if not card_id:
+                print(f"DEBUG: [_extrair_valor_carta] ERRO: Não foi possível mapear arquivo para ID: {carta_path}")
+                return None
+            
+            # Obter valor da base de dados
+            if tipo_carta == "users":
+                card = self.card_database.get_user(card_id)
+                print(f"DEBUG: [_extrair_valor_carta] Carta User encontrada: {card is not None}")
+                if card:
+                    print(f"DEBUG: [_extrair_valor_carta] User card details: {card}")
+                valor = card.buy_cost if card else None
+                print(f"DEBUG: [_extrair_valor_carta] User card {card_id}: valor = {valor}")
+                return valor
+            elif tipo_carta == "equipments":
+                card = self.card_database.get_equipment(card_id)
+                print(f"DEBUG: [_extrair_valor_carta] Carta Equipment encontrada: {card is not None}")
+                if card:
+                    print(f"DEBUG: [_extrair_valor_carta] Equipment card details: {card}")
+                valor = card.buy_cost if card else None
+                print(f"DEBUG: [_extrair_valor_carta] Equipment card {card_id}: valor = {valor}")
+                return valor
+            elif tipo_carta == "services":
+                card = self.card_database.get_service(card_id)
+                print(f"DEBUG: [_extrair_valor_carta] Carta Service encontrada: {card is not None}")
+                if card:
+                    print(f"DEBUG: [_extrair_valor_carta] Service card details: {card}")
+                valor = card.buy_cost if card else None
+                print(f"DEBUG: [_extrair_valor_carta] Service card {card_id}: valor = {valor}")
+                return valor
+            elif tipo_carta == "activities":
+                card = self.card_database.get_activity(card_id)
+                print(f"DEBUG: [_extrair_valor_carta] Carta Activity encontrada: {card is not None}")
+                if card:
+                    print(f"DEBUG: [_extrair_valor_carta] Activity card details: {card}")
+                valor = card.application_fee if card else None  # Activities usam application_fee como preço de compra
+                print(f"DEBUG: [_extrair_valor_carta] Activity card {card_id}: valor = {valor}")
+                return valor
+            
+            print(f"DEBUG: [_extrair_valor_carta] ERRO: Tipo de carta não suportado: {tipo_carta}")
+            return None
+            
+        except Exception as e:
+            print(f"DEBUG: [_extrair_valor_carta] EXCEÇÃO ao extrair valor da carta {carta_path}: {e}")
+            import traceback
+            traceback.print_exc()
+            # Fallback para extração do nome do arquivo
+            import re
+            nome = os.path.basename(carta_path)
+            match = re.search(r'_(\d+)\.', nome)
+            if match:
+                valor = int(match.group(1))
+                print(f"DEBUG: [_extrair_valor_carta] Valor extraído do nome (fallback após erro): {valor}")
+                return valor
+            print(f"DEBUG: [_extrair_valor_carta] Fallback após erro falhou - retornando None")
+            return None
+    
+    def _get_card_type_from_path(self, carta_path):
+        """
+        Determina o tipo da carta baseado no caminho do arquivo
+        """
+        path_lower = carta_path.lower()
+        print(f"DEBUG: [_get_card_type_from_path] Analisando caminho: {path_lower}")
+        
+        # Verificar padrões de diretório com /tipo/
+        if "/users/" in path_lower:
+            print(f"DEBUG: [_get_card_type_from_path] Tipo detectado (padrão /users/): users")
+            return "users"
+        elif "/equipments/" in path_lower:
+            print(f"DEBUG: [_get_card_type_from_path] Tipo detectado (padrão /equipments/): equipments")
+            return "equipments"
+        elif "/services/" in path_lower:
+            print(f"DEBUG: [_get_card_type_from_path] Tipo detectado (padrão /services/): services")
+            return "services"
+        elif "/activities/" in path_lower:
+            print(f"DEBUG: [_get_card_type_from_path] Tipo detectado (padrão /activities/): activities")
+            return "activities"
+        
+        # Verificar padrões de nome de diretório Residential-tipo-
+        if "residential-users-" in path_lower or "-users-" in path_lower:
+            print(f"DEBUG: [_get_card_type_from_path] Tipo detectado (padrão Residential-users-): users")
+            return "users"
+        elif "residential-equipments-" in path_lower or "-equipments-" in path_lower:
+            print(f"DEBUG: [_get_card_type_from_path] Tipo detectado (padrão Residential-equipments-): equipments")
+            return "equipments"
+        elif "residential-services-" in path_lower or "-services-" in path_lower:
+            print(f"DEBUG: [_get_card_type_from_path] Tipo detectado (padrão Residential-services-): services")
+            return "services"
+        elif "residential-activities-" in path_lower or "-activities-" in path_lower:
+            print(f"DEBUG: [_get_card_type_from_path] Tipo detectado (padrão Residential-activities-): activities")
+            return "activities"
+        
+        print(f"DEBUG: [_get_card_type_from_path] ERRO: Tipo não reconhecido no caminho")
+        return None
+    
+    def _map_file_to_card_id(self, carta_path, tipo_carta):
+        """
+        Mapeia um arquivo de carta para o ID correspondente na base de dados
+        """
         import re
-        # Extrai valor do nome do ficheiro: ..._100.png → 100
-        nome = os.path.basename(carta_path)
-        match = re.search(r'_(\d+)\.', nome)
-        if match:
-            return int(match.group(1))
+        nome_arquivo = os.path.basename(carta_path)
+        print(f"DEBUG: [_map_file_to_card_id] Mapeando {nome_arquivo} do tipo {tipo_carta}")
+        
+        # Extrair número da carta (ex: User_1.png -> 1)
+        match = re.search(r'_(\d+)\.', nome_arquivo)
+        if not match:
+            print(f"DEBUG: [_map_file_to_card_id] ERRO: Não foi possível extrair número de {nome_arquivo}")
+            return None
+        
+        numero = int(match.group(1))
+        print(f"DEBUG: [_map_file_to_card_id] Número extraído: {numero}")
+        
+        # Extrair cor do caminho
+        cor = self._get_color_from_path(carta_path)
+        print(f"DEBUG: [_map_file_to_card_id] Cor extraída: {cor}")
+        if not cor:
+            print(f"DEBUG: [_map_file_to_card_id] ERRO: Não foi possível extrair cor de {carta_path}")
+            return None
+        
+        # Mapear para ID da base de dados baseado no tipo (usando mesma lógica do card_integration.py)
+        if tipo_carta == "users":
+            card_id = f"{numero}_{cor}"
+            print(f"DEBUG: [_map_file_to_card_id] User ID gerado: {card_id}")
+            return card_id
+        elif tipo_carta == "equipments":
+            # Equipments têm mapeamento específico baseado no número
+            if numero >= 1 and numero <= 3:
+                card_id = f"small_router_{numero}_{cor}"
+            elif numero >= 4 and numero <= 6:
+                card_id = f"medium_router_{numero-3}_{cor}"
+            elif numero >= 7 and numero <= 9:
+                card_id = f"short_link_{numero-6}_{cor}"
+            elif numero >= 10 and numero <= 12:
+                card_id = f"long_link_{numero-9}_{cor}"
+            else:
+                print(f"DEBUG: [_map_file_to_card_id] ERRO: Equipment número {numero} fora do range")
+                return None
+            print(f"DEBUG: [_map_file_to_card_id] Equipment ID gerado: {card_id}")
+            return card_id
+        elif tipo_carta == "services":
+            # Services têm mapeamento específico conforme card_integration.py
+            service_mapping = {
+                1: "service_bandwidth_1", 2: "service_data_volume_2", 
+                3: "service_data_volume_3", 4: "service_data_volume_4",
+                5: "service_temporary_5", 6: "service_temporary_6", 
+                7: "service_temporary_7"
+            }
+            if numero in service_mapping:
+                service_type = service_mapping[numero]
+                card_id = f"{service_type}_{cor}"
+                print(f"DEBUG: [_map_file_to_card_id] Service ID gerado: {card_id}")
+                return card_id
+            else:
+                print(f"DEBUG: [_map_file_to_card_id] ERRO: Service número {numero} não encontrado no mapeamento")
+                return None
+        elif tipo_carta == "activities":
+            card_id = f"activity_{numero}_{cor}"
+            print(f"DEBUG: [_map_file_to_card_id] Activity ID gerado: {card_id}")
+            return card_id
+        
+        print(f"DEBUG: [_map_file_to_card_id] ERRO: Tipo não reconhecido: {tipo_carta}")
+        return None
+    
+    def _get_color_from_path(self, carta_path):
+        """
+        Extrai a cor do caminho do arquivo
+        """
+        path_lower = carta_path.lower()
+        print(f"DEBUG: [_get_color_from_path] Analisando caminho: {path_lower}")
+        
+        # Verificar padrões de diretório com /cor/
+        if "/red/" in path_lower:
+            print(f"DEBUG: [_get_color_from_path] Cor detectada (padrão /red/): red")
+            return "red"
+        elif "/blue/" in path_lower:
+            print(f"DEBUG: [_get_color_from_path] Cor detectada (padrão /blue/): blue")
+            return "blue"
+        elif "/green/" in path_lower:
+            print(f"DEBUG: [_get_color_from_path] Cor detectada (padrão /green/): green")
+            return "green"
+        elif "/yellow/" in path_lower:
+            print(f"DEBUG: [_get_color_from_path] Cor detectada (padrão /yellow/): yellow")
+            return "yellow"
+        
+        # Verificar padrões de sufixo -cor
+        if "-red" in path_lower or "red" in path_lower:
+            print(f"DEBUG: [_get_color_from_path] Cor detectada (padrão -red): red")
+            return "red"
+        elif "-blue" in path_lower or "blue" in path_lower:
+            print(f"DEBUG: [_get_color_from_path] Cor detectada (padrão -blue): blue")
+            return "blue"
+        elif "-green" in path_lower or "green" in path_lower:
+            print(f"DEBUG: [_get_color_from_path] Cor detectada (padrão -green): green")
+            return "green"
+        elif "-yellow" in path_lower or "yellow" in path_lower:
+            print(f"DEBUG: [_get_color_from_path] Cor detectada (padrão -yellow): yellow")
+            return "yellow"
+        
+        print(f"DEBUG: [_get_color_from_path] ERRO: Nenhuma cor encontrada no caminho")
         return None
 
     def _comprar_carta(self):
@@ -1104,6 +1374,50 @@ class StoreWindow(tk.Toplevel):
                 # A Store recebe o pagamento
                 self.saldo += valor
                 print(f"DEBUG: Depois da compra - Store: {self.saldo}, Player: {self.dashboard.saldo}")
+                
+                # IMPORTANTE: Remover a carta comprada dos baralhos (local e global)
+                print(f"DEBUG: Removendo carta comprada dos baralhos - carta: {os.path.basename(carta_path)}")
+                carta_removida = False
+                
+                # Determinar cor e tipo para remoção
+                cor_para_remover = self.player_color
+                tipo_para_remover = self.current_card_type
+                
+                # Tentar remover do baralho da cor do jogador primeiro
+                if (hasattr(self, 'cartas') and cor_para_remover in self.cartas and 
+                    tipo_para_remover in self.cartas[cor_para_remover] and 
+                    carta_path in self.cartas[cor_para_remover][tipo_para_remover]):
+                    self.cartas[cor_para_remover][tipo_para_remover].remove(carta_path)
+                    print(f"DEBUG: Carta removida do baralho local {cor_para_remover}/{tipo_para_remover}")
+                    carta_removida = True
+                
+                # Se não foi removida da cor do jogador, tentar neutral
+                if not carta_removida and (hasattr(self, 'cartas') and "neutral" in self.cartas and 
+                                         tipo_para_remover in self.cartas["neutral"] and 
+                                         carta_path in self.cartas["neutral"][tipo_para_remover]):
+                    self.cartas["neutral"][tipo_para_remover].remove(carta_path)
+                    print(f"DEBUG: Carta removida do baralho local neutral/{tipo_para_remover}")
+                    carta_removida = True
+                
+                # Remover também do baralho global
+                global baralhos
+                if baralhos:
+                    # Tentar remover da cor do jogador
+                    if (cor_para_remover in baralhos and tipo_para_remover in baralhos[cor_para_remover] and 
+                        carta_path in baralhos[cor_para_remover][tipo_para_remover]):
+                        baralhos[cor_para_remover][tipo_para_remover].remove(carta_path)
+                        print(f"DEBUG: Carta removida do baralho global {cor_para_remover}/{tipo_para_remover}")
+                    # Tentar remover do neutral
+                    elif ("neutral" in baralhos and tipo_para_remover in baralhos["neutral"] and 
+                          carta_path in baralhos["neutral"][tipo_para_remover]):
+                        baralhos["neutral"][tipo_para_remover].remove(carta_path)
+                        print(f"DEBUG: Carta removida do baralho global neutral/{tipo_para_remover}")
+                
+                if carta_removida:
+                    print(f"DEBUG: Sincronização completa - carta {os.path.basename(carta_path)} removida dos baralhos")
+                else:
+                    print(f"DEBUG: AVISO - carta {os.path.basename(carta_path)} não foi encontrada nos baralhos para remoção")
+                
                 # Garantir tipo correto para inventário
                 tipo_inv = self.current_card_type
                 if tipo_inv == "equipment":
@@ -1127,10 +1441,10 @@ class StoreWindow(tk.Toplevel):
                 self.show_buy_page()
         def cancelar():
             self.show_buy_page()
-        btn_yes = tk.Button(btns_frame, text="Yes", font=("Helvetica", 14, "bold"), bg="#4CAF50", fg="white", width=8, command=confirmar)
         btn_no = tk.Button(btns_frame, text="No", font=("Helvetica", 14, "bold"), bg="#F44336", fg="white", width=8, command=cancelar)
-        btn_yes.pack(side="left", padx=20, pady=10)
+        btn_yes = tk.Button(btns_frame, text="Yes", font=("Helvetica", 14, "bold"), bg="#4CAF50", fg="white", width=8, command=confirmar)
         btn_no.pack(side="left", padx=20, pady=10)
+        btn_yes.pack(side="left", padx=20, pady=10)
 
     def voltar_para_store(self):
         print("DEBUG: voltar_para_store chamado")
@@ -1797,9 +2111,9 @@ class StoreWindow(tk.Toplevel):
                 print("DEBUG: Outro tipo de carta - voltando à Store")
                 self.voltar_para_store()
         
-        # Botão ✖ cinza para fechar
+        # Botão ✖ cinza para fechar (movido para canto superior esquerdo)
         x_btn = tk.Button(self, text="✖", font=("Helvetica", 24, "bold"), bg="#AAAAAA", fg="white", width=2, height=1, borderwidth=0, highlightthickness=0, command=fechar, cursor="hand2", activebackground="#CCCCCC")
-        x_btn.place(relx=0.98, rely=0, anchor="ne")
+        x_btn.place(relx=0.02, rely=0, anchor="nw")
 
     def mostrar_carta_fullscreen_simples(self, carta_path, casa_tipo):
         """Mostra uma carta em fullscreen para casas de outro jogador - apenas visualização, sem compra/venda"""
@@ -3150,6 +3464,45 @@ class StoreWindow(tk.Toplevel):
         
         return carta_path
 
+    def adicionar_carta_ao_baralho(self, carta_path, carta_tipo, carta_cor=None):
+        """
+        Adiciona uma carta vendida de volta aos baralhos (local e global).
+        Usado quando um jogador vende uma carta para a Store.
+        """
+        print(f"DEBUG: [adicionar_carta_ao_baralho] Adicionando carta ao baralho - carta: {os.path.basename(carta_path)}, tipo: {carta_tipo}, cor: {carta_cor}")
+        
+        # Se cor não foi especificada, determinar a partir do player_color
+        if carta_cor is None:
+            carta_cor = self.player_color
+        
+        # Garantir que a estrutura do baralho local existe
+        if not hasattr(self, 'cartas'):
+            self.cartas = {}
+        if carta_cor not in self.cartas:
+            self.cartas[carta_cor] = {}
+        if carta_tipo not in self.cartas[carta_cor]:
+            self.cartas[carta_cor][carta_tipo] = []
+        
+        # Adicionar ao baralho local se ainda não existir
+        if carta_path not in self.cartas[carta_cor][carta_tipo]:
+            self.cartas[carta_cor][carta_tipo].append(carta_path)
+            print(f"DEBUG: [adicionar_carta_ao_baralho] Carta adicionada ao baralho local {carta_cor}/{carta_tipo}")
+        
+        # Adicionar também ao baralho global
+        global baralhos
+        if baralhos:
+            if carta_cor not in baralhos:
+                baralhos[carta_cor] = {}
+            if carta_tipo not in baralhos[carta_cor]:
+                baralhos[carta_cor][carta_tipo] = []
+            
+            if carta_path not in baralhos[carta_cor][carta_tipo]:
+                baralhos[carta_cor][carta_tipo].append(carta_path)
+                print(f"DEBUG: [adicionar_carta_ao_baralho] Carta adicionada ao baralho global {carta_cor}/{carta_tipo}")
+        
+        print(f"DEBUG: [adicionar_carta_ao_baralho] Sincronização completa - carta {os.path.basename(carta_path)} adicionada aos baralhos")
+        print(f"DEBUG: [adicionar_carta_ao_baralho] Cartas agora em {carta_cor}/{carta_tipo}: local={len(self.cartas[carta_cor][carta_tipo])}, global={len(baralhos[carta_cor][carta_tipo]) if baralhos and carta_cor in baralhos and carta_tipo in baralhos[carta_cor] else 'N/A'}")
+
     def mostrar_carta_challenge_fullscreen(self, carta_path):
         """
         Mostra uma carta de Challenge em fullscreen com funcionalidade completa.
@@ -3545,14 +3898,14 @@ class StoreWindow(tk.Toplevel):
             error_lbl = tk.Label(self, text="Error loading card", font=("Helvetica", 20), fg="red", bg="black")
             error_lbl.place(relx=0.5, rely=0.5, anchor="center")
         
-        # Botão X para voltar ao inventário
+        # Botão X para voltar ao inventário (movido para canto superior esquerdo)
         def voltar_inventario():
             print("DEBUG: Voltando ao inventário de compra")
             self.show_inventory_matrix_buy(tipos, page, current_card_type)
         
         x_btn = tk.Button(self, text="✖", font=("Helvetica", 24, "bold"), bg="#AAAAAA", fg="white", width=2, height=1, 
                          borderwidth=0, highlightthickness=0, command=voltar_inventario, cursor="hand2", activebackground="#CCCCCC")
-        x_btn.place(relx=0.98, rely=0, anchor="ne")
+        x_btn.place(relx=0.02, rely=0, anchor="nw")  # Canto superior esquerdo
         
         print("DEBUG: show_card_fullscreen_inventory_buy terminado com sucesso")
 

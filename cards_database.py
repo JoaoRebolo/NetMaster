@@ -2,7 +2,6 @@
 # -*- coding: utf-8 -*-
 """
 Base de Dados de Cartas NetMaster
-Sistema de armazenamento e gestão de cartas Users, Equipments e Contracts
 """
 
 from dataclasses import dataclass
@@ -142,6 +141,7 @@ class ServiceCard:
         return f"ServiceCard(id={self.service_id}, {self.title}, conditions={self.service_conditions}, buy={self.buy_cost})"
 
 @dataclass
+@dataclass
 class ActivityCard:
     """Carta de atividade/aplicação"""
     activity_id: str                    # ID único da carta (Activity_1, Activity_2, etc.)
@@ -153,14 +153,16 @@ class ActivityCard:
     rate: str                         # Taxa de envio: "1 packet per turn", "up to 1 packet per turn"
     destination: str                  # Destino das mensagens (sempre "Central node")
     drops_allowed: bool               # Se permite drops ou não
-    # Campos de recompensas e penalizações
     reward_per_packet: int            # Picoins ganhos por pacote recebido
-    message_bonus: Optional[int]      # Bónus por mensagem completa recebida
-    penalty_per_packet: Optional[int] # Penalização por pacote perdido
     application_fee: int              # Taxa de aplicação em picoins
-    # Campos de condições especiais
-    bonus_condition: Optional[str]    # Condição para bónus: "After 10 packets received", "Message received", etc.
-    penalty_condition: Optional[str]  # Condição para penalização: "10 or fewer packets drops", etc.
+    # Campos opcionais com valores padrão
+    message_received: Optional[int] = None   # Picoins ganhos por mensagem completa recebida
+    penalty_per_packet: Optional[int] = None # Penalização por pacote perdido
+    packet_bonus: Optional[int] = None       # Bónus extra por pacote em condições específicas
+    message_bonus: Optional[int] = None      # Bónus por mensagem completa recebida
+    bonus_condition: Optional[str] = None    # Condição para bónus: "After 10 packets received", "Message received", etc.
+    penalty_condition: Optional[str] = None  # Condição para penalização: "10 or fewer packets drops", etc.
+    sell_cost: int = 0                # Valor de venda (sempre 0 para Activities)
     # Campos de metadados fixos
     collection: str = "Packet Switching Collection"
     level: str = "Level I"
@@ -264,7 +266,7 @@ class UserDatabase:
         # Cartas de utilizadores residenciais
         colors = ["red", "green", "blue", "yellow"]
         
-        for i in range(1, 6):  # User_1 a User_5
+        for i in range(1, 7):  # User_1 a User_6 (mas User_6 não existe fisicamente)
             for color in colors:
                 if i == 1:
                     # User_1 é um Residential Contract
@@ -275,16 +277,16 @@ class UserDatabase:
                     buy_cost = 0        # Contract não tem custo de compra
                     sell_cost = 0       # Contract não tem custo de venda
                 else:
-                    # User_2 a User_5 correspondem a User IDs 1 a 4
-                    actual_user_id = i - 1  # User_2=1, User_3=2, User_4=3, User_5=4
+                    # User_2 a User_6 correspondem a User IDs 1 a 5
+                    actual_user_id = i - 1  # User_2=1, User_3=2, User_4=3, User_5=4, User_6=5
                     user_id = f"{actual_user_id}_{color}"
                     
                     # Todos os User IDs têm as mesmas características conforme cartas físicas
                     users_count = 1     # 1 user per card
                     applications = 1    # 1 application
                     services = 1        # 1 service
-                    buy_cost = 1        # Buy cost: 1 picoin
-                    sell_cost = 2       # Sell cost: 2 picoins
+                    buy_cost = 2        # Buy cost: 1 picoin
+                    sell_cost = 1       # Sell cost: 2 picoins
                 
                 user_card = UserCard(
                     user_id=user_id,
@@ -303,10 +305,42 @@ class UserDatabase:
         """Cria as cartas de equipamentos"""
         colors = ["red", "green", "blue", "yellow"]
         
-        # Small Router (Equipment_1 a Equipment_4)
-        for i in range(1, 5):
+        # Dicionário de mapeamento para valores individuais de compra e venda
+        # Podes alterar estes valores conforme necessário
+        equipment_costs = {
+            # Small Router (Equipment_1 a Equipment_3)
+            "small_router_1": {"buy": 40, "sell": 20, "queue_size": 4},
+            "small_router_2": {"buy": 40, "sell": 20, "queue_size": 4},
+            "small_router_3": {"buy": 40, "sell": 20, "queue_size": 4},
+            
+            
+            # Medium Router (Equipment_4 a Equipment_6)
+            "medium_router_1": {"buy": 80, "sell": 40, "queue_size": 8},
+            "medium_router_2": {"buy": 80, "sell": 40, "queue_size": 8},
+            "medium_router_3": {"buy": 80, "sell": 40, "queue_size": 8},
+            
+            
+            # Short Link (Equipment_7 a Equipment_9)
+            "short_link_1": {"buy": 40, "sell": 20, "link_length": 4},
+            "short_link_2": {"buy": 40, "sell": 20, "link_length": 4},
+            "short_link_3": {"buy": 40, "sell": 20, "link_length": 4},
+            
+            
+            # Long Link (Equipment_10 a Equipment_12)
+            "long_link_1": {"buy": 80, "sell": 40, "link_length": 8},
+            "long_link_2": {"buy": 80, "sell": 40, "link_length": 8},
+            "long_link_3": {"buy": 80, "sell": 40, "link_length": 8},
+            
+        }
+        
+        # Small Router (Equipment_1 a Equipment_3)
+        for i in range(1, 4):
             for color in colors:
                 equipment_id = f"small_router_{i}_{color}"
+                base_id = f"small_router_{i}"
+                
+                # Obter valores do dicionário ou usar valores padrão
+                costs = equipment_costs.get(base_id, {"buy": 100 + (i * 50), "sell": 50 + (i * 25), "queue_size": 2 + i})
                 
                 equipment_card = EquipmentCard(
                     equipment_id=equipment_id,
@@ -315,19 +349,23 @@ class UserDatabase:
                     category="Router",
                     model="Small Router",
                     specific_id=i,
-                    queue_size=2 + i,  # Tamanho da queue
+                    queue_size=costs["queue_size"],  # Tamanho da queue
                     link_rate=None,
                     link_length=None,
-                    buy_cost=100 + (i * 50),
-                    sell_cost=50 + (i * 25)
+                    buy_cost=costs["buy"],
+                    sell_cost=costs["sell"]
                 )
                 
                 self.equipments[equipment_id] = equipment_card
         
-        # Medium Router (Equipment_5 a Equipment_8)
-        for i in range(5, 9):
+        # Medium Router (Equipment_4 a Equipment_6)
+        for i in range(4, 7):
             for color in colors:
-                equipment_id = f"medium_router_{i}_{color}"
+                equipment_id = f"medium_router_{i-3}_{color}"
+                base_id = f"medium_router_{i-3}"
+                
+                # Obter valores do dicionário ou usar valores padrão
+                costs = equipment_costs.get(base_id, {"buy": 200 + ((i-4) * 75), "sell": 100 + ((i-4) * 37), "queue_size": 5 + (i-4)})
                 
                 equipment_card = EquipmentCard(
                     equipment_id=equipment_id,
@@ -335,20 +373,24 @@ class UserDatabase:
                     color=color,
                     category="Router",
                     model="Medium Router",
-                    specific_id=i-4,
-                    queue_size=5 + (i-4),  # Tamanho da queue
+                    specific_id=i-3,
+                    queue_size=costs["queue_size"],  # Tamanho da queue
                     link_rate=None,
                     link_length=None,
-                    buy_cost=200 + ((i-4) * 75),
-                    sell_cost=100 + ((i-4) * 37)
+                    buy_cost=costs["buy"],
+                    sell_cost=costs["sell"]
                 )
                 
                 self.equipments[equipment_id] = equipment_card
         
-        # Short Link (Equipment_9 a Equipment_12)
-        for i in range(9, 13):
+        # Short Link (Equipment_7 a Equipment_9)
+        for i in range(7, 10):
             for color in colors:
-                equipment_id = f"short_link_{i}_{color}"
+                equipment_id = f"short_link_{i-6}_{color}"
+                base_id = f"short_link_{i-6}"
+                
+                # Obter valores do dicionário ou usar valores padrão
+                costs = equipment_costs.get(base_id, {"buy": 150 + ((i-8) * 50), "sell": 75 + ((i-8) * 25), "link_length": 2 + (i-8)})
                 
                 equipment_card = EquipmentCard(
                     equipment_id=equipment_id,
@@ -356,20 +398,24 @@ class UserDatabase:
                     color=color,
                     category="Link",
                     model="Short Link",
-                    specific_id=i-8,
+                    specific_id=i-6,
                     queue_size=None,
                     link_rate="1 packet per turn",
-                    link_length=2 + (i-8),  # Comprimento do link
-                    buy_cost=150 + ((i-8) * 50),
-                    sell_cost=75 + ((i-8) * 25)
+                    link_length=costs["link_length"],  # Comprimento do link
+                    buy_cost=costs["buy"],
+                    sell_cost=costs["sell"]
                 )
                 
                 self.equipments[equipment_id] = equipment_card
         
-        # Long Link (Equipment_13 a Equipment_16)
-        for i in range(13, 17):
+        # Long Link (Equipment_10 a Equipment_12)
+        for i in range(10, 13):
             for color in colors:
-                equipment_id = f"long_link_{i}_{color}"
+                equipment_id = f"long_link_{i-9}_{color}"
+                base_id = f"long_link_{i-9}"
+                
+                # Obter valores do dicionário ou usar valores padrão
+                costs = equipment_costs.get(base_id, {"buy": 250 + ((i-12) * 75), "sell": 125 + ((i-12) * 37), "link_length": 5 + (i-12)})
                 
                 equipment_card = EquipmentCard(
                     equipment_id=equipment_id,
@@ -377,12 +423,12 @@ class UserDatabase:
                     color=color,
                     category="Link",
                     model="Long Link",
-                    specific_id=i-12,
+                    specific_id=i-9,
                     queue_size=None,
                     link_rate="1 packet per turn",
-                    link_length=5 + (i-12),  # Comprimento do link
-                    buy_cost=250 + ((i-12) * 75),
-                    sell_cost=125 + ((i-12) * 37)
+                    link_length=costs["link_length"],  # Comprimento do link
+                    buy_cost=costs["buy"],
+                    sell_cost=costs["sell"]
                 )
                 
                 self.equipments[equipment_id] = equipment_card
@@ -391,6 +437,51 @@ class UserDatabase:
         """Cria as cartas de serviços"""
         colors = ["red", "green", "blue", "yellow"]
         
+        # Dicionário de mapeamento para valores individuais de serviços
+        # Podes alterar estes valores conforme necessário
+        service_costs = {
+            # Bandwidth Services (1 por cor)
+            "bandwidth_1": {
+                "service_conditions": "up to 1 packet per turn",
+                "buy_price": 80,
+                "sell_price": 0
+            },
+            
+            # Data Volume Services (3 por cor)
+            "data_volume_1": {
+                "service_conditions": "5 packets",
+                "buy_price": 5,
+                "sell_price": 0
+            },
+            "data_volume_2": {
+                "service_conditions": "10 packets",
+                "buy_price": 8,
+                "sell_price": 0
+            },
+            "data_volume_3": {
+                "service_conditions": "20 packets",
+                "buy_price": 15,
+                "sell_price": 0
+            },
+            
+            # Temporary Services (3 por cor)
+            "temporary_1": {
+                "service_conditions": "4 turns",
+                "buy_price": 4,
+                "sell_price": 0
+            },
+            "temporary_2": {
+                "service_conditions": "8 turns",
+                "buy_price": 7,
+                "sell_price": 0
+            },
+            "temporary_3": {
+                "service_conditions": "16 turns",
+                "buy_price": 14,
+                "sell_price": 0
+            }
+        }
+        
         # Definir dados das cartas Services (baseado no services_card_integration.py)
         service_templates = [
             # Bandwidth Services (1 por cor)
@@ -398,59 +489,45 @@ class UserDatabase:
                 "type": ServiceType.BANDWIDTH,
                 "name_template": "Bandwidth Service {color}",
                 "title": "BANDWIDTH",
-                "description": "Subscribe to our Bandwidth Service and enjoy seamless network access whenever you need it",
-                "service_conditions": "up to 1 packet per turn",
-                "buy_price": 80
+                "description": "Subscribe to our Bandwidth Service and enjoy seamless network access whenever you need it"
             },
             # Data Volume Services (3 por cor)
             {
                 "type": ServiceType.DATA_VOLUME,
                 "name_template": "Data Volume Service {color} 5",
                 "title": "DATA VOLUME",
-                "description": "Subscribe to our Data Volume Service and pay only for the data you actually use. Enjoy flexible access without long-term obligations!",
-                "service_conditions": "5 packets",
-                "buy_price": 5
+                "description": "Subscribe to our Data Volume Service and pay only for the data you actually use. Enjoy flexible access without long-term obligations!"
             },
             {
                 "type": ServiceType.DATA_VOLUME,
                 "name_template": "Data Volume Service {color} 8",
                 "title": "DATA VOLUME",
-                "description": "Subscribe to our Data Volume Service and pay only for the data you actually use. Enjoy flexible access without long-term obligations!",
-                "service_conditions": "10 packets",
-                "buy_price": 8
+                "description": "Subscribe to our Data Volume Service and pay only for the data you actually use. Enjoy flexible access without long-term obligations!"
             },
             {
                 "type": ServiceType.DATA_VOLUME,
                 "name_template": "Data Volume Service {color} 15",
                 "title": "DATA VOLUME",
-                "description": "Subscribe to our Data Volume Service and pay only for the data you actually use. Enjoy flexible access without long-term obligations!",
-                "service_conditions": "20 packets",
-                "buy_price": 15
+                "description": "Subscribe to our Data Volume Service and pay only for the data you actually use. Enjoy flexible access without long-term obligations!"
             },
             # Temporary Services (3 por cor)
             {
                 "type": ServiceType.TEMPORARY,
                 "name_template": "Temporary Service {color} 4",
                 "title": "TEMPORARY",
-                "description": "Subscribe to our Temporary Service and pay only for the time you need. Access the network as long as you require, with no long-term commitments.",
-                "service_conditions": "4 turns",
-                "buy_price": 4
+                "description": "Subscribe to our Temporary Service and pay only for the time you need. Access the network as long as you require, with no long-term commitments."
             },
             {
                 "type": ServiceType.TEMPORARY,
                 "name_template": "Temporary Service {color} 7",
                 "title": "TEMPORARY",
-                "description": "Subscribe to our Temporary Service and pay only for the time you need. Access the network as long as you require, with no long-term commitments.",
-                "service_conditions": "8 turns",
-                "buy_price": 7
+                "description": "Subscribe to our Temporary Service and pay only for the time you need. Access the network as long as you require, with no long-term commitments."
             },
             {
                 "type": ServiceType.TEMPORARY,
                 "name_template": "Temporary Service {color} 14",
                 "title": "TEMPORARY",
-                "description": "Subscribe to our Temporary Service and pay only for the time you need. Access the network as long as you require, with no long-term commitments.",
-                "service_conditions": "16 turns",
-                "buy_price": 14
+                "description": "Subscribe to our Temporary Service and pay only for the time you need. Access the network as long as you require, with no long-term commitments."
             }
         ]
         
@@ -458,6 +535,14 @@ class UserDatabase:
         for color in colors:
             for idx, template in enumerate(service_templates):
                 service_id = f"service_{template['type'].value}_{idx+1}_{color}"
+                base_id = f"{template['type'].value}_{idx+1}"
+                
+                # Obter valores do dicionário ou usar valores padrão
+                costs = service_costs.get(base_id, {
+                    "service_conditions": "up to 1 packet per turn",
+                    "buy_price": 80,
+                    "sell_price": 40
+                })
                 
                 service_card = ServiceCard(
                     service_id=service_id,
@@ -466,9 +551,9 @@ class UserDatabase:
                     title=template["title"],
                     description=template["description"],
                     valid_for="1 Residential User",
-                    service_conditions=template["service_conditions"],
-                    buy_cost=template["buy_price"],
-                    sell_cost=template["buy_price"] // 2  # Venda é metade do preço de compra
+                    service_conditions=costs["service_conditions"],
+                    buy_cost=costs["buy_price"],
+                    sell_cost=costs["sell_price"]
                 )
                 
                 self.services[service_id] = service_card
@@ -488,7 +573,7 @@ class UserDatabase:
                 "rate": "1 packet per turn",
                 "drops_allowed": True,
                 "reward_per_packet": 4,
-                "message_bonus": None,
+                "message_received": None,
                 "penalty_per_packet": None,
                 "application_fee": 40,
                 "bonus_condition": None,
@@ -502,7 +587,7 @@ class UserDatabase:
                 "rate": "1 packet per turn",
                 "drops_allowed": True,
                 "reward_per_packet": 3,
-                "message_bonus": 4,
+                "packet_bonus": 4,
                 "penalty_per_packet": None,
                 "application_fee": 40,
                 "bonus_condition": "After 10 packets received",
@@ -516,7 +601,7 @@ class UserDatabase:
                 "rate": "1 packet per turn",
                 "drops_allowed": True,
                 "reward_per_packet": 4,
-                "message_bonus": 20,
+                "packet_bonus": 20,
                 "penalty_per_packet": None,
                 "application_fee": 60,
                 "bonus_condition": "After 15 packets received",
@@ -530,7 +615,7 @@ class UserDatabase:
                 "rate": "1 packet per turn",
                 "drops_allowed": True,
                 "reward_per_packet": 1,
-                "message_bonus": 160,
+                "message_received": 160,
                 "penalty_per_packet": None,
                 "application_fee": 40,
                 "bonus_condition": "No drops",
@@ -545,10 +630,10 @@ class UserDatabase:
                 "rate": "up to 1 packet per turn",
                 "drops_allowed": False,
                 "reward_per_packet": 0,
-                "message_bonus": 160,
+                "message_received": 160,
                 "penalty_per_packet": None,
                 "application_fee": 40,
-                "bonus_condition": "Message received",
+                "bonus_condition": None,
                 "penalty_condition": None
             },
             {
@@ -559,10 +644,10 @@ class UserDatabase:
                 "rate": "up to 1 packet per turn",
                 "drops_allowed": False,
                 "reward_per_packet": 0,
-                "message_bonus": 320,
+                "message_received": 320,
                 "penalty_per_packet": 8,
                 "application_fee": 60,
-                "bonus_condition": "Message received",
+                "bonus_condition": None,
                 "penalty_condition": "10 or fewer packets drops"
             },
             {
@@ -573,10 +658,10 @@ class UserDatabase:
                 "rate": "up to 1 packet per turn",
                 "drops_allowed": False,
                 "reward_per_packet": 0,
-                "message_bonus": 480,
+                "message_received": 480,
                 "penalty_per_packet": 4,
                 "application_fee": 60,
-                "bonus_condition": "Message received",
+                "bonus_condition": None,
                 "penalty_condition": "5 or fewer packets drops"
             },
             # SHORT MESSAGE - 2 variações diferentes
@@ -588,10 +673,10 @@ class UserDatabase:
                 "rate": "up to 1 packet per turn",
                 "drops_allowed": False,
                 "reward_per_packet": 0,
-                "message_bonus": 12,
+                "message_received": 12,
                 "penalty_per_packet": None,
                 "application_fee": 5,
-                "bonus_condition": "Message received",
+                "bonus_condition": None,
                 "penalty_condition": None
             },
             {
@@ -602,10 +687,10 @@ class UserDatabase:
                 "rate": "up to 1 packet per turn",
                 "drops_allowed": False,
                 "reward_per_packet": 0,
-                "message_bonus": 16,
+                "message_received": 16,
                 "penalty_per_packet": 2,
                 "application_fee": 5,
-                "bonus_condition": "Message received",
+                "bonus_condition": None,
                 "penalty_condition": "Per packet drop"
             },
             # GAMING - 2 variações diferentes
@@ -617,7 +702,7 @@ class UserDatabase:
                 "rate": "1 packet per turn",
                 "drops_allowed": True,
                 "reward_per_packet": 3,
-                "message_bonus": None,
+                "message_received": None,
                 "penalty_per_packet": None,
                 "application_fee": 5,
                 "bonus_condition": None,
@@ -631,7 +716,7 @@ class UserDatabase:
                 "rate": "1 packet per turn",
                 "drops_allowed": True,
                 "reward_per_packet": 2,
-                "message_bonus": 16,
+                "message_received": 16,
                 "penalty_per_packet": None,
                 "application_fee": 5,
                 "bonus_condition": "Message received",
@@ -646,10 +731,10 @@ class UserDatabase:
                 "rate": "up to 1 packet per turn",
                 "drops_allowed": False,
                 "reward_per_packet": 0,
-                "message_bonus": 80,
+                "message_received": 80,
                 "penalty_per_packet": None,
                 "application_fee": 10,
-                "bonus_condition": "Message received",
+                "bonus_condition": None,
                 "penalty_condition": None
             }
         ]
@@ -657,7 +742,8 @@ class UserDatabase:
         # Criar cartas para cada cor
         for color in colors:
             for idx, template in enumerate(activity_templates):
-                activity_id = f"activity_{template['type'].value}_{idx+1}_{color}"
+                # Gerar ID simples que corresponde aos arquivos físicos: Activity_1.png -> activity_1_red
+                activity_id = f"activity_{idx+1}_{color}"
                 
                 activity_card = ActivityCard(
                     activity_id=activity_id,
@@ -670,11 +756,14 @@ class UserDatabase:
                     destination="Central node",
                     drops_allowed=template["drops_allowed"],
                     reward_per_packet=template["reward_per_packet"],
-                    message_bonus=template["message_bonus"],
-                    penalty_per_packet=template["penalty_per_packet"],
+                    message_received=template.get("message_received"),
+                    penalty_per_packet=template.get("penalty_per_packet"),
+                    packet_bonus=template.get("packet_bonus"),
+                    message_bonus=template.get("message_bonus"),
                     application_fee=template["application_fee"],
-                    bonus_condition=template["bonus_condition"],
-                    penalty_condition=template["penalty_condition"]
+                    bonus_condition=template.get("bonus_condition"),
+                    penalty_condition=template.get("penalty_condition"),
+                    sell_cost=0  # Valor de venda sempre 0 para Activities
                 )
                 
                 self.activities[activity_id] = activity_card
@@ -903,7 +992,8 @@ class UserDatabase:
         
         # Criar cartas de desafio
         for idx, template in enumerate(challenge_templates):
-            challenge_id = f"challenge_{template['type'].value}_{idx+1}"
+            # Gerar ID simples que corresponde aos arquivos físicos: Challenge_1.png -> challenge_1
+            challenge_id = f"challenge_{idx+1}"
             
             challenge_card = ChallengeCard(
                 challenge_id=challenge_id,
@@ -938,53 +1028,64 @@ class UserDatabase:
             
         action_num = int(match.group(1))
         
-        # Para Router Upgrade (cartas 1-7) e Router Downgrade (cartas 8-14)
-        if action_type in [ActionType.ROUTER_UPGRADE, ActionType.ROUTER_DOWNGRADE]:
-            if action_type == ActionType.ROUTER_UPGRADE:
-                # Cartas 1-7: Router Upgrade
-                if 1 <= action_num <= 3:
-                    # Cartas 1-3: "Residential Router 1/2/3" (escolha do jogador)
-                    return action_num  # 1, 2, 3
-                elif 4 <= action_num <= 7:
-                    # Cartas 4-7: "Residential Router 1" (jogadores específicos)
-                    return 1
-            elif action_type == ActionType.ROUTER_DOWNGRADE:
-                # Cartas 8-14: Router Downgrade
-                if 8 <= action_num <= 10:
-                    # Cartas 8-10: "Residential Router 1/2/3" (escolha do jogador)
-                    return action_num - 7  # 1, 2, 3
-                elif 11 <= action_num <= 14:
-                    # Cartas 11-14: "Residential Router 1" (jogadores específicos)
-                    return 1
-                    
-        # Para Link Upgrade (cartas 15-21) e Link Downgrade (cartas 22-28)
-        elif action_type in [ActionType.LINK_UPGRADE, ActionType.LINK_DOWNGRADE]:
-            if action_type == ActionType.LINK_UPGRADE:
-                # Cartas 15-21: Link Upgrade
-                if 15 <= action_num <= 17:
-                    # Cartas 15-17: "Link to Residential Router 1/2/3" (escolha do jogador)
-                    return action_num - 14  # 1, 2, 3
-                elif 18 <= action_num <= 21:
-                    # Cartas 18-21: "Link to Residential Router 1" (jogadores específicos)
-                    return 1
-            elif action_type == ActionType.LINK_DOWNGRADE:
-                # Cartas 22-28: Link Downgrade
-                if 22 <= action_num <= 24:
-                    # Cartas 22-24: "Link to Residential Router 1/2/3" (escolha do jogador)
-                    return action_num - 21  # 1, 2, 3
-                elif 25 <= action_num <= 28:
-                    # Cartas 25-28: "Link to Residential Router 1" (jogadores específicos)
-                    return 1
+        # Mapeamento personalizado de router_ids por carta
+        # Podes alterar estes valores conforme necessário
+        router_id_mapping = {
+            # Router Upgrade (cartas 1-7)
+            1: 1,   # Action_1 -> Router 1
+            2: 2,   # Action_2 -> Router 2  
+            3: 3,   # Action_3 -> Router 3
+            4: 1,   # Action_4 -> Router 1
+            5: 1,   # Action_5 -> Router 1
+            6: 1,   # Action_6 -> Router 1
+            7: 1,   # Action_7 -> Router 1
+            
+            # Router Downgrade (cartas 8-14)
+            8: 1,   # Action_8 -> Router 1
+            9: 2,   # Action_9 -> Router 2
+            10: 3,  # Action_10 -> Router 3
+            11: 1,  # Action_11 -> Router 1
+            12: 1,  # Action_12 -> Router 1
+            13: 1,  # Action_13 -> Router 1
+            14: 1,  # Action_14 -> Router 1
+            
+            # Link Upgrade (cartas 15-21)
+            15: 1,  # Action_15 -> Router 1
+            16: 2,  # Action_16 -> Router 2
+            17: 3,  # Action_17 -> Router 3
+            18: 1,  # Action_18 -> Router 1
+            19: 1,  # Action_19 -> Router 1
+            20: 1,  # Action_20 -> Router 1
+            21: 1,  # Action_21 -> Router 1
+            
+            # Link Downgrade (cartas 22-28)
+            22: 1,  # Action_22 -> Router 1
+            23: 2,  # Action_23 -> Router 2
+            24: 3,  # Action_24 -> Router 3
+            25: 1,  # Action_25 -> Router 1
+            26: 1,  # Action_26 -> Router 1
+            27: 1,  # Action_27 -> Router 1
+            28: 1,  # Action_28 -> Router 1
+            
+            # Add Router (cartas 29-33) - não têm router específico
+            29: None,  # Action_29 -> None
+            30: None,  # Action_30 -> None
+            31: None,  # Action_31 -> None
+            32: None,  # Action_32 -> None
+            33: None,  # Action_33 -> None
+            
+            # Remove Router (cartas 34-38) - não têm router específico
+            34: None,  # Action_34 -> None
+            35: None,  # Action_35 -> None
+            36: None,  # Action_36 -> None
+            37: None,  # Action_37 -> None
+            38: None,  # Action_38 -> None
+        }
         
-        # Para Add Router (cartas 29-33) e Remove Router (cartas 34-38)
-        # Estas não têm router específico, retornar None
-        return None
+        # Retornar o router_id mapeado ou None se não existir
+        return router_id_mapping.get(action_num, None)
     
-    def _create_action_cards(self):
-        """Cria as cartas de ação"""
-        # 38 cartas Action no total: 7 router upgrade, 7 router downgrade, 7 link upgrade, 7 link downgrade, 5 add router, 5 remove router
-        action_templates = []
-        
+
     def _create_action_cards(self):
         """Cria as cartas de ação"""
         # 38 cartas Action no total: 7 router upgrade, 7 router downgrade, 7 link upgrade, 7 link downgrade, 5 add router, 5 remove router
@@ -1008,7 +1109,8 @@ class UserDatabase:
                 "title": "ROUTER UPGRADE",
                 "description": "A bigger queue means more space for packets. Upgrade the queue on your Small Router to reduce drops, and you'll unlock your Medium Router for free!",
                 "effect_description": "Move packets from the old queue to the new one, keeping them in the same order.",
-                "target": target
+                "target": target,
+                "router_id": i + 1 if i < 3 else 1  # Router 1,2,3 para as primeiras 3 cartas, Router 1 para as restantes
             })
         
         # ROUTER DOWNGRADE - 7 cartas
@@ -1118,6 +1220,9 @@ class UserDatabase:
             target = template["target"]
             action_type = template["type"]
             
+            # Usar router_id do template se existir, senão usar a função _extract_router_id
+            router_id = template.get("router_id", self._extract_router_id(action_id, action_type))
+            
             action_card = ActionCard(
                 action_id=action_id,
                 action_type=action_type,
@@ -1125,7 +1230,7 @@ class UserDatabase:
                 description=template["description"],
                 effect_description=template["effect_description"],
                 target=target,
-                router_id=self._extract_router_id(action_id, action_type)
+                router_id=router_id
             )
             
             self.actions[action_id] = action_card
@@ -1163,203 +1268,483 @@ class UserDatabase:
                 "target_player": "yellow",
                 "player_choice": False
             },
-            # Event_5: TRANSMISSION DELAY, Router 1, 1 TURN, jogador verde
+            # Event_5: TRANSMISSION DELAY, Router 2, 1 TURN, jogador amarelo
+            {
+                "duration_turns": 1,
+                "router_id": 2,
+                "target_player": "yellow",
+                "player_choice": False
+            },
+            # Event_6: TRANSMISSION DELAY, Router 3, 1 TURN, jogador amarelo
+            {
+                "duration_turns": 1,
+                "router_id": 3,
+                "target_player": "yellow",
+                "player_choice": False
+            },
+            # Event_7: TRANSMISSION DELAY, Router 1, 1 TURN, jogador verde
             {
                 "duration_turns": 1,
                 "router_id": 1,
                 "target_player": "green",
                 "player_choice": False
             },
-            # Event_6: TRANSMISSION DELAY, Router 1, 1 TURN, jogador azul
+            # Event_8: TRANSMISSION DELAY, Router 2, 1 TURN, jogador verde
+            {
+                "duration_turns": 1,
+                "router_id": 2,
+                "target_player": "green",
+                "player_choice": False
+            },
+            # Event_9: TRANSMISSION DELAY, Router 3, 1 TURN, jogador verde
+            {
+                "duration_turns": 1,
+                "router_id": 3,
+                "target_player": "green",
+                "player_choice": False
+            },
+            # Event_10: TRANSMISSION DELAY, Router 1, 1 TURN, jogador azul
             {
                 "duration_turns": 1,
                 "router_id": 1,
                 "target_player": "blue",
                 "player_choice": False
             },
-            # Event_7: TRANSMISSION DELAY, Router 1, 1 TURN, jogador vermelho
+            # Event_11: TRANSMISSION DELAY, Router 2, 1 TURN, jogador azul
+            {
+                "duration_turns": 1,
+                "router_id": 2,
+                "target_player": "blue",
+                "player_choice": False
+            },
+            # Event_12: TRANSMISSION DELAY, Router 3, 1 TURN, jogador azul
+            {
+                "duration_turns": 1,
+                "router_id": 3,
+                "target_player": "blue",
+                "player_choice": False
+            },
+            # Event_13: TRANSMISSION DELAY, Router 1, 1 TURN, jogador vermelho
             {
                 "duration_turns": 1,
                 "router_id": 1,
                 "target_player": "red",
                 "player_choice": False
             },
-            # Event_8: TRANSMISSION DELAY, Router 1, 1 TURN, jogadores cinzentos COM interrogação (escolha do jogador)
+            # Event_14: TRANSMISSION DELAY, Router 2, 1 TURN, jogador vermelho
+            {
+                "duration_turns": 1,
+                "router_id": 2,
+                "target_player": "red",
+                "player_choice": False
+            },
+            # Event_15: TRANSMISSION DELAY, Router 3, 1 TURN, jogador vermelho
+            {
+                "duration_turns": 1,
+                "router_id": 3,
+                "target_player": "red",
+                "player_choice": False
+            },
+            # Event_16: TRANSMISSION DELAY, Router 1, 1 TURN, jogadores cinzentos COM interrogação (escolha do jogador)
             {
                 "duration_turns": 1,
                 "router_id": 1,
                 "target_player": None,
                 "player_choice": True
             },
-            # Event_9: TRANSMISSION DELAY, Router 1, 2 TURNS, jogadores cinzentos SEM ? (próprio jogador)
+            # Event_17: TRANSMISSION DELAY, Router 2, 1 TURN, jogadores cinzentos COM interrogação (escolha do jogador)
+            {
+                "duration_turns": 1,
+                "router_id": 2,
+                "target_player": None,
+                "player_choice": True
+            },
+            # Event_18: TRANSMISSION DELAY, Router 3, 1 TURN, jogadores cinzentos COM interrogação (escolha do jogador)
+            {
+                "duration_turns": 1,
+                "router_id": 3,
+                "target_player": None,
+                "player_choice": True
+            },
+            # Event_19: TRANSMISSION DELAY, Router 1, 2 TURNS, jogadores cinzentos SEM ? (próprio jogador)
             {
                 "duration_turns": 2,
                 "router_id": 1,
                 "target_player": None,
                 "player_choice": False
             },
-            # Event_10: TRANSMISSION DELAY, Router 2, 2 TURNS, jogadores cinzentos SEM ? (próprio jogador)
+            # Event_20: TRANSMISSION DELAY, Router 2, 2 TURNS, jogadores cinzentos SEM ? (próprio jogador)
             {
                 "duration_turns": 2,
                 "router_id": 2,
                 "target_player": None,
                 "player_choice": False
             },
-            # Event_11: TRANSMISSION DELAY, Router 3, 2 TURNS, jogadores cinzentos SEM ? (próprio jogador)
+            # Event_21: TRANSMISSION DELAY, Router 3, 2 TURNS, jogadores cinzentos SEM ? (próprio jogador)
             {
                 "duration_turns": 2,
                 "router_id": 3,
                 "target_player": None,
                 "player_choice": False
             },
-            # Event_12: TRANSMISSION DELAY, Router 1, 2 TURNS, jogador amarelo
+            # Event_22: TRANSMISSION DELAY, Router 1, 2 TURNS, jogador amarelo
             {
                 "duration_turns": 2,
                 "router_id": 1,
                 "target_player": "yellow",
                 "player_choice": False
             },
-            # Event_13: TRANSMISSION DELAY, Router 1, 2 TURNS, jogador verde
+            # Event_23: TRANSMISSION DELAY, Router 2, 2 TURNS, jogador amarelo
+            {
+                "duration_turns": 2,
+                "router_id": 2,
+                "target_player": "yellow",
+                "player_choice": False
+            },
+            # Event_24: TRANSMISSION DELAY, Router 3, 2 TURNS, jogador amarelo
+            {
+                "duration_turns": 2,
+                "router_id": 3,
+                "target_player": "yellow",
+                "player_choice": False
+            },
+            # Event_25: TRANSMISSION DELAY, Router 1, 2 TURNS, jogador verde
             {
                 "duration_turns": 2,
                 "router_id": 1,
                 "target_player": "green",
                 "player_choice": False
             },
-            # Event_14: TRANSMISSION DELAY, Router 1, 2 TURNS, jogador azul
+            # Event_26: TRANSMISSION DELAY, Router 2, 2 TURNS, jogador verde
+            {
+                "duration_turns": 2,
+                "router_id": 2,
+                "target_player": "green",
+                "player_choice": False
+            },
+            # Event_27: TRANSMISSION DELAY, Router 3, 2 TURNS, jogador verde
+            {
+                "duration_turns": 2,
+                "router_id": 3,
+                "target_player": "green",
+                "player_choice": False
+            },
+            # Event_28: TRANSMISSION DELAY, Router 1, 2 TURNS, jogador azul
             {
                 "duration_turns": 2,
                 "router_id": 1,
                 "target_player": "blue",
                 "player_choice": False
             },
-            # Event_15: TRANSMISSION DELAY, Router 1, 2 TURNS, jogador vermelho
+            # Event_29: TRANSMISSION DELAY, Router 2, 2 TURNS, jogador azul
+            {
+                "duration_turns": 2,
+                "router_id": 2,
+                "target_player": "blue",
+                "player_choice": False
+            },
+            # Event_30: TRANSMISSION DELAY, Router 3, 2 TURNS, jogador azul
+            {
+                "duration_turns": 2,
+                "router_id": 3,
+                "target_player": "blue",
+                "player_choice": False
+            },
+            # Event_31: TRANSMISSION DELAY, Router 1, 2 TURNS, jogador vermelho
             {
                 "duration_turns": 2,
                 "router_id": 1,
                 "target_player": "red",
                 "player_choice": False
             },
-            # Event_16: TRANSMISSION DELAY, Router 1, 2 TURNS, jogadores cinzentos COM interrogação (escolha do jogador)
+            # Event_32: TRANSMISSION DELAY, Router 2, 2 TURNS, jogador vermelho
+            {
+                "duration_turns": 2,
+                "router_id": 2,
+                "target_player": "red",
+                "player_choice": False
+            },
+            # Event_33: TRANSMISSION DELAY, Router 3, 2 TURNS, jogador vermelho
+            {
+                "duration_turns": 2,
+                "router_id": 3,
+                "target_player": "red",
+                "player_choice": False
+            },
+            # Event_34: TRANSMISSION DELAY, Router 1, 2 TURNS, jogadores cinzentos COM interrogação (escolha do jogador)
             {
                 "duration_turns": 2,
                 "router_id": 1,
                 "target_player": None,
                 "player_choice": True
             },
-            # Event_17: TRANSMISSION DELAY, Router 1, 4 TURNS, jogadores cinzentos SEM ? (próprio jogador)
+            # Event_35: TRANSMISSION DELAY, Router 2, 2 TURNS, jogadores cinzentos COM interrogação (escolha do jogador)
+            {
+                "duration_turns": 2,
+                "router_id": 2,
+                "target_player": None,
+                "player_choice": True
+            },
+            # Event_36: TRANSMISSION DELAY, Router 3, 2 TURNS, jogadores cinzentos COM interrogação (escolha do jogador)
+            {
+                "duration_turns": 2,
+                "router_id": 3,
+                "target_player": None,
+                "player_choice": True
+            },
+            # Event_37: TRANSMISSION DELAY, Router 1, 4 TURNS, jogadores cinzentos SEM ? (próprio jogador)
             {
                 "duration_turns": 4,
                 "router_id": 1,
                 "target_player": None,
                 "player_choice": False
             },
-            # Event_18: TRANSMISSION DELAY, Router 2, 4 TURNS, jogadores cinzentos SEM ? (próprio jogador)
+            # Event_38: TRANSMISSION DELAY, Router 2, 4 TURNS, jogadores cinzentos SEM ? (próprio jogador)
             {
                 "duration_turns": 4,
                 "router_id": 2,
                 "target_player": None,
                 "player_choice": False
             },
-            # Event_19: TRANSMISSION DELAY, Router 3, 4 TURNS, jogadores cinzentos SEM ? (próprio jogador)
+            # Event_39: TRANSMISSION DELAY, Router 3, 4 TURNS, jogadores cinzentos SEM ? (próprio jogador)
             {
                 "duration_turns": 4,
                 "router_id": 3,
                 "target_player": None,
                 "player_choice": False
             },
-            # Event_20: TRANSMISSION DELAY, Router 1, 4 TURNS, jogador amarelo
+            # Event_40: TRANSMISSION DELAY, Router 1, 4 TURNS, jogador amarelo
             {
                 "duration_turns": 4,
                 "router_id": 1,
                 "target_player": "yellow",
                 "player_choice": False
             },
-            # Event_21: TRANSMISSION DELAY, Router 1, 4 TURNS, jogador verde
+            # Event_41: TRANSMISSION DELAY, Router 2, 4 TURNS, jogador amarelo
+            {
+                "duration_turns": 4,
+                "router_id": 2,
+                "target_player": "yellow",
+                "player_choice": False
+            },
+            # Event_42: TRANSMISSION DELAY, Router 3, 4 TURNS, jogador amarelo
+            {
+                "duration_turns": 4,
+                "router_id": 3,
+                "target_player": "yellow",
+                "player_choice": False
+            },
+            # Event_43: TRANSMISSION DELAY, Router 1, 4 TURNS, jogador verde
             {
                 "duration_turns": 4,
                 "router_id": 1,
                 "target_player": "green",
                 "player_choice": False
             },
-            # Event_22: TRANSMISSION DELAY, Router 1, 4 TURNS, jogador azul
+            # Event_44: TRANSMISSION DELAY, Router 2, 4 TURNS, jogador verde
+            {
+                "duration_turns": 4,
+                "router_id": 2,
+                "target_player": "green",
+                "player_choice": False
+            },
+            # Event_45: TRANSMISSION DELAY, Router 3, 4 TURNS, jogador verde
+            {
+                "duration_turns": 4,
+                "router_id": 3,
+                "target_player": "green",
+                "player_choice": False
+            },
+            # Event_46: TRANSMISSION DELAY, Router 1, 4 TURNS, jogador azul
             {
                 "duration_turns": 4,
                 "router_id": 1,
                 "target_player": "blue",
                 "player_choice": False
             },
-            # Event_23: TRANSMISSION DELAY, Router 1, 4 TURNS, jogador vermelho
+            # Event_47: TRANSMISSION DELAY, Router 2, 4 TURNS, jogador azul
+            {
+                "duration_turns": 4,
+                "router_id": 2,
+                "target_player": "blue",
+                "player_choice": False
+            },
+            # Event_48: TRANSMISSION DELAY, Router 3, 4 TURNS, jogador azul
+            {
+                "duration_turns": 4,
+                "router_id": 3,
+                "target_player": "blue",
+                "player_choice": False
+            },
+            # Event_49: TRANSMISSION DELAY, Router 1, 4 TURNS, jogador vermelho
             {
                 "duration_turns": 4,
                 "router_id": 1,
                 "target_player": "red",
                 "player_choice": False
             },
-            # Event_24: TRANSMISSION DELAY, Router 1, 4 TURNS, jogadores cinzentos COM interrogação (escolha do jogador)
+            # Event_50: TRANSMISSION DELAY, Router 2, 4 TURNS, jogador vermelho
+            {
+                "duration_turns": 4,
+                "router_id": 2,
+                "target_player": "red",
+                "player_choice": False
+            },
+            # Event_51: TRANSMISSION DELAY, Router 3, 4 TURNS, jogador vermelho
+            {
+                "duration_turns": 4,
+                "router_id": 3,
+                "target_player": "red",
+                "player_choice": False
+            },
+            # Event_52: TRANSMISSION DELAY, Router 1, 4 TURNS, jogadores cinzentos COM interrogação (escolha do jogador)
             {
                 "duration_turns": 4,
                 "router_id": 1,
                 "target_player": None,
                 "player_choice": True
             },
-            # Event_25: TRANSMISSION DELAY, Router 1, ? TURNS, jogadores cinzentos SEM ? (próprio jogador)
+            # Event_53: TRANSMISSION DELAY, Router 2, 4 TURNS, jogadores cinzentos COM interrogação (escolha do jogador)
+            {
+                "duration_turns": 4,
+                "router_id": 2,
+                "target_player": None,
+                "player_choice": True
+            },
+            # Event_54: TRANSMISSION DELAY, Router 3, 4 TURNS, jogadores cinzentos COM interrogação (escolha do jogador)
+            {
+                "duration_turns": 4,
+                "router_id": 3,
+                "target_player": None,
+                "player_choice": True
+            },
+            # Event_55: TRANSMISSION DELAY, Router 1, ? TURNS, jogadores cinzentos SEM ? (próprio jogador)
             {
                 "duration_turns": "variable",  # ? TURNS - será determinado por dado
                 "router_id": 1,
                 "target_player": None,
                 "player_choice": False,
             },
-            # Event_26: TRANSMISSION DELAY, Router 2, ? TURNS, jogadores cinzentos SEM ? (próprio jogador)
+            # Event_56: TRANSMISSION DELAY, Router 2, ? TURNS, jogadores cinzentos SEM ? (próprio jogador)
             {
                 "duration_turns": "variable",  # ? TURNS - será determinado por dado
                 "router_id": 2,
                 "target_player": None,
                 "player_choice": False, 
             },
-            # Event_27: TRANSMISSION DELAY, Router 3, ? TURNS, jogadores cinzentos SEM ? (próprio jogador)
+            # Event_57: TRANSMISSION DELAY, Router 3, ? TURNS, jogadores cinzentos SEM ? (próprio jogador)
             {
                 "duration_turns": "variable",
                 "router_id": 3,
                 "target_player": None,
                 "player_choice": False,  
             },
-            # Event_28: TRANSMISSION DELAY, Router 1, ? TURNS, jogador amarelo
+            # Event_58: TRANSMISSION DELAY, Router 1, ? TURNS, jogador amarelo
             {
                 "duration_turns": "variable",
                 "router_id": 1,
                 "target_player": "yellow",
                 "player_choice": False,  
             },
-            # Event_29: TRANSMISSION DELAY, Router 1, ? TURNS, jogador verde
+            # Event_59: TRANSMISSION DELAY, Router 2, ? TURNS, jogador amarelo
+            {
+                "duration_turns": "variable",
+                "router_id": 2,
+                "target_player": "yellow",
+                "player_choice": False,  
+            },
+            # Event_60: TRANSMISSION DELAY, Router 3, ? TURNS, jogador amarelo
+            {
+                "duration_turns": "variable",
+                "router_id": 3,
+                "target_player": "yellow",
+                "player_choice": False,  
+            },
+            # Event_61: TRANSMISSION DELAY, Router 1, ? TURNS, jogador verde
             {
                 "duration_turns": "variable",
                 "router_id": 1,
                 "target_player": "green",
                 "player_choice": False,   
             },
-            # Event_30: TRANSMISSION DELAY, Router 1, ? TURNS, jogador azul
+            # Event_62: TRANSMISSION DELAY, Router 2, ? TURNS, jogador verde
+            {
+                "duration_turns": "variable",
+                "router_id": 2,
+                "target_player": "green",
+                "player_choice": False,   
+            },
+            # Event_63: TRANSMISSION DELAY, Router 3, ? TURNS, jogador verde
+            {
+                "duration_turns": "variable",
+                "router_id": 3,
+                "target_player": "green",
+                "player_choice": False,   
+            },
+            # Event_64: TRANSMISSION DELAY, Router 1, ? TURNS, jogador azul
             {
                 "duration_turns": "variable",
                 "router_id": 1,
                 "target_player": "blue",
                 "player_choice": True,    
             },
-            # Event_31: TRANSMISSION DELAY, Router 1, ? TURNS, jogador vermelho
+            # Event_65: TRANSMISSION DELAY, Router 2, ? TURNS, jogador azul
+            {
+                "duration_turns": "variable",
+                "router_id": 2,
+                "target_player": "blue",
+                "player_choice": True,    
+            },
+            # Event_66: TRANSMISSION DELAY, Router 3, ? TURNS, jogador azul
+            {
+                "duration_turns": "variable",
+                "router_id": 3,
+                "target_player": "blue",
+                "player_choice": True,    
+            },
+            # Event_67: TRANSMISSION DELAY, Router 1, ? TURNS, jogador vermelho
             {
                 "duration_turns": "variable",
                 "router_id": 1,
                 "target_player": "red",
                 "player_choice": False,   
             },
-            # Event_32: TRANSMISSION DELAY, Router 1, ? TURNS, jogadores cinzentos COM interrogação (escolha do jogador)
+            # Event_68: TRANSMISSION DELAY, Router 2, ? TURNS, jogador vermelho
+            {
+                "duration_turns": "variable",
+                "router_id": 2,
+                "target_player": "red",
+                "player_choice": False,   
+            },
+            # Event_69: TRANSMISSION DELAY, Router 3, ? TURNS, jogador vermelho
+            {
+                "duration_turns": "variable",
+                "router_id": 3,
+                "target_player": "red",
+                "player_choice": False,   
+            },
+            # Event_70: TRANSMISSION DELAY, Router 1, ? TURNS, jogadores cinzentos COM interrogação (escolha do jogador)
             {
                 "duration_turns": "variable",
                 "router_id": 1,
                 "target_player": None,
                 "player_choice": True,   
             },
-            # Event_33: LINK FAILURE, Router 1, 1 TURN, jogadores cinzentos SEM ? (próprio jogador)
+            # Event_71: TRANSMISSION DELAY, Router 2, ? TURNS, jogadores cinzentos COM interrogação (escolha do jogador)
+            {
+                "duration_turns": "variable",
+                "router_id": 2,
+                "target_player": None,
+                "player_choice": True,   
+            },
+            # Event_72: TRANSMISSION DELAY, Router 3, ? TURNS, jogadores cinzentos COM interrogação (escolha do jogador)
+            {
+                "duration_turns": "variable",
+                "router_id": 3,
+                "target_player": None,
+                "player_choice": True,   
+            },
+            # Event_73: LINK FAILURE, Router 1, 1 TURN, jogadores cinzentos SEM ? (próprio jogador)
             {
                 "duration_turns": 1,
                 "router_id": 1,
@@ -1367,7 +1752,7 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.LINK_FAILURE,
             },
-            # Event_34: LINK FAILURE, Router 2, 1 TURN, jogadores cinzentos SEM ? (próprio jogador)
+            # Event_74: LINK FAILURE, Router 2, 1 TURN, jogadores cinzentos SEM ? (próprio jogador)
             {
                 "duration_turns": 1,
                 "router_id": 2,
@@ -1375,7 +1760,7 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.LINK_FAILURE,            
             },
-            # Event_35: LINK FAILURE, Router 3, 1 TURN, jogadores cinzentos SEM ? (próprio jogador)
+            # Event_75: LINK FAILURE, Router 3, 1 TURN, jogadores cinzentos SEM ? (próprio jogador)
             {
                 "duration_turns": 1,
                 "router_id": 3,
@@ -1383,7 +1768,7 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.LINK_FAILURE,
             },
-            # Event_36: LINK FAILURE, Router 1, 1 TURN, jogador amarelo
+            # Event_76: LINK FAILURE, Router 1, 1 TURN, jogador amarelo
             {
                 "duration_turns": 1,
                 "router_id": 1,
@@ -1391,7 +1776,23 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.LINK_FAILURE,
             },
-            # Event_37: LINK FAILURE, Router 1, 1 TURN, jogador verde
+            # Event_77: LINK FAILURE, Router 2, 1 TURN, jogador amarelo
+            {
+                "duration_turns": 1,
+                "router_id": 2,
+                "target_player": "yellow",
+                "player_choice": False,
+                "event_type": EventType.LINK_FAILURE,
+            },
+            # Event_78: LINK FAILURE, Router 3, 1 TURN, jogador amarelo
+            {
+                "duration_turns": 1,
+                "router_id": 3,
+                "target_player": "yellow",
+                "player_choice": False,
+                "event_type": EventType.LINK_FAILURE,
+            },
+            # Event_79: LINK FAILURE, Router 1, 1 TURN, jogador verde
             {
                 "duration_turns": 1,
                 "router_id": 1,
@@ -1399,7 +1800,23 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.LINK_FAILURE,
             },
-            # Event_38: LINK FAILURE, Router 1, 1 TURN, jogador azul
+            # Event_80: LINK FAILURE, Router 2, 1 TURN, jogador verde
+            {
+                "duration_turns": 1,
+                "router_id": 2,
+                "target_player": "green",
+                "player_choice": False,
+                "event_type": EventType.LINK_FAILURE,
+            },
+            # Event_81: LINK FAILURE, Router 3, 1 TURN, jogador verde
+            {
+                "duration_turns": 1,
+                "router_id": 3,
+                "target_player": "green",
+                "player_choice": False,
+                "event_type": EventType.LINK_FAILURE,
+            },
+            # Event_82: LINK FAILURE, Router 1, 1 TURN, jogador azul
             {
                 "duration_turns": 1,
                 "router_id": 1,
@@ -1407,7 +1824,23 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.LINK_FAILURE,
             },
-            # Event_39: LINK FAILURE, Router 1, 1 TURN, jogador vermelho
+            # Event_83: LINK FAILURE, Router 2, 1 TURN, jogador azul
+            {
+                "duration_turns": 1,
+                "router_id": 2,
+                "target_player": "blue",
+                "player_choice": False,
+                "event_type": EventType.LINK_FAILURE,
+            },
+            # Event_84: LINK FAILURE, Router 3, 1 TURN, jogador azul
+            {
+                "duration_turns": 1,
+                "router_id": 3,
+                "target_player": "blue",
+                "player_choice": False,
+                "event_type": EventType.LINK_FAILURE,
+            },
+            # Event_85: LINK FAILURE, Router 1, 1 TURN, jogador vermelho
             {
                 "duration_turns": 1,
                 "router_id": 1,
@@ -1415,7 +1848,23 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.LINK_FAILURE,
             },
-            # Event_40: LINK FAILURE, Router 1, 1 TURN, jogadores cinzentos COM interrogação (escolha do jogador)
+            # Event_86: LINK FAILURE, Router 2, 1 TURN, jogador vermelho
+            {
+                "duration_turns": 1,
+                "router_id": 2,
+                "target_player": "red",
+                "player_choice": False,
+                "event_type": EventType.LINK_FAILURE,
+            },
+            # Event_87: LINK FAILURE, Router 3, 1 TURN, jogador vermelho
+            {
+                "duration_turns": 1,
+                "router_id": 3,
+                "target_player": "red",
+                "player_choice": False,
+                "event_type": EventType.LINK_FAILURE,
+            },
+            # Event_88: LINK FAILURE, Router 1, 1 TURN, jogadores cinzentos COM interrogação (escolha do jogador)
             {
                 "duration_turns": 1,
                 "router_id": 1,
@@ -1423,7 +1872,23 @@ class UserDatabase:
                 "player_choice": True,
                 "event_type": EventType.LINK_FAILURE,
             },
-            # Event_41: LINK FAILURE, Router 1, 2 TURNS, jogadores cinzentos SEM ? (próprio jogador)
+            # Event_89: LINK FAILURE, Router 2, 1 TURN, jogadores cinzentos COM interrogação (escolha do jogador)
+            {
+                "duration_turns": 1,
+                "router_id": 2,
+                "target_player": None,
+                "player_choice": True,
+                "event_type": EventType.LINK_FAILURE,
+            },
+            # Event_90: LINK FAILURE, Router 3, 1 TURN, jogadores cinzentos COM interrogação (escolha do jogador)
+            {
+                "duration_turns": 1,
+                "router_id": 3,
+                "target_player": None,
+                "player_choice": True,
+                "event_type": EventType.LINK_FAILURE,
+            },
+            # Event_91: LINK FAILURE, Router 1, 2 TURNS, jogadores cinzentos SEM ? (próprio jogador)
             {
                 "duration_turns": 2,
                 "router_id": 1,
@@ -1431,7 +1896,7 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.LINK_FAILURE,
             },
-            # Event_42: LINK FAILURE, Router 2, 2 TURNS, jogadores cinzentos SEM ? (próprio jogador)
+            # Event_92: LINK FAILURE, Router 2, 2 TURNS, jogadores cinzentos SEM ? (próprio jogador)
             {
                 "duration_turns": 2,
                 "router_id": 2,
@@ -1439,7 +1904,7 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.LINK_FAILURE,                  
             },
-            # Event_43: LINK FAILURE, Router 3, 2 TURNS, jogadores cinzentos SEM ? (próprio jogador)
+            # Event_93: LINK FAILURE, Router 3, 2 TURNS, jogadores cinzentos SEM ? (próprio jogador)
             {
                 "duration_turns": 2,
                 "router_id": 3,
@@ -1447,7 +1912,7 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.LINK_FAILURE,
             },
-            # Event_44: LINK FAILURE, Router 1, 2 TURNS, jogador amarelo
+            # Event_94: LINK FAILURE, Router 1, 2 TURNS, jogador amarelo
             {
                 "duration_turns": 2,
                 "router_id": 1,
@@ -1455,7 +1920,23 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.LINK_FAILURE,
             },
-            # Event_45: LINK FAILURE, Router 1, 2 TURNS, jogador verde
+            # Event_95: LINK FAILURE, Router 2, 2 TURNS, jogador amarelo
+            {
+                "duration_turns": 2,
+                "router_id": 2,
+                "target_player": "yellow",
+                "player_choice": False,
+                "event_type": EventType.LINK_FAILURE,
+            },
+            # Event_96: LINK FAILURE, Router 3, 2 TURNS, jogador amarelo
+            {
+                "duration_turns": 2,
+                "router_id": 3,
+                "target_player": "yellow",
+                "player_choice": False,
+                "event_type": EventType.LINK_FAILURE,
+            },
+            # Event_97: LINK FAILURE, Router 1, 2 TURNS, jogador verde
             {
                 "duration_turns": 2,
                 "router_id": 1,
@@ -1463,7 +1944,23 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.LINK_FAILURE,
             },
-            # Event_46: LINK FAILURE, Router 1, 2 TURNS, jogador azul
+            # Event_98: LINK FAILURE, Router 2, 2 TURNS, jogador verde
+            {
+                "duration_turns": 2,
+                "router_id": 2,
+                "target_player": "green",
+                "player_choice": False,
+                "event_type": EventType.LINK_FAILURE,
+            },
+            # Event_99: LINK FAILURE, Router 3, 2 TURNS, jogador verde
+            {
+                "duration_turns": 2,
+                "router_id": 3,
+                "target_player": "green",
+                "player_choice": False,
+                "event_type": EventType.LINK_FAILURE,
+            },
+            # Event_100: LINK FAILURE, Router 1, 2 TURNS, jogador azul
             {
                 "duration_turns": 2,
                 "router_id": 1,
@@ -1471,7 +1968,23 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.LINK_FAILURE,
             },
-            # Event_47: LINK FAILURE, Router 1, 2 TURNS, jogador vermelho
+            # Event_101: LINK FAILURE, Router 2, 2 TURNS, jogador azul
+            {
+                "duration_turns": 2,
+                "router_id": 2,
+                "target_player": "blue",
+                "player_choice": False,
+                "event_type": EventType.LINK_FAILURE,
+            },
+            # Event_102: LINK FAILURE, Router 3, 2 TURNS, jogador azul
+            {
+                "duration_turns": 2,
+                "router_id": 3,
+                "target_player": "blue",
+                "player_choice": False,
+                "event_type": EventType.LINK_FAILURE,
+            },
+            # Event_103: LINK FAILURE, Router 1, 2 TURNS, jogador vermelho
             {
                 "duration_turns": 2,
                 "router_id": 1,
@@ -1479,7 +1992,23 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.LINK_FAILURE,
             },
-            # Event_48: LINK FAILURE, Router 1, 2 TURNS, jogadores cinzentos COM ? (escolha do jogador)
+            # Event_104: LINK FAILURE, Router 2, 2 TURNS, jogador vermelho
+            {
+                "duration_turns": 2,
+                "router_id": 2,
+                "target_player": "red",
+                "player_choice": False,
+                "event_type": EventType.LINK_FAILURE,
+            },
+            # Event_105: LINK FAILURE, Router 3, 2 TURNS, jogador vermelho
+            {
+                "duration_turns": 2,
+                "router_id": 3,
+                "target_player": "red",
+                "player_choice": False,
+                "event_type": EventType.LINK_FAILURE,
+            },
+            # Event_106: LINK FAILURE, Router 1, 2 TURNS, jogadores cinzentos COM ? (escolha do jogador)
             {
                 "duration_turns": 2,
                 "router_id": 1,
@@ -1487,7 +2016,23 @@ class UserDatabase:
                 "player_choice": True,
                 "event_type": EventType.LINK_FAILURE,
             },
-            # Event_49: LINK FAILURE, Router 1, 4 TURNS, jogadores cinzentos SEM ? (próprio jogador)
+            # Event_107: LINK FAILURE, Router 2, 2 TURNS, jogadores cinzentos COM ? (escolha do jogador)
+            {
+                "duration_turns": 2,
+                "router_id": 2,
+                "target_player": None,
+                "player_choice": True,
+                "event_type": EventType.LINK_FAILURE,
+            },
+            # Event_108: LINK FAILURE, Router 3, 2 TURNS, jogadores cinzentos COM ? (escolha do jogador)
+            {
+                "duration_turns": 2,
+                "router_id": 3,
+                "target_player": None,
+                "player_choice": True,
+                "event_type": EventType.LINK_FAILURE,
+            },
+            # Event_109: LINK FAILURE, Router 1, 4 TURNS, jogadores cinzentos SEM ? (próprio jogador)
             {
                 "duration_turns": 4,
                 "router_id": 1,
@@ -1495,7 +2040,7 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.LINK_FAILURE,
             },
-            # Event_50: LINK FAILURE, Router 2, 4 TURNS, jogadores cinzentos SEM ? (próprio jogador)
+            # Event_110: LINK FAILURE, Router 2, 4 TURNS, jogadores cinzentos SEM ? (próprio jogador)
             {
                 "duration_turns": 4,
                 "router_id": 2,
@@ -1503,7 +2048,7 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.LINK_FAILURE,
             },
-            # Event_51: LINK FAILURE, Router 3, 4 TURNS, jogadores cinzentos SEM ? (próprio jogador)
+            # Event_111: LINK FAILURE, Router 3, 4 TURNS, jogadores cinzentos SEM ? (próprio jogador)
             {
                 "duration_turns": 4,
                 "router_id": 3,
@@ -1511,7 +2056,7 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.LINK_FAILURE,
             },
-            # Event_52: LINK FAILURE, Router 1, 4 TURNS, jogador amarelo
+            # Event_112: LINK FAILURE, Router 1, 4 TURNS, jogador amarelo
             {
                 "duration_turns": 4,
                 "router_id": 1,
@@ -1519,7 +2064,23 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.LINK_FAILURE,
             },
-            # Event_53: LINK FAILURE, Router 1, 4 TURNS, jogador verde
+            # Event_113: LINK FAILURE, Router 2, 4 TURNS, jogador amarelo
+            {
+                "duration_turns": 4,
+                "router_id": 2,
+                "target_player": "yellow",
+                "player_choice": False,
+                "event_type": EventType.LINK_FAILURE,
+            },
+            # Event_114: LINK FAILURE, Router 3, 4 TURNS, jogador amarelo
+            {
+                "duration_turns": 4,
+                "router_id": 3,
+                "target_player": "yellow",
+                "player_choice": False,
+                "event_type": EventType.LINK_FAILURE,
+            },
+            # Event_115: LINK FAILURE, Router 1, 4 TURNS, jogador verde
             {
                 "duration_turns": 4,
                 "router_id": 1,
@@ -1527,7 +2088,23 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.LINK_FAILURE,
             },
-            # Event_54: LINK FAILURE, Router 1, 4 TURNS, jogador azul
+            # Event_116: LINK FAILURE, Router 2, 4 TURNS, jogador verde
+            {
+                "duration_turns": 4,
+                "router_id": 2,
+                "target_player": "green",
+                "player_choice": False,
+                "event_type": EventType.LINK_FAILURE,
+            },
+            # Event_117: LINK FAILURE, Router 3, 4 TURNS, jogador verde
+            {
+                "duration_turns": 4,
+                "router_id": 3,
+                "target_player": "green",
+                "player_choice": False,
+                "event_type": EventType.LINK_FAILURE,
+            },
+            # Event_118: LINK FAILURE, Router 1, 4 TURNS, jogador azul
             {
                 "duration_turns": 4,
                 "router_id": 1,
@@ -1535,7 +2112,23 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.LINK_FAILURE,
             },
-            # Event_55: LINK FAILURE, Router 1, 4 TURNS, jogador vermelho
+            # Event_119: LINK FAILURE, Router 2, 4 TURNS, jogador azul
+            {
+                "duration_turns": 4,
+                "router_id": 2,
+                "target_player": "blue",
+                "player_choice": False,
+                "event_type": EventType.LINK_FAILURE,
+            },
+            # Event_120: LINK FAILURE, Router 3, 4 TURNS, jogador azul
+            {
+                "duration_turns": 4,
+                "router_id": 3,
+                "target_player": "blue",
+                "player_choice": False,
+                "event_type": EventType.LINK_FAILURE,
+            },
+            # Event_121: LINK FAILURE, Router 1, 4 TURNS, jogador vermelho
             {
                 "duration_turns": 4,
                 "router_id": 1,
@@ -1543,7 +2136,23 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.LINK_FAILURE,
             },
-            # Event_56: LINK FAILURE, Router 1, 4 TURNS, jogadores cinzentos COM ? (escolha do jogador)
+            # Event_122: LINK FAILURE, Router 2, 4 TURNS, jogador vermelho
+            {
+                "duration_turns": 4,
+                "router_id": 2,
+                "target_player": "red",
+                "player_choice": False,
+                "event_type": EventType.LINK_FAILURE,
+            },
+            # Event_123: LINK FAILURE, Router 3, 4 TURNS, jogador vermelho
+            {
+                "duration_turns": 4,
+                "router_id": 3,
+                "target_player": "red",
+                "player_choice": False,
+                "event_type": EventType.LINK_FAILURE,
+            },
+            # Event_124: LINK FAILURE, Router 1, 4 TURNS, jogadores cinzentos COM ? (escolha do jogador)
             {
                 "duration_turns": 4,
                 "router_id": 1,
@@ -1551,7 +2160,23 @@ class UserDatabase:
                 "player_choice": True,
                 "event_type": EventType.LINK_FAILURE,
             },
-            # Event_57: LINK FAILURE, Router 1, ? TURNS, jogadores cinzentos SEM ? (próprio jogador)
+            # Event_125: LINK FAILURE, Router 2, 4 TURNS, jogadores cinzentos COM ? (escolha do jogador)
+            {
+                "duration_turns": 4,
+                "router_id": 2,
+                "target_player": None,
+                "player_choice": True,
+                "event_type": EventType.LINK_FAILURE,
+            },
+            # Event_126: LINK FAILURE, Router 3, 4 TURNS, jogadores cinzentos COM ? (escolha do jogador)
+            {
+                "duration_turns": 4,
+                "router_id": 3,
+                "target_player": None,
+                "player_choice": True,
+                "event_type": EventType.LINK_FAILURE,
+            },
+            # Event_127: LINK FAILURE, Router 1, ? TURNS, jogadores cinzentos SEM ? (próprio jogador)
             {
                 "duration_turns": "variable",
                 "router_id": 1,
@@ -1559,7 +2184,7 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.LINK_FAILURE,
             },
-            # Event_58: LINK FAILURE, Router 2, ? TURNS, jogadores cinzentos SEM ? (próprio jogador)
+            # Event_128: LINK FAILURE, Router 2, ? TURNS, jogadores cinzentos SEM ? (próprio jogador)
             {
                 "duration_turns": "variable",
                 "router_id": 2,
@@ -1567,7 +2192,7 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.LINK_FAILURE,
             },
-            # Event_59: LINK FAILURE, Router 3, ? TURNS, jogadores cinzentos SEM ? (próprio jogador)
+            # Event_129: LINK FAILURE, Router 3, ? TURNS, jogadores cinzentos SEM ? (próprio jogador)
             {
                 "duration_turns": "variable",
                 "router_id": 3,
@@ -1575,7 +2200,7 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.LINK_FAILURE,
             },
-            # Event_60: LINK FAILURE, Router 1, ? TURNS, jogador amarelo
+            # Event_130: LINK FAILURE, Router 1, ? TURNS, jogador amarelo
             {
                 "duration_turns": "variable",
                 "router_id": 1,
@@ -1583,7 +2208,23 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.LINK_FAILURE,
             },
-            # Event_61: LINK FAILURE, Router 1, ? TURNS, jogador verde
+            # Event_131: LINK FAILURE, Router 2, ? TURNS, jogador amarelo
+            {
+                "duration_turns": "variable",
+                "router_id": 2,
+                "target_player": "yellow",
+                "player_choice": False,
+                "event_type": EventType.LINK_FAILURE,
+            },
+            # Event_132: LINK FAILURE, Router 3, ? TURNS, jogador amarelo
+            {
+                "duration_turns": "variable",
+                "router_id": 3,
+                "target_player": "yellow",
+                "player_choice": False,
+                "event_type": EventType.LINK_FAILURE,
+            },
+            # Event_133: LINK FAILURE, Router 1, ? TURNS, jogador verde
             {
                 "duration_turns": "variable",
                 "router_id": 1,
@@ -1591,7 +2232,23 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.LINK_FAILURE,
             },
-            # Event_62: LINK FAILURE, Router 1, ? TURNS, jogador azul
+            # Event_134: LINK FAILURE, Router 2, ? TURNS, jogador verde
+            {
+                "duration_turns": "variable",
+                "router_id": 2,
+                "target_player": "green",
+                "player_choice": False,
+                "event_type": EventType.LINK_FAILURE,
+            },
+            # Event_135: LINK FAILURE, Router 3, ? TURNS, jogador verde
+            {
+                "duration_turns": "variable",
+                "router_id": 3,
+                "target_player": "green",
+                "player_choice": False,
+                "event_type": EventType.LINK_FAILURE,
+            },
+            # Event_136: LINK FAILURE, Router 1, ? TURNS, jogador azul
             {
                 "duration_turns": "variable",
                 "router_id": 1,
@@ -1599,7 +2256,23 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.LINK_FAILURE,
             },
-            # Event_63: LINK FAILURE, Router 1, ? TURNS, jogador vermelho
+            # Event_137: LINK FAILURE, Router 2, ? TURNS, jogador azul
+            {
+                "duration_turns": "variable",
+                "router_id": 2,
+                "target_player": "blue",
+                "player_choice": False,
+                "event_type": EventType.LINK_FAILURE,
+            },
+            # Event_138: LINK FAILURE, Router 3, ? TURNS, jogador azul
+            {
+                "duration_turns": "variable",
+                "router_id": 3,
+                "target_player": "blue",
+                "player_choice": False,
+                "event_type": EventType.LINK_FAILURE,
+            },
+            # Event_139: LINK FAILURE, Router 1, ? TURNS, jogador vermelho
             {
                 "duration_turns": "variable",
                 "router_id": 1,
@@ -1607,7 +2280,23 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.LINK_FAILURE,
             },
-            # Event_64: LINK FAILURE, Router 1, ? TURNS, jogadores cinzentos COM interrogação (escolha do jogador)
+            # Event_140: LINK FAILURE, Router 2, ? TURNS, jogador vermelho
+            {
+                "duration_turns": "variable",
+                "router_id": 2,
+                "target_player": "red",
+                "player_choice": False,
+                "event_type": EventType.LINK_FAILURE,
+            },
+            # Event_141: LINK FAILURE, Router 3, ? TURNS, jogador vermelho
+            {
+                "duration_turns": "variable",
+                "router_id": 3,
+                "target_player": "red",
+                "player_choice": False,
+                "event_type": EventType.LINK_FAILURE,
+            },
+            # Event_142: LINK FAILURE, Router 1, ? TURNS, jogadores cinzentos COM interrogação (escolha do jogador)
             {
                 "duration_turns": "variable",
                 "router_id": 1,
@@ -1615,7 +2304,23 @@ class UserDatabase:
                 "player_choice": True,
                 "event_type": EventType.LINK_FAILURE,
             },
-            # Event_65: TRAFFIC BURST, Router 1, 1 TURN, jogadores cinzentos SEM interrogação (próprio jogador)
+            # Event_143: LINK FAILURE, Router 2, ? TURNS, jogadores cinzentos COM interrogação (escolha do jogador)
+            {
+                "duration_turns": "variable",
+                "router_id": 2,
+                "target_player": None,
+                "player_choice": True,
+                "event_type": EventType.LINK_FAILURE,
+            },
+            # Event_144: LINK FAILURE, Router 3, ? TURNS, jogadores cinzentos COM interrogação (escolha do jogador)
+            {
+                "duration_turns": "variable",
+                "router_id": 3,
+                "target_player": None,
+                "player_choice": True,
+                "event_type": EventType.LINK_FAILURE,
+            },
+            # Event_145: TRAFFIC BURST, Router 1, 1 TURN, jogadores cinzentos SEM interrogação (próprio jogador)
             {
                 "duration_turns": 1,
                 "router_id": 1,
@@ -1623,7 +2328,7 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.TRAFFIC_BURST,
             },
-            # Event_66: TRAFFIC BURST, Router 2, 1 TURN, jogadores cinzentos SEM interrogação (próprio jogador)
+            # Event_146: TRAFFIC BURST, Router 2, 1 TURN, jogadores cinzentos SEM interrogação (próprio jogador)
             {
                 "duration_turns": 1,
                 "router_id": 2,
@@ -1631,7 +2336,7 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.TRAFFIC_BURST,
             },
-            # Event_67: TRAFFIC BURST, Router 3, 1 TURN, jogadores cinzentos SEM interrogação (próprio jogador)
+            # Event_147: TRAFFIC BURST, Router 3, 1 TURN, jogadores cinzentos SEM interrogação (próprio jogador)
             {
                 "duration_turns": 1,
                 "router_id": 3,
@@ -1639,7 +2344,7 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.TRAFFIC_BURST,
             },
-            # Event_68: TRAFFIC BURST, Router 1, 1 TURN, jogador amarelo
+            # Event_148: TRAFFIC BURST, Router 1, 1 TURN, jogador amarelo
             {
                 "duration_turns": 1,
                 "router_id": 1, 
@@ -1647,7 +2352,23 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.TRAFFIC_BURST,
             },
-            # Event_69: TRAFFIC BURST, Router 1, 1 TURN, jogador verde
+            # Event_149: TRAFFIC BURST, Router 2, 1 TURN, jogador amarelo
+            {
+                "duration_turns": 1,
+                "router_id": 2,
+                "target_player": "yellow",
+                "player_choice": False,
+                "event_type": EventType.TRAFFIC_BURST,
+            },
+            # Event_150: TRAFFIC BURST, Router 3, 1 TURN, jogador amarelo
+            {
+                "duration_turns": 1,
+                "router_id": 3,
+                "target_player": "yellow",
+                "player_choice": False,
+                "event_type": EventType.TRAFFIC_BURST,
+            },
+            # Event_151: TRAFFIC BURST, Router 1, 1 TURN, jogador verde
             {
                 "duration_turns": 1,
                 "router_id": 1,
@@ -1655,7 +2376,23 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.TRAFFIC_BURST,
             },
-            # Event_70: TRAFFIC BURST, Router 1, 1 TURN, jogador azul
+            # Event_152: TRAFFIC BURST, Router 2, 1 TURN, jogador verde
+            {
+                "duration_turns": 1,
+                "router_id": 2,
+                "target_player": "green",
+                "player_choice": False,
+                "event_type": EventType.TRAFFIC_BURST,
+            },
+            # Event_153: TRAFFIC BURST, Router 3, 1 TURN, jogador verde
+            {
+                "duration_turns": 1,
+                "router_id": 3,
+                "target_player": "green",
+                "player_choice": False,
+                "event_type": EventType.TRAFFIC_BURST,
+            },
+            # Event_154: TRAFFIC BURST, Router 1, 1 TURN, jogador azul
             {
                 "duration_turns": 1,
                 "router_id": 1,
@@ -1663,7 +2400,23 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.TRAFFIC_BURST,
             },
-            # Event_71: TRAFFIC BURST, Router 1, 1 TURN, jogador vermelho
+            # Event_155: TRAFFIC BURST, Router 2, 1 TURN, jogador azul
+            {
+                "duration_turns": 1,
+                "router_id": 2,
+                "target_player": "blue",
+                "player_choice": False,
+                "event_type": EventType.TRAFFIC_BURST,
+            },
+            # Event_156: TRAFFIC BURST, Router 3, 1 TURN, jogador azul
+            {
+                "duration_turns": 1,
+                "router_id": 3,
+                "target_player": "blue",
+                "player_choice": False,
+                "event_type": EventType.TRAFFIC_BURST,
+            },
+            # Event_157: TRAFFIC BURST, Router 1, 1 TURN, jogador vermelho
             {
                 "duration_turns": 1,
                 "router_id": 1,
@@ -1671,7 +2424,23 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.TRAFFIC_BURST,
             },
-            # Event_72: TRAFFIC BURST, Router 1, 1 TURN, jogador jogadores cinzentos COM interrogação (escolha do jogador)
+            # Event_158: TRAFFIC BURST, Router 2, 1 TURN, jogador vermelho
+            {
+                "duration_turns": 1,
+                "router_id": 2,
+                "target_player": "red",
+                "player_choice": False,
+                "event_type": EventType.TRAFFIC_BURST,
+            },
+            # Event_159: TRAFFIC BURST, Router 3, 1 TURN, jogador vermelho
+            {
+                "duration_turns": 1,
+                "router_id": 3,
+                "target_player": "red",
+                "player_choice": False,
+                "event_type": EventType.TRAFFIC_BURST,
+            },
+            # Event_160: TRAFFIC BURST, Router 1, 1 TURN, jogadores cinzentos COM interrogação (escolha do jogador)
             {
                 "duration_turns": 1,
                 "router_id": 1,
@@ -1679,7 +2448,23 @@ class UserDatabase:
                 "player_choice": True,
                 "event_type": EventType.TRAFFIC_BURST,
             },
-            # Event_73: TRAFFIC BURST, Router 1, 2 TURNS, jogadores cinzentos SEM interrogação (próprio jogador)
+            # Event_161: TRAFFIC BURST, Router 2, 1 TURN, jogadores cinzentos COM interrogação (escolha do jogador)
+            {
+                "duration_turns": 1,
+                "router_id": 2,
+                "target_player": None,
+                "player_choice": True,
+                "event_type": EventType.TRAFFIC_BURST,
+            },
+            # Event_162: TRAFFIC BURST, Router 3, 1 TURN, jogadores cinzentos COM interrogação (escolha do jogador)
+            {
+                "duration_turns": 1,
+                "router_id": 3,
+                "target_player": None,
+                "player_choice": True,
+                "event_type": EventType.TRAFFIC_BURST,
+            },
+            # Event_163: TRAFFIC BURST, Router 1, 2 TURNS, jogadores cinzentos SEM interrogação (próprio jogador)
             {
                 "duration_turns": 2,
                 "router_id": 1,
@@ -1687,7 +2472,7 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.TRAFFIC_BURST,
             },
-            # Event_74: TRAFFIC BURST, Router 2, 2 TURNS, jogadores cinzentos SEM interrogação (próprio jogador)
+            # Event_164: TRAFFIC BURST, Router 2, 2 TURNS, jogadores cinzentos SEM interrogação (próprio jogador)
             {
                 "duration_turns": 2,
                 "router_id": 2,
@@ -1695,7 +2480,7 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.TRAFFIC_BURST,
             },
-            # Event_75: TRAFFIC BURST, Router 3, 2 TURNS, jogadores cinzentos SEM interrogação (próprio jogador)
+            # Event_165: TRAFFIC BURST, Router 3, 2 TURNS, jogadores cinzentos SEM interrogação (próprio jogador)
             {
                 "duration_turns": 2,
                 "router_id": 3,
@@ -1703,7 +2488,7 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.TRAFFIC_BURST,
             },
-            # Event_76: TRAFFIC BURST, Router 1, 2 TURNS, jogador amarelo
+            # Event_166: TRAFFIC BURST, Router 1, 2 TURNS, jogador amarelo
             {
                 "duration_turns": 2,
                 "router_id": 1,
@@ -1711,7 +2496,23 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.TRAFFIC_BURST,
             },
-            # Event_77: TRAFFIC BURST, Router 1, 2 TURNS, jogador verde
+            # Event_167: TRAFFIC BURST, Router 2, 2 TURNS, jogador amarelo
+            {
+                "duration_turns": 2,
+                "router_id": 2,
+                "target_player": "yellow",
+                "player_choice": False,
+                "event_type": EventType.TRAFFIC_BURST,
+            },
+            # Event_168: TRAFFIC BURST, Router 3, 2 TURNS, jogador amarelo
+            {
+                "duration_turns": 2,
+                "router_id": 3,
+                "target_player": "yellow",
+                "player_choice": False,
+                "event_type": EventType.TRAFFIC_BURST,
+            },
+            # Event_169: TRAFFIC BURST, Router 1, 2 TURNS, jogador verde
             {
                 "duration_turns": 2,
                 "router_id": 1,
@@ -1719,7 +2520,23 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.TRAFFIC_BURST,
             },
-            # Event_78: TRAFFIC BURST, Router 1, 2 TURNS, jogador azul
+            # Event_170: TRAFFIC BURST, Router 2, 2 TURNS, jogador verde
+            {
+                "duration_turns": 2,
+                "router_id": 2,
+                "target_player": "green",
+                "player_choice": False,
+                "event_type": EventType.TRAFFIC_BURST,
+            },
+            # Event_171: TRAFFIC BURST, Router 3, 2 TURNS, jogador verde
+            {
+                "duration_turns": 2,
+                "router_id": 3,
+                "target_player": "green",
+                "player_choice": False,
+                "event_type": EventType.TRAFFIC_BURST,
+            },
+            # Event_172: TRAFFIC BURST, Router 1, 2 TURNS, jogador azul
             {
                 "duration_turns": 2,
                 "router_id": 1,
@@ -1727,7 +2544,23 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.TRAFFIC_BURST,
             },
-            # Event_79: TRAFFIC BURST, Router 1, 2 TURNS, jogador vermelho
+            # Event_173: TRAFFIC BURST, Router 2, 2 TURNS, jogador azul
+            {
+                "duration_turns": 2,
+                "router_id": 2,
+                "target_player": "blue",
+                "player_choice": False,
+                "event_type": EventType.TRAFFIC_BURST,
+            },
+            # Event_174: TRAFFIC BURST, Router 3, 2 TURNS, jogador azul
+            {
+                "duration_turns": 2,
+                "router_id": 3,
+                "target_player": "blue",
+                "player_choice": False,
+                "event_type": EventType.TRAFFIC_BURST,
+            },
+            # Event_175: TRAFFIC BURST, Router 1, 2 TURNS, jogador vermelho
             {
                 "duration_turns": 2,
                 "router_id": 1,
@@ -1735,7 +2568,23 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.TRAFFIC_BURST,
             },
-            # Event_80: TRAFFIC BURST, Router 1, 2 TURNS, jogador jogadores cinzentos COM interrogação (escolha do jogador)
+            # Event_176: TRAFFIC BURST, Router 2, 2 TURNS, jogador vermelho
+            {
+                "duration_turns": 2,
+                "router_id": 2,
+                "target_player": "red",
+                "player_choice": False,
+                "event_type": EventType.TRAFFIC_BURST,
+            },
+            # Event_177: TRAFFIC BURST, Router 3, 2 TURNS, jogador vermelho
+            {
+                "duration_turns": 2,
+                "router_id": 3,
+                "target_player": "red",
+                "player_choice": False,
+                "event_type": EventType.TRAFFIC_BURST,
+            },
+            # Event_178: TRAFFIC BURST, Router 1, 2 TURNS, jogadores cinzentos COM interrogação (escolha do jogador)
             {
                 "duration_turns": 2,
                 "router_id": 1,
@@ -1743,7 +2592,23 @@ class UserDatabase:
                 "player_choice": True,
                 "event_type": EventType.TRAFFIC_BURST,
             },
-            # Event_81: TRAFFIC BURST, Router 1, 4 TURNS, jogadores cinzentos SEM interrogação (próprio jogador)
+            # Event_179: TRAFFIC BURST, Router 2, 2 TURNS, jogadores cinzentos COM interrogação (escolha do jogador)
+            {
+                "duration_turns": 2,
+                "router_id": 2,
+                "target_player": None,
+                "player_choice": True,
+                "event_type": EventType.TRAFFIC_BURST,
+            },
+            # Event_180: TRAFFIC BURST, Router 3, 2 TURNS, jogadores cinzentos COM interrogação (escolha do jogador)
+            {
+                "duration_turns": 2,
+                "router_id": 3,
+                "target_player": None,
+                "player_choice": True,
+                "event_type": EventType.TRAFFIC_BURST,
+            },
+            # Event_181: TRAFFIC BURST, Router 1, 4 TURNS, jogadores cinzentos SEM interrogação (próprio jogador)
             {
                 "duration_turns": 4,
                 "router_id": 1,
@@ -1751,7 +2616,7 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.TRAFFIC_BURST,
             },
-            # Event_82: TRAFFIC BURST, Router 2, 4 TURNS, jogadores cinzentos SEM interrogação (próprio jogador)
+            # Event_182: TRAFFIC BURST, Router 2, 4 TURNS, jogadores cinzentos SEM interrogação (próprio jogador)
             {
                 "duration_turns": 4,
                 "router_id": 2,
@@ -1759,7 +2624,7 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.TRAFFIC_BURST,
             },
-            # Event_83: TRAFFIC BURST, Router 3, 4 TURNS, jogadores cinzentos SEM interrogação (próprio jogador)
+            # Event_183: TRAFFIC BURST, Router 3, 4 TURNS, jogadores cinzentos SEM interrogação (próprio jogador)
             {
                 "duration_turns": 4,
                 "router_id": 3, 
@@ -1767,7 +2632,7 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.TRAFFIC_BURST,
             },
-            # Event_84: TRAFFIC BURST, Router 1, 4 TURNS, jogador amarelo
+            # Event_184: TRAFFIC BURST, Router 1, 4 TURNS, jogador amarelo
             {
                 "duration_turns": 4,
                 "router_id": 1,
@@ -1775,7 +2640,23 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.TRAFFIC_BURST,
             },
-            # Event_85: TRAFFIC BURST, Router 1, 4 TURNS, jogador verde
+            # Event_185: TRAFFIC BURST, Router 2, 4 TURNS, jogador amarelo
+            {
+                "duration_turns": 4,
+                "router_id": 2,
+                "target_player": "yellow",
+                "player_choice": False,
+                "event_type": EventType.TRAFFIC_BURST,
+            },
+            # Event_186: TRAFFIC BURST, Router 3, 4 TURNS, jogador amarelo
+            {
+                "duration_turns": 4,
+                "router_id": 3,
+                "target_player": "yellow",
+                "player_choice": False,
+                "event_type": EventType.TRAFFIC_BURST,
+            },
+            # Event_187: TRAFFIC BURST, Router 1, 4 TURNS, jogador verde
             {
                 "duration_turns": 4,
                 "router_id": 1,
@@ -1783,7 +2664,23 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.TRAFFIC_BURST,
             },
-            # Event_86: TRAFFIC BURST, Router 1, 4 TURNS, jogador azul
+            # Event_188: TRAFFIC BURST, Router 2, 4 TURNS, jogador verde
+            {
+                "duration_turns": 4,
+                "router_id": 2,
+                "target_player": "green",
+                "player_choice": False,
+                "event_type": EventType.TRAFFIC_BURST,
+            },
+            # Event_189: TRAFFIC BURST, Router 3, 4 TURNS, jogador verde
+            {
+                "duration_turns": 4,
+                "router_id": 3,
+                "target_player": "green",
+                "player_choice": False,
+                "event_type": EventType.TRAFFIC_BURST,
+            },
+            # Event_190: TRAFFIC BURST, Router 1, 4 TURNS, jogador azul
             {
                 "duration_turns": 4,
                 "router_id": 1,
@@ -1791,7 +2688,23 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.TRAFFIC_BURST,
             },
-            # Event_87: TRAFFIC BURST, Router 1, 4 TURNS, jogador vermelho
+            # Event_191: TRAFFIC BURST, Router 2, 4 TURNS, jogador azul
+            {
+                "duration_turns": 4,
+                "router_id": 2,
+                "target_player": "blue",
+                "player_choice": False,
+                "event_type": EventType.TRAFFIC_BURST,
+            },
+            # Event_192: TRAFFIC BURST, Router 3, 4 TURNS, jogador azul
+            {
+                "duration_turns": 4,
+                "router_id": 3,
+                "target_player": "blue",
+                "player_choice": False,
+                "event_type": EventType.TRAFFIC_BURST,
+            },
+            # Event_193: TRAFFIC BURST, Router 1, 4 TURNS, jogador vermelho
             {
                 "duration_turns": 4,
                 "router_id": 1,
@@ -1799,7 +2712,23 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.TRAFFIC_BURST,
             },
-            # Event_88: TRAFFIC BURST, Router 1, 4 TURNS, jogadores cinzentos COM interrogação (escolha do jogador)
+            # Event_194: TRAFFIC BURST, Router 2, 4 TURNS, jogador vermelho
+            {
+                "duration_turns": 4,
+                "router_id": 2,
+                "target_player": "red",
+                "player_choice": False,
+                "event_type": EventType.TRAFFIC_BURST,
+            },
+            # Event_195: TRAFFIC BURST, Router 3, 4 TURNS, jogador vermelho
+            {
+                "duration_turns": 4,
+                "router_id": 3,
+                "target_player": "red",
+                "player_choice": False,
+                "event_type": EventType.TRAFFIC_BURST,
+            },
+            # Event_196: TRAFFIC BURST, Router 1, 4 TURNS, jogadores cinzentos COM interrogação (escolha do jogador)
             {
                 "duration_turns": 4,
                 "router_id": 1,
@@ -1807,71 +2736,169 @@ class UserDatabase:
                 "player_choice": True,
                 "event_type": EventType.TRAFFIC_BURST,
             },
-            # Event_89: TRAFFIC BURST, Router 1, ? TURNS, jogadores cinzentos SEM interrogação (próprio jogador)
+            # Event_197: TRAFFIC BURST, Router 2, 4 TURNS, jogadores cinzentos COM interrogação (escolha do jogador)
             {
-                "duration_turns": "variable",
-                "router_id": 1,
-                "target_player": None,
-                "player_choice": False,
-                "event_type": EventType.TRAFFIC_BURST,
-            },
-            # Event_90: TRAFFIC BURST, Router 2, ? TURNS, jogadores cinzentos SEM interrogação (próprio jogador)
-            {
-                "duration_turns": "variable",
+                "duration_turns": 4,
                 "router_id": 2,
-                "target_player": None,
-                "player_choice": False,
-                "event_type": EventType.TRAFFIC_BURST,
-            },
-            # Event_91: TRAFFIC BURST, Router 3, ? TURNS, jogadores cinzentos SEM interrogação (próprio jogador)
-            {
-                "duration_turns": "variable",
-                "router_id": 3, 
-                "target_player": None,
-                "player_choice": False,
-                "event_type": EventType.TRAFFIC_BURST,
-            },
-            # Event_92: TRAFFIC BURST, Router 1, ? TURNS, jogador amarelo
-            {
-                "duration_turns": "variable",
-                "router_id": 1,
-                "target_player": "yellow",
-                "player_choice": False,
-                "event_type": EventType.TRAFFIC_BURST,
-            },
-            # Event_93: TRAFFIC BURST, Router 1, ? TURNS, jogador verde
-            {
-                "duration_turns": "variable",
-                "router_id": 1,
-                "target_player": "green",
-                "player_choice": False,
-                "event_type": EventType.TRAFFIC_BURST,
-            },
-            # Event_94: TRAFFIC BURST, Router 1, ? TURNS, jogador azul
-            {
-                "duration_turns": "variable",
-                "router_id": 1,
-                "target_player": "blue",
-                "player_choice": False,
-                "event_type": EventType.TRAFFIC_BURST,
-            },
-            # Event_95: TRAFFIC BURST, Router 1, ? TURNS, jogador vermelho
-            {
-                "duration_turns": "variable",
-                "router_id": 1,
-                "target_player": "red",
-                "player_choice": False,
-                "event_type": EventType.TRAFFIC_BURST,
-            },
-            # Event_96: TRAFFIC BURST, Router 1, ? TURNS, jogadores cinzentos COM interrogação (escolha do jogador)
-            {
-                "duration_turns": "variable",
-                "router_id": 1,
                 "target_player": None,
                 "player_choice": True,
                 "event_type": EventType.TRAFFIC_BURST,
             },
-            # Event_97: QUEUE CONGESTION, Router 1, 1 TURN, jogadores cinzentos SEM interrogação (próprio jogador)
+            # Event_198: TRAFFIC BURST, Router 3, 4 TURNS, jogadores cinzentos COM interrogação (escolha do jogador)
+            {
+                "duration_turns": 4,
+                "router_id": 3,
+                "target_player": None,
+                "player_choice": True,
+                "event_type": EventType.TRAFFIC_BURST,
+            },
+            # Event_199: TRAFFIC BURST, Router 1, ? TURNS, jogadores cinzentos SEM interrogação (próprio jogador)
+            {
+                "duration_turns": "variable",
+                "router_id": 1, 
+                "target_player": None,
+                "player_choice": False,
+                "event_type": EventType.TRAFFIC_BURST,
+            },
+            # Event_200: TRAFFIC BURST, Router 2, ? TURNS, jogadores cinzentos SEM interrogação (próprio jogador)
+            {
+                "duration_turns": "variable",
+                "router_id": 2,
+                "target_player": None,
+                "player_choice": False,
+                "event_type": EventType.TRAFFIC_BURST,
+            },
+            # Event_201: TRAFFIC BURST, Router 3, ? TURNS, jogadores cinzentos SEM interrogação (próprio jogador)
+            {
+                "duration_turns": "variable",
+                "router_id": 3,
+                "target_player": None,
+                "player_choice": False,
+                "event_type": EventType.TRAFFIC_BURST,
+            },
+            # Event_202: TRAFFIC BURST, Router 1, ? TURNS, jogador amarelo
+            {
+                "duration_turns": "variable",
+                "router_id": 1,
+                "target_player": "yellow",
+                "player_choice": False,
+                "event_type": EventType.TRAFFIC_BURST,
+            },
+            # Event_203: TRAFFIC BURST, Router 2, ? TURNS, jogador amarelo
+            {
+                "duration_turns": "variable",
+                "router_id": 2,
+                "target_player": "yellow",
+                "player_choice": False,
+                "event_type": EventType.TRAFFIC_BURST,
+            },
+            # Event_204: TRAFFIC BURST, Router 3, ? TURNS, jogador amarelo
+            {
+                "duration_turns": "variable",
+                "router_id": 3,
+                "target_player": "yellow",
+                "player_choice": False,
+                "event_type": EventType.TRAFFIC_BURST,
+            },
+            # Event_205: TRAFFIC BURST, Router 1, ? TURNS, jogador verde
+            {
+                "duration_turns": "variable",
+                "router_id": 1,
+                "target_player": "green",
+                "player_choice": False,
+                "event_type": EventType.TRAFFIC_BURST,
+            },
+            # Event_206: TRAFFIC BURST, Router 2, ? TURNS, jogador verde
+            {
+                "duration_turns": "variable",
+                "router_id": 2,
+                "target_player": "green",
+                "player_choice": False,
+                "event_type": EventType.TRAFFIC_BURST,
+            },
+            # Event_207: TRAFFIC BURST, Router 3, ? TURNS, jogador verde
+            {
+                "duration_turns": "variable",
+                "router_id": 3,
+                "target_player": "green",
+                "player_choice": False,
+                "event_type": EventType.TRAFFIC_BURST,
+            },
+            # Event_208: TRAFFIC BURST, Router 1, ? TURNS, jogador azul
+            {
+                "duration_turns": "variable",
+                "router_id": 3,
+                "target_player": "blue",
+                "player_choice": False,
+                "event_type": EventType.TRAFFIC_BURST,
+            },
+            # Event_209: TRAFFIC BURST, Router 2, ? TURNS, jogador azul
+            {
+                "duration_turns": "variable",
+                "router_id": 2,
+                "target_player": "blue",
+                "player_choice": False,
+                "event_type": EventType.TRAFFIC_BURST,
+            },
+            # Event_210: TRAFFIC BURST, Router 3, ? TURNS, jogador azul
+            {
+                "duration_turns": "variable",
+                "router_id": 3,
+                "target_player": "blue",
+                "player_choice": False,
+                "event_type": EventType.TRAFFIC_BURST,
+            },
+            # Event_211: TRAFFIC BURST, Router 1, ? TURNS, jogador vermelho
+            {
+                "duration_turns": "variable",
+                "router_id": 1,
+                "target_player": "red",
+                "player_choice": False,
+                "event_type": EventType.TRAFFIC_BURST,
+            },
+            # Event_212: TRAFFIC BURST, Router 2, ? TURNS, jogador vermelho
+            {
+                "duration_turns": "variable",
+                "router_id": 2,
+                "target_player": "red",
+                "player_choice": False,
+                "event_type": EventType.TRAFFIC_BURST,
+            },
+            # Event_213: TRAFFIC BURST, Router 3, ? TURNS, jogador vermelho
+            {
+                "duration_turns": "variable",
+                "router_id": 3,
+                "target_player": "red",
+                "player_choice": False,
+                "event_type": EventType.TRAFFIC_BURST,
+            },
+            # Event_214: TRAFFIC BURST, Router 1, ? TURNS, jogadores cinzentos COM interrogação (escolha do jogador)
+            {
+                "duration_turns": "variable",
+                "router_id": 1,
+                "target_player": None,
+                "player_choice": True,
+                "event_type": EventType.TRAFFIC_BURST,
+            },
+            # Event_215: TRAFFIC BURST, Router 2, ? TURNS, jogadores cinzentos COM interrogação (escolha do jogador)
+            {
+                "duration_turns": "variable",
+                "router_id": 2,
+                "target_player": None,
+                "player_choice": True,
+                "event_type": EventType.TRAFFIC_BURST,
+            },
+            # Event_216: TRAFFIC BURST, Router 3, ? TURNS, jogadores cinzentos COM interrogação (escolha do jogador)
+            {
+                "duration_turns": "variable",
+                "router_id": 3,
+                "target_player": None,
+                "player_choice": True,
+                "event_type": EventType.TRAFFIC_BURST,
+            },
+            
+            # QUEUE CONGESTION Events (Event_217 to Event_288)
+            # Event_217: QUEUE CONGESTION, Router 1, 1 TURN, jogadores cinzentos SEM interrogação (próprio jogador)
             {
                 "duration_turns": 1,
                 "router_id": 1,
@@ -1879,7 +2906,7 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.QUEUE_CONGESTION,
             },
-            # Event_98: QUEUE CONGESTION, Router 2, 1 TURN, jogadores cinzentos SEM interrogação (próprio jogador)
+            # Event_218: QUEUE CONGESTION, Router 2, 1 TURN, jogadores cinzentos SEM interrogação (próprio jogador)
             {
                 "duration_turns": 1,
                 "router_id": 2,
@@ -1887,15 +2914,15 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.QUEUE_CONGESTION,
             },
-            # Event_99: QUEUE CONGESTION, Router 3, 1 TURN, jogadores cinzentos SEM interrogação (próprio jogador)
+            # Event_219: QUEUE CONGESTION, Router 3, 1 TURN, jogadores cinzentos SEM interrogação (próprio jogador)
             {
                 "duration_turns": 1,
-                "router_id": 3, 
+                "router_id": 3,
                 "target_player": None,
                 "player_choice": False,
                 "event_type": EventType.QUEUE_CONGESTION,
             },
-            # Event_100: QUEUE CONGESTION, Router 1, 1 TURN, jogador amarelo
+            # Event_220: QUEUE CONGESTION, Router 1, 1 TURN, jogador amarelo
             {
                 "duration_turns": 1,
                 "router_id": 1,
@@ -1903,7 +2930,23 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.QUEUE_CONGESTION,
             },
-            # Event_101: QUEUE CONGESTION, Router 1, 1 TURN, jogador verde
+            # Event_221: QUEUE CONGESTION, Router 2, 1 TURN, jogador amarelo
+            {
+                "duration_turns": 1,
+                "router_id": 2,
+                "target_player": "yellow",
+                "player_choice": False,
+                "event_type": EventType.QUEUE_CONGESTION,
+            },
+            # Event_222: QUEUE CONGESTION, Router 3, 1 TURN, jogador amarelo
+            {
+                "duration_turns": 1,
+                "router_id": 3,
+                "target_player": "yellow",
+                "player_choice": False,
+                "event_type": EventType.QUEUE_CONGESTION,
+            },
+            # Event_223: QUEUE CONGESTION, Router 1, 1 TURN, jogador verde
             {
                 "duration_turns": 1,
                 "router_id": 1,
@@ -1911,7 +2954,23 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.QUEUE_CONGESTION,
             },
-            # Event_102: QUEUE CONGESTION, Router 1, 1 TURN, jogador azul
+            # Event_224: QUEUE CONGESTION, Router 2, 1 TURN, jogador verde
+            {
+                "duration_turns": 1,
+                "router_id": 2,
+                "target_player": "green",
+                "player_choice": False,
+                "event_type": EventType.QUEUE_CONGESTION,
+            },
+            # Event_225: QUEUE CONGESTION, Router 3, 1 TURN, jogador verde
+            {
+                "duration_turns": 1,
+                "router_id": 3,
+                "target_player": "green",
+                "player_choice": False,
+                "event_type": EventType.QUEUE_CONGESTION,
+            },
+            # Event_226: QUEUE CONGESTION, Router 1, 1 TURN, jogador azul
             {
                 "duration_turns": 1,
                 "router_id": 1,
@@ -1919,7 +2978,23 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.QUEUE_CONGESTION,
             },
-            # Event_103: QUEUE CONGESTION, Router 1, 1 TURN, jogador vermelho
+            # Event_227: QUEUE CONGESTION, Router 2, 1 TURN, jogador azul
+            {
+                "duration_turns": 1,
+                "router_id": 2,
+                "target_player": "blue",
+                "player_choice": False,
+                "event_type": EventType.QUEUE_CONGESTION,
+            },
+            # Event_228: QUEUE CONGESTION, Router 3, 1 TURN, jogador azul
+            {
+                "duration_turns": 1,
+                "router_id": 3,
+                "target_player": "blue",
+                "player_choice": False,
+                "event_type": EventType.QUEUE_CONGESTION,
+            },
+            # Event_229: QUEUE CONGESTION, Router 1, 1 TURN, jogador vermelho
             {
                 "duration_turns": 1,
                 "router_id": 1,
@@ -1927,7 +3002,23 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.QUEUE_CONGESTION,
             },
-            # Event_104: QUEUE CONGESTION, Router 1, 1 TURN, jogadores cinzentos COM interrogação (escolha do jogador)
+            # Event_230: QUEUE CONGESTION, Router 2, 1 TURN, jogador vermelho
+            {
+                "duration_turns": 1,
+                "router_id": 2,
+                "target_player": "red",
+                "player_choice": False,
+                "event_type": EventType.QUEUE_CONGESTION,
+            },
+            # Event_231: QUEUE CONGESTION, Router 3, 1 TURN, jogador vermelho
+            {
+                "duration_turns": 1,
+                "router_id": 3,
+                "target_player": "red",
+                "player_choice": False,
+                "event_type": EventType.QUEUE_CONGESTION,
+            },
+            # Event_232: QUEUE CONGESTION, Router 1, 1 TURN, jogadores cinzentos COM interrogação (escolha do jogador)
             {
                 "duration_turns": 1,
                 "router_id": 1,
@@ -1935,7 +3026,23 @@ class UserDatabase:
                 "player_choice": True,
                 "event_type": EventType.QUEUE_CONGESTION,
             },
-            # Event_105: QUEUE CONGESTION, Router 1, 2 TURNS, jogadores cinzentos SEM interrogação (próprio jogador)
+            # Event_233: QUEUE CONGESTION, Router 2, 1 TURN, jogadores cinzentos COM interrogação (escolha do jogador)
+            {
+                "duration_turns": 1,
+                "router_id": 2,
+                "target_player": None,
+                "player_choice": True,
+                "event_type": EventType.QUEUE_CONGESTION,
+            },
+            # Event_234: QUEUE CONGESTION, Router 3, 1 TURN, jogadores cinzentos COM interrogação (escolha do jogador)
+            {
+                "duration_turns": 1,
+                "router_id": 3,
+                "target_player": None,
+                "player_choice": True,
+                "event_type": EventType.QUEUE_CONGESTION,
+            },
+            # Event_235: QUEUE CONGESTION, Router 1, 2 TURNS, jogadores cinzentos SEM interrogação (próprio jogador)
             {
                 "duration_turns": 2,
                 "router_id": 1,
@@ -1943,7 +3050,7 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.QUEUE_CONGESTION,
             },
-            # Event_106: QUEUE CONGESTION, Router 2, 2 TURNS, jogadores cinzentos SEM interrogação (próprio jogador)
+            # Event_236: QUEUE CONGESTION, Router 2, 2 TURNS, jogadores cinzentos SEM interrogação (próprio jogador)
             {
                 "duration_turns": 2,
                 "router_id": 2,
@@ -1951,7 +3058,7 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.QUEUE_CONGESTION,
             },
-            # Event_107: QUEUE CONGESTION, Router 3, 2 TURNS, jogadores cinzentos SEM interrogação (próprio jogador)
+            # Event_237: QUEUE CONGESTION, Router 3, 2 TURNS, jogadores cinzentos SEM interrogação (próprio jogador)
             {
                 "duration_turns": 2,
                 "router_id": 3,
@@ -1959,7 +3066,7 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.QUEUE_CONGESTION,
             },
-            # Event_108: QUEUE CONGESTION, Router 1, 2 TURNS, jogador amarelo
+            # Event_238: QUEUE CONGESTION, Router 1, 2 TURNS, jogador amarelo
             {
                 "duration_turns": 2,
                 "router_id": 1,
@@ -1967,7 +3074,23 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.QUEUE_CONGESTION,
             },
-            # Event_109: QUEUE CONGESTION, Router 1, 2 TURNS, jogador verde
+            # Event_239: QUEUE CONGESTION, Router 2, 2 TURNS, jogador amarelo
+            {
+                "duration_turns": 2,
+                "router_id": 2,
+                "target_player": "yellow",
+                "player_choice": False,
+                "event_type": EventType.QUEUE_CONGESTION,
+            },
+            # Event_240: QUEUE CONGESTION, Router 3, 2 TURNS, jogador amarelo
+            {
+                "duration_turns": 2,
+                "router_id": 3,
+                "target_player": "yellow",
+                "player_choice": False,
+                "event_type": EventType.QUEUE_CONGESTION,
+            },
+            # Event_241: QUEUE CONGESTION, Router 1, 2 TURNS, jogador verde
             {
                 "duration_turns": 2,
                 "router_id": 1,
@@ -1975,7 +3098,23 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.QUEUE_CONGESTION,
             },
-            # Event_110: QUEUE CONGESTION, Router 1, 2 TURNS, jogador azul
+            # Event_242: QUEUE CONGESTION, Router 2, 2 TURNS, jogador verde
+            {
+                "duration_turns": 2,
+                "router_id": 2,
+                "target_player": "green",
+                "player_choice": False,
+                "event_type": EventType.QUEUE_CONGESTION,
+            },
+            # Event_243: QUEUE CONGESTION, Router 3, 2 TURNS, jogador verde
+            {
+                "duration_turns": 2,
+                "router_id": 3,
+                "target_player": "green",
+                "player_choice": False,
+                "event_type": EventType.QUEUE_CONGESTION,
+            },
+            # Event_244: QUEUE CONGESTION, Router 1, 2 TURNS, jogador azul
             {
                 "duration_turns": 2,
                 "router_id": 1,
@@ -1983,7 +3122,23 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.QUEUE_CONGESTION,
             },
-            # Event_111: QUEUE CONGESTION, Router 1, 2 TURNS, jogador vermelho
+            # Event_245: QUEUE CONGESTION, Router 2, 2 TURNS, jogador azul
+            {
+                "duration_turns": 2,
+                "router_id": 2,
+                "target_player": "blue",
+                "player_choice": False,
+                "event_type": EventType.QUEUE_CONGESTION,
+            },
+            # Event_246: QUEUE CONGESTION, Router 3, 2 TURNS, jogador azul
+            {
+                "duration_turns": 2,
+                "router_id": 3,
+                "target_player": "blue",
+                "player_choice": False,
+                "event_type": EventType.QUEUE_CONGESTION,
+            },
+            # Event_247: QUEUE CONGESTION, Router 1, 2 TURNS, jogador vermelho
             {
                 "duration_turns": 2,
                 "router_id": 1,
@@ -1991,7 +3146,23 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.QUEUE_CONGESTION,
             },
-            # Event_112: QUEUE CONGESTION, Router 1, 2 TURNS, jogadores cinzentos COM interrogação (escolha do jogador)
+            # Event_248: QUEUE CONGESTION, Router 2, 2 TURNS, jogador vermelho
+            {
+                "duration_turns": 2,
+                "router_id": 2,
+                "target_player": "red",
+                "player_choice": False,
+                "event_type": EventType.QUEUE_CONGESTION,
+            },
+            # Event_249: QUEUE CONGESTION, Router 3, 2 TURNS, jogador vermelho
+            {
+                "duration_turns": 2,
+                "router_id": 3,
+                "target_player": "red",
+                "player_choice": False,
+                "event_type": EventType.QUEUE_CONGESTION,
+            },
+            # Event_250: QUEUE CONGESTION, Router 1, 2 TURNS, jogadores cinzentos COM interrogação (escolha do jogador)
             {
                 "duration_turns": 2,
                 "router_id": 1,
@@ -1999,7 +3170,23 @@ class UserDatabase:
                 "player_choice": True,
                 "event_type": EventType.QUEUE_CONGESTION,
             },
-            # Event_113: QUEUE CONGESTION, Router 1, 4 TURNS, jogadores cinzentos SEM interrogação (próprio jogador)
+            # Event_251: QUEUE CONGESTION, Router 2, 2 TURNS, jogadores cinzentos COM interrogação (escolha do jogador)
+            {
+                "duration_turns": 2,
+                "router_id": 2,
+                "target_player": None,
+                "player_choice": True,
+                "event_type": EventType.QUEUE_CONGESTION,
+            },
+            # Event_252: QUEUE CONGESTION, Router 3, 2 TURNS, jogadores cinzentos COM interrogação (escolha do jogador)
+            {
+                "duration_turns": 2,
+                "router_id": 3,
+                "target_player": None,
+                "player_choice": True,
+                "event_type": EventType.QUEUE_CONGESTION,
+            },
+            # Event_253: QUEUE CONGESTION, Router 1, 4 TURNS, jogadores cinzentos SEM interrogação (próprio jogador)
             {
                 "duration_turns": 4,
                 "router_id": 1,
@@ -2007,7 +3194,7 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.QUEUE_CONGESTION,
             },
-            # Event_114: QUEUE CONGESTION, Router 2, 4 TURNS, jogadores cinzentos SEM interrogação (próprio jogador)
+            # Event_254: QUEUE CONGESTION, Router 2, 4 TURNS, jogadores cinzentos SEM interrogação (próprio jogador)
             {
                 "duration_turns": 4,
                 "router_id": 2,
@@ -2015,7 +3202,7 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.QUEUE_CONGESTION,
             },
-            # Event_115: QUEUE CONGESTION, Router 3, 4 TURNS, jogadores cinzentos SEM interrogação (próprio jogador)
+            # Event_255: QUEUE CONGESTION, Router 3, 4 TURNS, jogadores cinzentos SEM interrogação (próprio jogador)
             {
                 "duration_turns": 4,
                 "router_id": 3,
@@ -2023,7 +3210,7 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.QUEUE_CONGESTION,
             },
-            # Event_116: QUEUE CONGESTION, Router 1, 4 TURNS, jogador amarelo
+            # Event_256: QUEUE CONGESTION, Router 1, 4 TURNS, jogador amarelo
             {
                 "duration_turns": 4,
                 "router_id": 1,
@@ -2031,7 +3218,23 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.QUEUE_CONGESTION,
             },
-            # Event_117: QUEUE CONGESTION, Router 1, 4 TURNS, jogador verde
+            # Event_257: QUEUE CONGESTION, Router 2, 4 TURNS, jogador amarelo
+            {
+                "duration_turns": 4,
+                "router_id": 2,
+                "target_player": "yellow",
+                "player_choice": False,
+                "event_type": EventType.QUEUE_CONGESTION,
+            },
+            # Event_258: QUEUE CONGESTION, Router 3, 4 TURNS, jogador amarelo
+            {
+                "duration_turns": 4,
+                "router_id": 3,
+                "target_player": "yellow",
+                "player_choice": False,
+                "event_type": EventType.QUEUE_CONGESTION,
+            },
+            # Event_259: QUEUE CONGESTION, Router 1, 4 TURNS, jogador verde
             {
                 "duration_turns": 4,
                 "router_id": 1,
@@ -2039,7 +3242,23 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.QUEUE_CONGESTION,
             },
-            # Event_118: QUEUE CONGESTION, Router 1, 4 TURNS, jogador azul
+            # Event_260: QUEUE CONGESTION, Router 2, 4 TURNS, jogador verde
+            {
+                "duration_turns": 4,
+                "router_id": 2,
+                "target_player": "green",
+                "player_choice": False,
+                "event_type": EventType.QUEUE_CONGESTION,
+            },
+            # Event_261: QUEUE CONGESTION, Router 3, 4 TURNS, jogador verde
+            {
+                "duration_turns": 4,
+                "router_id": 3,
+                "target_player": "green",
+                "player_choice": False,
+                "event_type": EventType.QUEUE_CONGESTION,
+            },
+            # Event_262: QUEUE CONGESTION, Router 1, 4 TURNS, jogador azul
             {
                 "duration_turns": 4,
                 "router_id": 1,
@@ -2047,7 +3266,23 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.QUEUE_CONGESTION,
             },
-            # Event_119: QUEUE CONGESTION, Router 1, 4 TURNS, jogador vermelho
+            # Event_263: QUEUE CONGESTION, Router 2, 4 TURNS, jogador azul
+            {
+                "duration_turns": 4,
+                "router_id": 2,
+                "target_player": "blue",
+                "player_choice": False,
+                "event_type": EventType.QUEUE_CONGESTION,
+            },
+            # Event_264: QUEUE CONGESTION, Router 3, 4 TURNS, jogador azul
+            {
+                "duration_turns": 4,
+                "router_id": 3,
+                "target_player": "blue",
+                "player_choice": False,
+                "event_type": EventType.QUEUE_CONGESTION,
+            },
+            # Event_265: QUEUE CONGESTION, Router 1, 4 TURNS, jogador vermelho
             {
                 "duration_turns": 4,
                 "router_id": 1,
@@ -2055,15 +3290,47 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.QUEUE_CONGESTION,
             },
-            # Event_120: QUEUE CONGESTION, Router 1, 4 TURNS, jogadores cinzentos COM interrogação (escolha do jogador)
+            # Event_266: QUEUE CONGESTION, Router 2, 4 TURNS, jogador vermelho
+            {
+                "duration_turns": 4,
+                "router_id": 2,
+                "target_player": "red",
+                "player_choice": False,
+                "event_type": EventType.QUEUE_CONGESTION,
+            },
+            # Event_267: QUEUE CONGESTION, Router 3, 4 TURNS, jogador vermelho
+            {
+                "duration_turns": 4,
+                "router_id": 3,
+                "target_player": "red",
+                "player_choice": False,
+                "event_type": EventType.QUEUE_CONGESTION,
+            },
+            # Event_268: QUEUE CONGESTION, Router 1, 4 TURNS, jogadores cinzentos COM interrogação (escolha do jogador)
             {
                 "duration_turns": 4,
                 "router_id": 1,
                 "target_player": None,
                 "player_choice": True,
-                "event_type": EventType.QUEUE_CONGESTION,    
+                "event_type": EventType.QUEUE_CONGESTION,
             },
-            # Event_121: QUEUE CONGESTION, Router 1, ? TURNS, jogadores cinzentos SEM interrogação (próprio jogador)
+            # Event_269: QUEUE CONGESTION, Router 2, 4 TURNS, jogadores cinzentos COM interrogação (escolha do jogador)
+            {
+                "duration_turns": 4,
+                "router_id": 2,
+                "target_player": None,
+                "player_choice": True,
+                "event_type": EventType.QUEUE_CONGESTION,
+            },
+            # Event_270: QUEUE CONGESTION, Router 3, 4 TURNS, jogadores cinzentos COM interrogação (escolha do jogador)
+            {
+                "duration_turns": 4,
+                "router_id": 3,
+                "target_player": None,
+                "player_choice": True,
+                "event_type": EventType.QUEUE_CONGESTION,
+            },
+            # Event_271: QUEUE CONGESTION, Router 1, ? TURNS, jogadores cinzentos SEM interrogação (próprio jogador)
             {
                 "duration_turns": "variable",
                 "router_id": 1,
@@ -2071,7 +3338,7 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.QUEUE_CONGESTION,
             },
-            # Event_122: QUEUE CONGESTION, Router 2, ? TURNS, jogadores cinzentos SEM interrogação (próprio jogador)
+            # Event_272: QUEUE CONGESTION, Router 2, ? TURNS, jogadores cinzentos SEM interrogação (próprio jogador)
             {
                 "duration_turns": "variable",
                 "router_id": 2,
@@ -2079,7 +3346,7 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.QUEUE_CONGESTION,
             },
-            # Event_123: QUEUE CONGESTION, Router 3, ? TURNS, jogadores cinzentos SEM interrogação (próprio jogador)
+            # Event_273: QUEUE CONGESTION, Router 3, ? TURNS, jogadores cinzentos SEM interrogação (próprio jogador)
             {
                 "duration_turns": "variable",
                 "router_id": 3,
@@ -2087,7 +3354,7 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.QUEUE_CONGESTION,
             },
-            # Event_124: QUEUE CONGESTION, Router 1, ? TURNS, jogador amarelo
+            # Event_274: QUEUE CONGESTION, Router 1, ? TURNS, jogador amarelo
             {
                 "duration_turns": "variable",
                 "router_id": 1,
@@ -2095,7 +3362,23 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.QUEUE_CONGESTION,
             },
-            # Event_125: QUEUE CONGESTION, Router 1, ? TURNS, jogador verde
+            # Event_275: QUEUE CONGESTION, Router 2, ? TURNS, jogador amarelo
+            {
+                "duration_turns": "variable",
+                "router_id": 2,
+                "target_player": "yellow",
+                "player_choice": False,
+                "event_type": EventType.QUEUE_CONGESTION,
+            },
+            # Event_276: QUEUE CONGESTION, Router 3, ? TURNS, jogador amarelo
+            {
+                "duration_turns": "variable",
+                "router_id": 3,
+                "target_player": "yellow",
+                "player_choice": False,
+                "event_type": EventType.QUEUE_CONGESTION,
+            },
+            # Event_277: QUEUE CONGESTION, Router 1, ? TURNS, jogador verde
             {
                 "duration_turns": "variable",
                 "router_id": 1,
@@ -2103,15 +3386,47 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.QUEUE_CONGESTION,
             },
-            # Event_126: QUEUE CONGESTION, Router 1, ? TURNS, jogador azul
+            # Event_278: QUEUE CONGESTION, Router 2, ? TURNS, jogador verde
             {
                 "duration_turns": "variable",
-                "router_id": 1,
-                "target_player": "blue",
+                "router_id": 2,
+                "target_player": "green",
                 "player_choice": False,
                 "event_type": EventType.QUEUE_CONGESTION,
             },
-            # Event_127: QUEUE CONGESTION, Router 1, ? TURNS, jogador vermelho
+            # Event_279: QUEUE CONGESTION, Router 3, ? TURNS, jogador verde
+            {
+                "duration_turns": "variable",
+                "router_id": 3,
+                "target_player": "green",
+                "player_choice": False,
+                "event_type": EventType.QUEUE_CONGESTION,
+            },
+            # Event_280: QUEUE CONGESTION, Router 1, ? TURNS, jogador azul
+            {
+                "duration_turns": "variable",
+                "router_id": 1,
+                "target_player": "blue",
+                "player_choice": True,
+                "event_type": EventType.QUEUE_CONGESTION,
+            },
+            # Event_281: QUEUE CONGESTION, Router 2, ? TURNS, jogador azul
+            {
+                "duration_turns": "variable",
+                "router_id": 2,
+                "target_player": "blue",
+                "player_choice": True,
+                "event_type": EventType.QUEUE_CONGESTION,
+            },
+            # Event_282: QUEUE CONGESTION, Router 3, ? TURNS, jogador azul
+            {
+                "duration_turns": "variable",
+                "router_id": 3,
+                "target_player": "blue",
+                "player_choice": True,
+                "event_type": EventType.QUEUE_CONGESTION,
+            },
+            # Event_283: QUEUE CONGESTION, Router 1, ? TURNS, jogador vermelho
             {
                 "duration_turns": "variable",
                 "router_id": 1,
@@ -2119,7 +3434,23 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.QUEUE_CONGESTION,
             },
-            # Event_128: QUEUE CONGESTION, Router 1, ? TURNS, jogadores cinzentos COM interrogação (escolha do jogador)
+            # Event_284: QUEUE CONGESTION, Router 2, ? TURNS, jogador vermelho
+            {
+                "duration_turns": "variable",
+                "router_id": 2,
+                "target_player": "red",
+                "player_choice": False,
+                "event_type": EventType.QUEUE_CONGESTION,
+            },
+            # Event_285: QUEUE CONGESTION, Router 3, ? TURNS, jogador vermelho
+            {
+                "duration_turns": "variable",
+                "router_id": 3,
+                "target_player": "red",
+                "player_choice": False,
+                "event_type": EventType.QUEUE_CONGESTION,
+            },
+            # Event_286: QUEUE CONGESTION, Router 1, ? TURNS, jogadores cinzentos COM interrogação (escolha do jogador)
             {
                 "duration_turns": "variable",
                 "router_id": 1,
@@ -2127,7 +3458,25 @@ class UserDatabase:
                 "player_choice": True,
                 "event_type": EventType.QUEUE_CONGESTION,
             },
-            # Event_129: QUEUE FULL, Router 1, 1 TURN, jogadores cinzentos SEM interrogação (próprio jogador)
+            # Event_287: QUEUE CONGESTION, Router 2, ? TURNS, jogadores cinzentos COM interrogação (escolha do jogador)
+            {
+                "duration_turns": "variable",
+                "router_id": 2,
+                "target_player": None,
+                "player_choice": True,
+                "event_type": EventType.QUEUE_CONGESTION,
+            },
+            # Event_288: QUEUE CONGESTION, Router 3, ? TURNS, jogadores cinzentos COM interrogação (escolha do jogador)
+            {
+                "duration_turns": "variable",
+                "router_id": 3,
+                "target_player": None,
+                "player_choice": True,
+                "event_type": EventType.QUEUE_CONGESTION,
+            },
+            
+            # QUEUE FULL Events (Event_289 to Event_360)
+            # Event_289: QUEUE FULL, Router 1, 1 TURN, jogadores cinzentos SEM interrogação (próprio jogador)
             {
                 "duration_turns": 1,
                 "router_id": 1,
@@ -2135,7 +3484,7 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.QUEUE_FULL,
             },
-           # Event_130: QUEUE FULL, Router 2, 1 TURN, jogadores cinzentos SEM interrogação (próprio jogador)
+            # Event_290: QUEUE FULL, Router 2, 1 TURN, jogadores cinzentos SEM interrogação (próprio jogador)
             {
                 "duration_turns": 1,
                 "router_id": 2,
@@ -2143,7 +3492,7 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.QUEUE_FULL,
             },
-            # Event_131: QUEUE FULL, Router 3, 1 TURN, jogadores cinzentos SEM interrogação (próprio jogador)
+            # Event_291: QUEUE FULL, Router 3, 1 TURN, jogadores cinzentos SEM interrogação (próprio jogador)
             {
                 "duration_turns": 1,
                 "router_id": 3,
@@ -2151,7 +3500,7 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.QUEUE_FULL,
             },
-            # Event_132: QUEUE FULL, Router 1, 1 TURN, jogador amarelo
+            # Event_292: QUEUE FULL, Router 1, 1 TURN, jogador amarelo
             {
                 "duration_turns": 1,
                 "router_id": 1,
@@ -2159,7 +3508,23 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.QUEUE_FULL,
             },
-            # Event_133: QUEUE FULL, Router 1, 1 TURN, jogador verde
+            # Event_293: QUEUE FULL, Router 2, 1 TURN, jogador amarelo
+            {
+                "duration_turns": 1,
+                "router_id": 2,
+                "target_player": "yellow",
+                "player_choice": False,
+                "event_type": EventType.QUEUE_FULL,
+            },
+            # Event_294: QUEUE FULL, Router 3, 1 TURN, jogador amarelo
+            {
+                "duration_turns": 1,
+                "router_id": 3,
+                "target_player": "yellow",
+                "player_choice": False,
+                "event_type": EventType.QUEUE_FULL,
+            },
+            # Event_295: QUEUE FULL, Router 1, 1 TURN, jogador verde
             {
                 "duration_turns": 1,
                 "router_id": 1,
@@ -2167,7 +3532,23 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.QUEUE_FULL,
             },
-            # Event_134: QUEUE FULL, Router 1, 1 TURN, jogador azul
+            # Event_296: QUEUE FULL, Router 2, 1 TURN, jogador verde
+            {
+                "duration_turns": 1,
+                "router_id": 2,
+                "target_player": "green",
+                "player_choice": False,
+                "event_type": EventType.QUEUE_FULL,
+            },
+            # Event_297: QUEUE FULL, Router 3, 1 TURN, jogador verde
+            {
+                "duration_turns": 1,
+                "router_id": 3,
+                "target_player": "green",
+                "player_choice": False,
+                "event_type": EventType.QUEUE_FULL,
+            },
+            # Event_298: QUEUE FULL, Router 1, 1 TURN, jogador azul
             {
                 "duration_turns": 1,
                 "router_id": 1,
@@ -2175,7 +3556,23 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.QUEUE_FULL,
             },
-            # Event_135: QUEUE FULL, Router 1, 1 TURN, jogador vermelho
+            # Event_299: QUEUE FULL, Router 2, 1 TURN, jogador azul
+            {
+                "duration_turns": 1,
+                "router_id": 2,
+                "target_player": "blue",
+                "player_choice": False,
+                "event_type": EventType.QUEUE_FULL,
+            },
+            # Event_300: QUEUE FULL, Router 3, 1 TURN, jogador azul
+            {
+                "duration_turns": 1,
+                "router_id": 3,
+                "target_player": "blue",
+                "player_choice": False,
+                "event_type": EventType.QUEUE_FULL,
+            },
+            # Event_301: QUEUE FULL, Router 1, 1 TURN, jogador vermelho
             {
                 "duration_turns": 1,
                 "router_id": 1,
@@ -2183,7 +3580,23 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.QUEUE_FULL,
             },
-            # Event_136: QUEUE FULL, Router 1, 1 TURN, jogadores cinzentos COM interrogação (escolha do jogador)
+            # Event_302: QUEUE FULL, Router 2, 1 TURN, jogador vermelho
+            {
+                "duration_turns": 1,
+                "router_id": 2,
+                "target_player": "red",
+                "player_choice": False,
+                "event_type": EventType.QUEUE_FULL,
+            },
+            # Event_303: QUEUE FULL, Router 3, 1 TURN, jogador vermelho
+            {
+                "duration_turns": 1,
+                "router_id": 3,
+                "target_player": "red",
+                "player_choice": False,
+                "event_type": EventType.QUEUE_FULL,
+            },
+            # Event_304: QUEUE FULL, Router 1, 1 TURN, jogadores cinzentos COM interrogação (escolha do jogador)
             {
                 "duration_turns": 1,
                 "router_id": 1,
@@ -2191,7 +3604,23 @@ class UserDatabase:
                 "player_choice": True,
                 "event_type": EventType.QUEUE_FULL,
             },
-            # Event_137: QUEUE FULL, Router 1, 2 TURNS, jogadores cinzentos SEM interrogação (próprio jogador)
+            # Event_305: QUEUE FULL, Router 2, 1 TURN, jogadores cinzentos COM interrogação (escolha do jogador)
+            {
+                "duration_turns": 1,
+                "router_id": 2,
+                "target_player": None,
+                "player_choice": True,
+                "event_type": EventType.QUEUE_FULL,
+            },
+            # Event_306: QUEUE FULL, Router 3, 1 TURN, jogadores cinzentos COM interrogação (escolha do jogador)
+            {
+                "duration_turns": 1,
+                "router_id": 3,
+                "target_player": None,
+                "player_choice": True,
+                "event_type": EventType.QUEUE_FULL,
+            },
+            # Event_307: QUEUE FULL, Router 1, 2 TURNS, jogadores cinzentos SEM interrogação (próprio jogador)
             {
                 "duration_turns": 2,
                 "router_id": 1,
@@ -2199,7 +3628,7 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.QUEUE_FULL,
             },
-            # Event_138: QUEUE FULL, Router 2, 2 TURNS, jogadores cinzentos SEM interrogação (próprio jogador)
+            # Event_308: QUEUE FULL, Router 2, 2 TURNS, jogadores cinzentos SEM interrogação (próprio jogador)
             {
                 "duration_turns": 2,
                 "router_id": 2,
@@ -2207,7 +3636,7 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.QUEUE_FULL,
             },
-            # Event_139: QUEUE FULL, Router 3, 2 TURNS, jogadores cinzentos SEM interrogação (próprio jogador)
+            # Event_309: QUEUE FULL, Router 3, 2 TURNS, jogadores cinzentos SEM interrogação (próprio jogador)
             {
                 "duration_turns": 2,
                 "router_id": 3,
@@ -2215,7 +3644,7 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.QUEUE_FULL,
             },
-            # Event_140: QUEUE FULL, Router 1, 2 TURNS, jogador amarelo
+            # Event_310: QUEUE FULL, Router 1, 2 TURNS, jogador amarelo
             {
                 "duration_turns": 2,
                 "router_id": 1,
@@ -2223,7 +3652,23 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.QUEUE_FULL,
             },
-            # Event_141: QUEUE FULL, Router 1, 2 TURNS, jogador verde
+            # Event_311: QUEUE FULL, Router 2, 2 TURNS, jogador amarelo
+            {
+                "duration_turns": 2,
+                "router_id": 2,
+                "target_player": "yellow",
+                "player_choice": False,
+                "event_type": EventType.QUEUE_FULL,
+            },
+            # Event_312: QUEUE FULL, Router 3, 2 TURNS, jogador amarelo
+            {
+                "duration_turns": 2,
+                "router_id": 3,
+                "target_player": "yellow",
+                "player_choice": False,
+                "event_type": EventType.QUEUE_FULL,
+            },
+            # Event_313: QUEUE FULL, Router 1, 2 TURNS, jogador verde
             {
                 "duration_turns": 2,
                 "router_id": 1,
@@ -2231,7 +3676,23 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.QUEUE_FULL,
             },
-            # Event_142: QUEUE FULL, Router 1, 2 TURNS, jogador azul
+            # Event_314: QUEUE FULL, Router 2, 2 TURNS, jogador verde
+            {
+                "duration_turns": 2,
+                "router_id": 2,
+                "target_player": "green",
+                "player_choice": False,
+                "event_type": EventType.QUEUE_FULL,
+            },
+            # Event_315: QUEUE FULL, Router 3, 2 TURNS, jogador verde
+            {
+                "duration_turns": 2,
+                "router_id": 3,
+                "target_player": "green",
+                "player_choice": False,
+                "event_type": EventType.QUEUE_FULL,
+            },
+            # Event_316: QUEUE FULL, Router 1, 2 TURNS, jogador azul
             {
                 "duration_turns": 2,
                 "router_id": 1,
@@ -2239,7 +3700,23 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.QUEUE_FULL,
             },
-            # Event_143: QUEUE FULL, Router 1, 2 TURNS, jogador vermelho
+            # Event_317: QUEUE FULL, Router 2, 2 TURNS, jogador azul
+            {
+                "duration_turns": 2,
+                "router_id": 2,
+                "target_player": "blue",
+                "player_choice": False,
+                "event_type": EventType.QUEUE_FULL,
+            },
+            # Event_318: QUEUE FULL, Router 3, 2 TURNS, jogador azul
+            {
+                "duration_turns": 2,
+                "router_id": 3,
+                "target_player": "blue",
+                "player_choice": False,
+                "event_type": EventType.QUEUE_FULL,
+            },
+            # Event_319: QUEUE FULL, Router 1, 2 TURNS, jogador vermelho
             {
                 "duration_turns": 2,
                 "router_id": 1,
@@ -2247,7 +3724,23 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.QUEUE_FULL,
             },
-            # Event_144: QUEUE FULL, Router 1, 2 TURNS, jogadores cinzentos COM interrogação (escolha do jogador)
+            # Event_320: QUEUE FULL, Router 2, 2 TURNS, jogador vermelho
+            {
+                "duration_turns": 2,
+                "router_id": 2,
+                "target_player": "red",
+                "player_choice": False,
+                "event_type": EventType.QUEUE_FULL,
+            },
+            # Event_321: QUEUE FULL, Router 3, 2 TURNS, jogador vermelho
+            {
+                "duration_turns": 2,
+                "router_id": 3,
+                "target_player": "red",
+                "player_choice": False,
+                "event_type": EventType.QUEUE_FULL,
+            },
+            # Event_322: QUEUE FULL, Router 1, 2 TURNS, jogadores cinzentos COM interrogação (escolha do jogador)
             {
                 "duration_turns": 2,
                 "router_id": 1,
@@ -2255,7 +3748,23 @@ class UserDatabase:
                 "player_choice": True,
                 "event_type": EventType.QUEUE_FULL,
             },
-            # Event_145: QUEUE FULL, Router 1, 4 TURNS, jogadores cinzentos SEM interrogação (próprio jogador)
+            # Event_323: QUEUE FULL, Router 2, 2 TURNS, jogadores cinzentos COM interrogação (escolha do jogador)
+            {
+                "duration_turns": 2,
+                "router_id": 2,
+                "target_player": None,
+                "player_choice": True,
+                "event_type": EventType.QUEUE_FULL,
+            },
+            # Event_324: QUEUE FULL, Router 3, 2 TURNS, jogadores cinzentos COM interrogação (escolha do jogador)
+            {
+                "duration_turns": 2,
+                "router_id": 3,
+                "target_player": None,
+                "player_choice": True,
+                "event_type": EventType.QUEUE_FULL,
+            },
+            # Event_325: QUEUE FULL, Router 1, 4 TURNS, jogadores cinzentos SEM interrogação (próprio jogador)
             {
                 "duration_turns": 4,
                 "router_id": 1,
@@ -2263,7 +3772,7 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.QUEUE_FULL,
             },
-            # Event_146: QUEUE FULL, Router 2, 4 TURNS, jogadores cinzentos SEM interrogação (próprio jogador)
+            # Event_326: QUEUE FULL, Router 2, 4 TURNS, jogadores cinzentos SEM interrogação (próprio jogador)
             {
                 "duration_turns": 4,
                 "router_id": 2,
@@ -2271,7 +3780,7 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.QUEUE_FULL,
             },
-            # Event_147: QUEUE FULL, Router 3, 4 TURNS, jogadores cinzentos SEM interrogação (próprio jogador)
+            # Event_327: QUEUE FULL, Router 3, 4 TURNS, jogadores cinzentos SEM interrogação (próprio jogador)
             {
                 "duration_turns": 4,
                 "router_id": 3,
@@ -2279,7 +3788,7 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.QUEUE_FULL,
             },
-            # Event_148: QUEUE FULL, Router 1, 4 TURNS, jogador amarelo
+            # Event_328: QUEUE FULL, Router 1, 4 TURNS, jogador amarelo
             {
                 "duration_turns": 4,
                 "router_id": 1,
@@ -2287,7 +3796,23 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.QUEUE_FULL,
             },
-            # Event_149: QUEUE FULL, Router 1, 4 TURNS, jogador verde
+            # Event_329: QUEUE FULL, Router 2, 4 TURNS, jogador amarelo
+            {
+                "duration_turns": 4,
+                "router_id": 2,
+                "target_player": "yellow",
+                "player_choice": False,
+                "event_type": EventType.QUEUE_FULL,
+            },
+            # Event_330: QUEUE FULL, Router 3, 4 TURNS, jogador amarelo
+            {
+                "duration_turns": 4,
+                "router_id": 3,
+                "target_player": "yellow",
+                "player_choice": False,
+                "event_type": EventType.QUEUE_FULL,
+            },
+            # Event_331: QUEUE FULL, Router 1, 4 TURNS, jogador verde
             {
                 "duration_turns": 4,
                 "router_id": 1,
@@ -2295,7 +3820,23 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.QUEUE_FULL,
             },
-            # Event_150: QUEUE FULL, Router 1, 4 TURNS, jogador azul
+            # Event_332: QUEUE FULL, Router 2, 4 TURNS, jogador verde
+            {
+                "duration_turns": 4,
+                "router_id": 2,
+                "target_player": "green",
+                "player_choice": False,
+                "event_type": EventType.QUEUE_FULL,
+            },
+            # Event_333: QUEUE FULL, Router 3, 4 TURNS, jogador verde
+            {
+                "duration_turns": 4,
+                "router_id": 3,
+                "target_player": "green",
+                "player_choice": False,
+                "event_type": EventType.QUEUE_FULL,
+            },
+            # Event_334: QUEUE FULL, Router 1, 4 TURNS, jogador azul
             {
                 "duration_turns": 4,
                 "router_id": 1,
@@ -2303,7 +3844,23 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.QUEUE_FULL,
             },
-            # Event_151: QUEUE FULL, Router 1, 4 TURNS, jogador vermelho
+            # Event_335: QUEUE FULL, Router 2, 4 TURNS, jogador azul
+            {
+                "duration_turns": 4,
+                "router_id": 2,
+                "target_player": "blue",
+                "player_choice": False,
+                "event_type": EventType.QUEUE_FULL,
+            },
+            # Event_336: QUEUE FULL, Router 3, 4 TURNS, jogador azul
+            {
+                "duration_turns": 4,
+                "router_id": 3,
+                "target_player": "blue",
+                "player_choice": False,
+                "event_type": EventType.QUEUE_FULL,
+            },
+            # Event_337: QUEUE FULL, Router 1, 4 TURNS, jogador vermelho
             {
                 "duration_turns": 4,
                 "router_id": 1,
@@ -2311,7 +3868,23 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.QUEUE_FULL,
             },
-            # Event_152: QUEUE FULL, Router 1, 4 TURNS, jogadores cinzentos COM interrogação (escolha do jogador)
+            # Event_338: QUEUE FULL, Router 2, 4 TURNS, jogador vermelho
+            {
+                "duration_turns": 4,
+                "router_id": 2,
+                "target_player": "red",
+                "player_choice": False,
+                "event_type": EventType.QUEUE_FULL,
+            },
+            # Event_339: QUEUE FULL, Router 3, 4 TURNS, jogador vermelho
+            {
+                "duration_turns": 4,
+                "router_id": 3,
+                "target_player": "red",
+                "player_choice": False,
+                "event_type": EventType.QUEUE_FULL,
+            },
+            # Event_340: QUEUE FULL, Router 1, 4 TURNS, jogadores cinzentos COM interrogação (escolha do jogador)
             {
                 "duration_turns": 4,
                 "router_id": 1,
@@ -2319,7 +3892,23 @@ class UserDatabase:
                 "player_choice": True,
                 "event_type": EventType.QUEUE_FULL,
             },
-            # Event_153: QUEUE FULL, Router 1, ? TURNS, jogadores cinzentos SEM interrogação (próprio jogador)
+            # Event_341: QUEUE FULL, Router 2, 4 TURNS, jogadores cinzentos COM interrogação (escolha do jogador)
+            {
+                "duration_turns": 4,
+                "router_id": 2,
+                "target_player": None,
+                "player_choice": True,
+                "event_type": EventType.QUEUE_FULL,
+            },
+            # Event_342: QUEUE FULL, Router 3, 4 TURNS, jogadores cinzentos COM interrogação (escolha do jogador)
+            {
+                "duration_turns": 4,
+                "router_id": 3,
+                "target_player": None,
+                "player_choice": True,
+                "event_type": EventType.QUEUE_FULL,
+            },
+            # Event_343: QUEUE FULL, Router 1, ? TURNS, jogadores cinzentos SEM interrogação (próprio jogador)
             {
                 "duration_turns": "variable",
                 "router_id": 1,
@@ -2327,7 +3916,7 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.QUEUE_FULL,
             },
-            # Event_154: QUEUE FULL, Router 2, ? TURNS, jogadores cinzentos SEM interrogação (próprio jogador)
+            # Event_344: QUEUE FULL, Router 2, ? TURNS, jogadores cinzentos SEM interrogação (próprio jogador)
             {
                 "duration_turns": "variable",
                 "router_id": 2,
@@ -2335,7 +3924,7 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.QUEUE_FULL,
             },
-            # Event_155: QUEUE FULL, Router 3, ? TURNS, jogadores cinzentos SEM interrogação (próprio jogador)
+            # Event_345: QUEUE FULL, Router 3, ? TURNS, jogadores cinzentos SEM interrogação (próprio jogador)
             {
                 "duration_turns": "variable",
                 "router_id": 3,
@@ -2343,7 +3932,7 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.QUEUE_FULL,
             },
-            # Event_156: QUEUE FULL, Router 1, ? TURNS, jogador amarelo
+            # Event_346: QUEUE FULL, Router 1, ? TURNS, jogador amarelo
             {
                 "duration_turns": "variable",
                 "router_id": 1,
@@ -2351,7 +3940,23 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.QUEUE_FULL,
             },
-            # Event_157: QUEUE FULL, Router 1, ? TURNS, jogador verde
+            # Event_347: QUEUE FULL, Router 2, ? TURNS, jogador amarelo
+            {
+                "duration_turns": "variable",
+                "router_id": 2,
+                "target_player": "yellow",
+                "player_choice": False,
+                "event_type": EventType.QUEUE_FULL,
+            },
+            # Event_348: QUEUE FULL, Router 3, ? TURNS, jogador amarelo
+            {
+                "duration_turns": "variable",
+                "router_id": 3,
+                "target_player": "yellow",
+                "player_choice": False,
+                "event_type": EventType.QUEUE_FULL,
+            },
+            # Event_349: QUEUE FULL, Router 1, ? TURNS, jogador verde
             {
                 "duration_turns": "variable",
                 "router_id": 1,
@@ -2359,15 +3964,47 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.QUEUE_FULL,
             },
-            # Event_158: QUEUE FULL, Router 1, ? TURNS, jogador azul
+            # Event_350: QUEUE FULL, Router 2, ? TURNS, jogador verde
             {
                 "duration_turns": "variable",
-                "router_id": 1,
-                "target_player": "blue",
+                "router_id": 2,
+                "target_player": "green",
                 "player_choice": False,
                 "event_type": EventType.QUEUE_FULL,
             },
-            # Event_159: QUEUE FULL, Router 1, ? TURNS, jogador vermelho
+            # Event_351: QUEUE FULL, Router 3, ? TURNS, jogador verde
+            {
+                "duration_turns": "variable",
+                "router_id": 3,
+                "target_player": "green",
+                "player_choice": False,
+                "event_type": EventType.QUEUE_FULL,
+            },
+            # Event_352: QUEUE FULL, Router 1, ? TURNS, jogador azul
+            {
+                "duration_turns": "variable",
+                "router_id": 1,
+                "target_player": "blue",
+                "player_choice": True,
+                "event_type": EventType.QUEUE_FULL,
+            },
+            # Event_353: QUEUE FULL, Router 2, ? TURNS, jogador azul
+            {
+                "duration_turns": "variable",
+                "router_id": 2,
+                "target_player": "blue",
+                "player_choice": True,
+                "event_type": EventType.QUEUE_FULL,
+            },
+            # Event_354: QUEUE FULL, Router 3, ? TURNS, jogador azul
+            {
+                "duration_turns": "variable",
+                "router_id": 3,
+                "target_player": "blue",
+                "player_choice": True,
+                "event_type": EventType.QUEUE_FULL,
+            },
+            # Event_355: QUEUE FULL, Router 1, ? TURNS, jogador vermelho
             {
                 "duration_turns": "variable",
                 "router_id": 1,
@@ -2375,7 +4012,23 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.QUEUE_FULL,
             },
-            # Event_160: QUEUE FULL, Router 1, ? TURNS, jogadores cinzentos COM interrogação (escolha do jogador)
+            # Event_356: QUEUE FULL, Router 2, ? TURNS, jogador vermelho
+            {
+                "duration_turns": "variable",
+                "router_id": 2,
+                "target_player": "red",
+                "player_choice": False,
+                "event_type": EventType.QUEUE_FULL,
+            },
+            # Event_357: QUEUE FULL, Router 3, ? TURNS, jogador vermelho
+            {
+                "duration_turns": "variable",
+                "router_id": 3,
+                "target_player": "red",
+                "player_choice": False,
+                "event_type": EventType.QUEUE_FULL,
+            },
+            # Event_358: QUEUE FULL, Router 1, ? TURNS, jogadores cinzentos COM interrogação (escolha do jogador)
             {
                 "duration_turns": "variable",
                 "router_id": 1,
@@ -2383,7 +4036,25 @@ class UserDatabase:
                 "player_choice": True,
                 "event_type": EventType.QUEUE_FULL,
             },
-            # Event_161: PACKET DROP, Router 1, 1 TURN, jogadores cinzentos SEM interrogação (próprio jogador)
+            # Event_359: QUEUE FULL, Router 2, ? TURNS, jogadores cinzentos COM interrogação (escolha do jogador)
+            {
+                "duration_turns": "variable",
+                "router_id": 2,
+                "target_player": None,
+                "player_choice": True,
+                "event_type": EventType.QUEUE_FULL,
+            },
+            # Event_360: QUEUE FULL, Router 3, ? TURNS, jogadores cinzentos COM interrogação (escolha do jogador)
+            {
+                "duration_turns": "variable",
+                "router_id": 3,
+                "target_player": None,
+                "player_choice": True,
+                "event_type": EventType.QUEUE_FULL,
+            },
+            
+            # PACKET DROP Events (Event_361 to Event_432)
+            # Event_361: PACKET DROP, Router 1, 1 TURN, jogadores cinzentos SEM interrogação (próprio jogador)
             {
                 "duration_turns": 1,
                 "router_id": 1,
@@ -2391,7 +4062,7 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.PACKET_DROP,
             },
-            # Event_162: PACKET DROP, Router 2, 1 TURN, jogadores cinzentos SEM interrogação (próprio jogador)
+            # Event_362: PACKET DROP, Router 2, 1 TURN, jogadores cinzentos SEM interrogação (próprio jogador)
             {
                 "duration_turns": 1,
                 "router_id": 2,
@@ -2399,7 +4070,7 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.PACKET_DROP,
             },
-            # Event_163: PACKET DROP, Router 3, 1 TURN, jogadores cinzentos SEM interrogação (próprio jogador)
+            # Event_363: PACKET DROP, Router 3, 1 TURN, jogadores cinzentos SEM interrogação (próprio jogador)
             {
                 "duration_turns": 1,
                 "router_id": 3,
@@ -2407,7 +4078,7 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.PACKET_DROP,
             },
-            # Event_164: PACKET DROP, Router 1, 1 TURN, jogador amarelo
+            # Event_364: PACKET DROP, Router 1, 1 TURN, jogador amarelo
             {
                 "duration_turns": 1,
                 "router_id": 1,
@@ -2415,7 +4086,23 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.PACKET_DROP,
             },
-            # Event_165: PACKET DROP, Router 1, 1 TURN, jogador verde
+            # Event_365: PACKET DROP, Router 2, 1 TURN, jogador amarelo
+            {
+                "duration_turns": 1,
+                "router_id": 2,
+                "target_player": "yellow",
+                "player_choice": False,
+                "event_type": EventType.PACKET_DROP,
+            },
+            # Event_366: PACKET DROP, Router 3, 1 TURN, jogador amarelo
+            {
+                "duration_turns": 1,
+                "router_id": 3,
+                "target_player": "yellow",
+                "player_choice": False,
+                "event_type": EventType.PACKET_DROP,
+            },
+            # Event_367: PACKET DROP, Router 1, 1 TURN, jogador verde
             {
                 "duration_turns": 1,
                 "router_id": 1,
@@ -2423,7 +4110,23 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.PACKET_DROP,
             },
-            # Event_166: PACKET DROP, Router 1, 1 TURN, jogador azul
+            # Event_368: PACKET DROP, Router 2, 1 TURN, jogador verde
+            {
+                "duration_turns": 1,
+                "router_id": 2,
+                "target_player": "green",
+                "player_choice": False,
+                "event_type": EventType.PACKET_DROP,
+            },
+            # Event_369: PACKET DROP, Router 3, 1 TURN, jogador verde
+            {
+                "duration_turns": 1,
+                "router_id": 3,
+                "target_player": "green",
+                "player_choice": False,
+                "event_type": EventType.PACKET_DROP,
+            },
+            # Event_370: PACKET DROP, Router 1, 1 TURN, jogador azul
             {
                 "duration_turns": 1,
                 "router_id": 1,
@@ -2431,7 +4134,23 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.PACKET_DROP,
             },
-            # Event_167: PACKET DROP, Router 1, 1 TURN, jogador vermelho
+            # Event_371: PACKET DROP, Router 2, 1 TURN, jogador azul
+            {
+                "duration_turns": 1,
+                "router_id": 2,
+                "target_player": "blue",
+                "player_choice": False,
+                "event_type": EventType.PACKET_DROP,
+            },
+            # Event_372: PACKET DROP, Router 3, 1 TURN, jogador azul
+            {
+                "duration_turns": 1,
+                "router_id": 3,
+                "target_player": "blue",
+                "player_choice": False,
+                "event_type": EventType.PACKET_DROP,
+            },
+            # Event_373: PACKET DROP, Router 1, 1 TURN, jogador vermelho
             {
                 "duration_turns": 1,
                 "router_id": 1,
@@ -2439,7 +4158,23 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.PACKET_DROP,
             },
-            # Event_168: PACKET DROP, Router 1, 1 TURN, jogadores cinzentos COM interrogação (escolha do jogador)
+            # Event_374: PACKET DROP, Router 2, 1 TURN, jogador vermelho
+            {
+                "duration_turns": 1,
+                "router_id": 2,
+                "target_player": "red",
+                "player_choice": False,
+                "event_type": EventType.PACKET_DROP,
+            },
+            # Event_375: PACKET DROP, Router 3, 1 TURN, jogador vermelho
+            {
+                "duration_turns": 1,
+                "router_id": 3,
+                "target_player": "red",
+                "player_choice": False,
+                "event_type": EventType.PACKET_DROP,
+            },
+            # Event_376: PACKET DROP, Router 1, 1 TURN, jogadores cinzentos COM interrogação (escolha do jogador)
             {
                 "duration_turns": 1,
                 "router_id": 1,
@@ -2447,7 +4182,23 @@ class UserDatabase:
                 "player_choice": True,
                 "event_type": EventType.PACKET_DROP,
             },
-            # Event_169: PACKET DROP, Router 1, 2 TURNS, jogadores cinzentos SEM interrogação (próprio jogador)
+            # Event_377: PACKET DROP, Router 2, 1 TURN, jogadores cinzentos COM interrogação (escolha do jogador)
+            {
+                "duration_turns": 1,
+                "router_id": 2,
+                "target_player": None,
+                "player_choice": True,
+                "event_type": EventType.PACKET_DROP,
+            },
+            # Event_378: PACKET DROP, Router 3, 1 TURN, jogadores cinzentos COM interrogação (escolha do jogador)
+            {
+                "duration_turns": 1,
+                "router_id": 3,
+                "target_player": None,
+                "player_choice": True,
+                "event_type": EventType.PACKET_DROP,
+            },
+            # Event_379: PACKET DROP, Router 1, 2 TURNS, jogadores cinzentos SEM interrogação (próprio jogador)
             {
                 "duration_turns": 2,
                 "router_id": 1,
@@ -2455,7 +4206,7 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.PACKET_DROP,
             },
-            # Event_170: PACKET DROP, Router 2, 2 TURNS, jogadores cinzentos SEM interrogação (próprio jogador)
+            # Event_380: PACKET DROP, Router 2, 2 TURNS, jogadores cinzentos SEM interrogação (próprio jogador)
             {
                 "duration_turns": 2,
                 "router_id": 2,
@@ -2463,7 +4214,7 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.PACKET_DROP,
             },
-            # Event_171: PACKET DROP, Router 3, 2 TURNS, jogadores cinzentos SEM interrogação (próprio jogador)
+            # Event_381: PACKET DROP, Router 3, 2 TURNS, jogadores cinzentos SEM interrogação (próprio jogador)
             {
                 "duration_turns": 2,
                 "router_id": 3,
@@ -2471,7 +4222,7 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.PACKET_DROP,
             },
-            # Event_172: PACKET DROP, Router 1, 2 TURNS, jogador amarelo
+            # Event_382: PACKET DROP, Router 1, 2 TURNS, jogador amarelo
             {
                 "duration_turns": 2,
                 "router_id": 1,
@@ -2479,7 +4230,23 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.PACKET_DROP,
             },
-            # Event_173: PACKET DROP, Router 1, 2 TURNS, jogador verde
+            # Event_383: PACKET DROP, Router 2, 2 TURNS, jogador amarelo
+            {
+                "duration_turns": 2,
+                "router_id": 2,
+                "target_player": "yellow",
+                "player_choice": False,
+                "event_type": EventType.PACKET_DROP,
+            },
+            # Event_384: PACKET DROP, Router 3, 2 TURNS, jogador amarelo
+            {
+                "duration_turns": 2,
+                "router_id": 3,
+                "target_player": "yellow",
+                "player_choice": False,
+                "event_type": EventType.PACKET_DROP,
+            },
+            # Event_385: PACKET DROP, Router 1, 2 TURNS, jogador verde
             {
                 "duration_turns": 2,
                 "router_id": 1,
@@ -2487,7 +4254,23 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.PACKET_DROP,
             },
-            # Event_174: PACKET DROP, Router 1, 2 TURNS, jogador azul
+            # Event_386: PACKET DROP, Router 2, 2 TURNS, jogador verde
+            {
+                "duration_turns": 2,
+                "router_id": 2,
+                "target_player": "green",
+                "player_choice": False,
+                "event_type": EventType.PACKET_DROP,
+            },
+            # Event_387: PACKET DROP, Router 3, 2 TURNS, jogador verde
+            {
+                "duration_turns": 2,
+                "router_id": 3,
+                "target_player": "green",
+                "player_choice": False,
+                "event_type": EventType.PACKET_DROP,
+            },
+            # Event_388: PACKET DROP, Router 1, 2 TURNS, jogador azul
             {
                 "duration_turns": 2,
                 "router_id": 1,
@@ -2495,7 +4278,23 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.PACKET_DROP,
             },
-            # Event_175: PACKET DROP, Router 1, 2 TURNS, jogador vermelho
+            # Event_389: PACKET DROP, Router 2, 2 TURNS, jogador azul
+            {
+                "duration_turns": 2,
+                "router_id": 2,
+                "target_player": "blue",
+                "player_choice": False,
+                "event_type": EventType.PACKET_DROP,
+            },
+            # Event_390: PACKET DROP, Router 3, 2 TURNS, jogador azul
+            {
+                "duration_turns": 2,
+                "router_id": 3,
+                "target_player": "blue",
+                "player_choice": False,
+                "event_type": EventType.PACKET_DROP,
+            },
+            # Event_391: PACKET DROP, Router 1, 2 TURNS, jogador vermelho
             {
                 "duration_turns": 2,
                 "router_id": 1,
@@ -2503,7 +4302,23 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.PACKET_DROP,
             },
-            # Event_176: PACKET DROP, Router 1, 2 TURNS, jogadores cinzentos COM interrogação (escolha do jogador)
+            # Event_392: PACKET DROP, Router 2, 2 TURNS, jogador vermelho
+            {
+                "duration_turns": 2,
+                "router_id": 2,
+                "target_player": "red",
+                "player_choice": False,
+                "event_type": EventType.PACKET_DROP,
+            },
+            # Event_393: PACKET DROP, Router 3, 2 TURNS, jogador vermelho
+            {
+                "duration_turns": 2,
+                "router_id": 3,
+                "target_player": "red",
+                "player_choice": False,
+                "event_type": EventType.PACKET_DROP,
+            },
+            # Event_394: PACKET DROP, Router 1, 2 TURNS, jogadores cinzentos COM interrogação (escolha do jogador)
             {
                 "duration_turns": 2,
                 "router_id": 1,
@@ -2511,7 +4326,23 @@ class UserDatabase:
                 "player_choice": True,
                 "event_type": EventType.PACKET_DROP,
             },
-            # Event_177: PACKET DROP, Router 1, 4 TURNS, jogadores cinzentos SEM interrogação (próprio jogador)
+            # Event_395: PACKET DROP, Router 2, 2 TURNS, jogadores cinzentos COM interrogação (escolha do jogador)
+            {
+                "duration_turns": 2,
+                "router_id": 2,
+                "target_player": None,
+                "player_choice": True,
+                "event_type": EventType.PACKET_DROP,
+            },
+            # Event_396: PACKET DROP, Router 3, 2 TURNS, jogadores cinzentos COM interrogação (escolha do jogador)
+            {
+                "duration_turns": 2,
+                "router_id": 3,
+                "target_player": None,
+                "player_choice": True,
+                "event_type": EventType.PACKET_DROP,
+            },
+            # Event_397: PACKET DROP, Router 1, 4 TURNS, jogadores cinzentos SEM interrogação (próprio jogador)
             {
                 "duration_turns": 4,
                 "router_id": 1,
@@ -2519,7 +4350,7 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.PACKET_DROP,
             },
-            # Event_178: PACKET DROP, Router 2, 4 TURNS, jogadores cinzentos SEM interrogação (próprio jogador)
+            # Event_398: PACKET DROP, Router 2, 4 TURNS, jogadores cinzentos SEM interrogação (próprio jogador)
             {
                 "duration_turns": 4,
                 "router_id": 2,
@@ -2527,15 +4358,15 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.PACKET_DROP,
             },
-            # Event_179: PACKET DROP, Router 3, 4 TURNS, jogadores cinzentos SEM interrogação (próprio jogador)
+            # Event_399: PACKET DROP, Router 3, 4 TURNS, jogadores cinzentos SEM interrogação (próprio jogador)
             {
                 "duration_turns": 4,
                 "router_id": 3,
                 "target_player": None,
                 "player_choice": False,
                 "event_type": EventType.PACKET_DROP,
-            },  
-            # Event_180: PACKET DROP, Router 1, 4 TURNS, jogador amarelo
+            },
+            # Event_400: PACKET DROP, Router 1, 4 TURNS, jogador amarelo
             {
                 "duration_turns": 4,
                 "router_id": 1,
@@ -2543,7 +4374,23 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.PACKET_DROP,
             },
-            # Event_181: PACKET DROP, Router 1, 4 TURNS, jogador verde
+            # Event_401: PACKET DROP, Router 2, 4 TURNS, jogador amarelo
+            {
+                "duration_turns": 4,
+                "router_id": 2,
+                "target_player": "yellow",
+                "player_choice": False,
+                "event_type": EventType.PACKET_DROP,
+            },
+            # Event_402: PACKET DROP, Router 3, 4 TURNS, jogador amarelo
+            {
+                "duration_turns": 4,
+                "router_id": 3,
+                "target_player": "yellow",
+                "player_choice": False,
+                "event_type": EventType.PACKET_DROP,
+            },
+            # Event_403: PACKET DROP, Router 1, 4 TURNS, jogador verde
             {
                 "duration_turns": 4,
                 "router_id": 1,
@@ -2551,7 +4398,23 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.PACKET_DROP,
             },
-            # Event_182: PACKET DROP, Router 1, 4 TURNS, jogador azul
+            # Event_404: PACKET DROP, Router 2, 4 TURNS, jogador verde
+            {
+                "duration_turns": 4,
+                "router_id": 2,
+                "target_player": "green",
+                "player_choice": False,
+                "event_type": EventType.PACKET_DROP,
+            },
+            # Event_405: PACKET DROP, Router 3, 4 TURNS, jogador verde
+            {
+                "duration_turns": 4,
+                "router_id": 3,
+                "target_player": "green",
+                "player_choice": False,
+                "event_type": EventType.PACKET_DROP,
+            },
+            # Event_406: PACKET DROP, Router 1, 4 TURNS, jogador azul
             {
                 "duration_turns": 4,
                 "router_id": 1,
@@ -2559,7 +4422,23 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.PACKET_DROP,
             },
-            # Event_183: PACKET DROP, Router 1, 4 TURNS, jogador vermelho
+            # Event_407: PACKET DROP, Router 2, 4 TURNS, jogador azul
+            {
+                "duration_turns": 4,
+                "router_id": 2,
+                "target_player": "blue",
+                "player_choice": False,
+                "event_type": EventType.PACKET_DROP,
+            },
+            # Event_408: PACKET DROP, Router 3, 4 TURNS, jogador azul
+            {
+                "duration_turns": 4,
+                "router_id": 3,
+                "target_player": "blue",
+                "player_choice": False,
+                "event_type": EventType.PACKET_DROP,
+            },
+            # Event_409: PACKET DROP, Router 1, 4 TURNS, jogador vermelho
             {
                 "duration_turns": 4,
                 "router_id": 1,
@@ -2567,7 +4446,23 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.PACKET_DROP,
             },
-            # Event_184: PACKET DROP, Router 1, 4 TURNS, jogadores cinzentos COM interrogação (escolha do jogador)
+            # Event_410: PACKET DROP, Router 2, 4 TURNS, jogador vermelho
+            {
+                "duration_turns": 4,
+                "router_id": 2,
+                "target_player": "red",
+                "player_choice": False,
+                "event_type": EventType.PACKET_DROP,
+            },
+            # Event_411: PACKET DROP, Router 3, 4 TURNS, jogador vermelho
+            {
+                "duration_turns": 4,
+                "router_id": 3,
+                "target_player": "red",
+                "player_choice": False,
+                "event_type": EventType.PACKET_DROP,
+            },
+            # Event_412: PACKET DROP, Router 1, 4 TURNS, jogadores cinzentos COM interrogação (escolha do jogador)
             {
                 "duration_turns": 4,
                 "router_id": 1,
@@ -2575,7 +4470,23 @@ class UserDatabase:
                 "player_choice": True,
                 "event_type": EventType.PACKET_DROP,
             },
-            # Event_185: PACKET DROP, Router 1, ? TURNS, jogadores cinzentos SEM interrogação (próprio jogador)
+            # Event_413: PACKET DROP, Router 2, 4 TURNS, jogadores cinzentos COM interrogação (escolha do jogador)
+            {
+                "duration_turns": 4,
+                "router_id": 2,
+                "target_player": None,
+                "player_choice": True,
+                "event_type": EventType.PACKET_DROP,
+            },
+            # Event_414: PACKET DROP, Router 3, 4 TURNS, jogadores cinzentos COM interrogação (escolha do jogador)
+            {
+                "duration_turns": 4,
+                "router_id": 3,
+                "target_player": None,
+                "player_choice": True,
+                "event_type": EventType.PACKET_DROP,
+            },
+            # Event_415: PACKET DROP, Router 1, ? TURNS, jogadores cinzentos SEM interrogação (próprio jogador)
             {
                 "duration_turns": "variable",
                 "router_id": 1,
@@ -2583,7 +4494,7 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.PACKET_DROP,
             },
-            # Event_186: PACKET DROP, Router 2, ? TURNS, jogadores cinzentos SEM interrogação (próprio jogador)
+            # Event_416: PACKET DROP, Router 2, ? TURNS, jogadores cinzentos SEM interrogação (próprio jogador)
             {
                 "duration_turns": "variable",
                 "router_id": 2,
@@ -2591,7 +4502,7 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.PACKET_DROP,
             },
-            # Event_187: PACKET DROP, Router 3, ? TURNS, jogadores cinzentos SEM interrogação (próprio jogador)
+            # Event_417: PACKET DROP, Router 3, ? TURNS, jogadores cinzentos SEM interrogação (próprio jogador)
             {
                 "duration_turns": "variable",
                 "router_id": 3,
@@ -2599,7 +4510,7 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.PACKET_DROP,
             },
-            # Event_188: PACKET DROP, Router 1, ? TURNS, jogador amarelo
+            # Event_418: PACKET DROP, Router 1, ? TURNS, jogador amarelo
             {
                 "duration_turns": "variable",
                 "router_id": 1,
@@ -2607,7 +4518,23 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.PACKET_DROP,
             },
-            # Event_189: PACKET DROP, Router 1, ? TURNS, jogador verde
+            # Event_419: PACKET DROP, Router 2, ? TURNS, jogador amarelo
+            {
+                "duration_turns": "variable",
+                "router_id": 2,
+                "target_player": "yellow",
+                "player_choice": False,
+                "event_type": EventType.PACKET_DROP,
+            },
+            # Event_420: PACKET DROP, Router 3, ? TURNS, jogador amarelo
+            {
+                "duration_turns": "variable",
+                "router_id": 3,
+                "target_player": "yellow",
+                "player_choice": False,
+                "event_type": EventType.PACKET_DROP,
+            },
+            # Event_421: PACKET DROP, Router 1, ? TURNS, jogador verde
             {
                 "duration_turns": "variable",
                 "router_id": 1,
@@ -2615,15 +4542,47 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.PACKET_DROP,
             },
-            # Event_190: PACKET DROP, Router 1, ? TURNS, jogador azul
+            # Event_422: PACKET DROP, Router 2, ? TURNS, jogador verde
+            {
+                "duration_turns": "variable",
+                "router_id": 2,
+                "target_player": "green",
+                "player_choice": False,
+                "event_type": EventType.PACKET_DROP,
+            },
+            # Event_423: PACKET DROP, Router 3, ? TURNS, jogador verde
+            {
+                "duration_turns": "variable",
+                "router_id": 3,
+                "target_player": "green",
+                "player_choice": False,
+                "event_type": EventType.PACKET_DROP,
+            },
+            # Event_424: PACKET DROP, Router 1, ? TURNS, jogador azul
             {
                 "duration_turns": "variable",
                 "router_id": 1,
                 "target_player": "blue",
-                "player_choice": False,
+                "player_choice": True,
                 "event_type": EventType.PACKET_DROP,
             },
-            # Event_191: PACKET DROP, Router 1, ? TURNS, jogador vermelho
+            # Event_425: PACKET DROP, Router 2, ? TURNS, jogador azul
+            {
+                "duration_turns": "variable",
+                "router_id": 2,
+                "target_player": "blue",
+                "player_choice": True,
+                "event_type": EventType.PACKET_DROP,
+            },
+            # Event_426: PACKET DROP, Router 3, ? TURNS, jogador azul
+            {
+                "duration_turns": "variable",
+                "router_id": 3,
+                "target_player": "blue",
+                "player_choice": True,
+                "event_type": EventType.PACKET_DROP,
+            },
+            # Event_427: PACKET DROP, Router 1, ? TURNS, jogador vermelho
             {
                 "duration_turns": "variable",
                 "router_id": 1,
@@ -2631,7 +4590,23 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.PACKET_DROP,
             },
-            # Event_192: PACKET DROP, Router 1, ? TURNS, jogadores cinzentos COM interrogação (escolha do jogador)
+            # Event_428: PACKET DROP, Router 2, ? TURNS, jogador vermelho
+            {
+                "duration_turns": "variable",
+                "router_id": 2,
+                "target_player": "red",
+                "player_choice": False,
+                "event_type": EventType.PACKET_DROP,
+            },
+            # Event_429: PACKET DROP, Router 3, ? TURNS, jogador vermelho
+            {
+                "duration_turns": "variable",
+                "router_id": 3,
+                "target_player": "red",
+                "player_choice": False,
+                "event_type": EventType.PACKET_DROP,
+            },
+            # Event_430: PACKET DROP, Router 1, ? TURNS, jogadores cinzentos COM interrogação (escolha do jogador)
             {
                 "duration_turns": "variable",
                 "router_id": 1,
@@ -2639,7 +4614,25 @@ class UserDatabase:
                 "player_choice": True,
                 "event_type": EventType.PACKET_DROP,
             },
-            # Event_193: EMPTY QUEUE, Router 1, 1 TURN, jogadores cinzentos SEM interrogação (próprio jogador)
+            # Event_431: PACKET DROP, Router 2, ? TURNS, jogadores cinzentos COM interrogação (escolha do jogador)
+            {
+                "duration_turns": "variable",
+                "router_id": 2,
+                "target_player": None,
+                "player_choice": True,
+                "event_type": EventType.PACKET_DROP,
+            },
+            # Event_432: PACKET DROP, Router 3, ? TURNS, jogadores cinzentos COM interrogação (escolha do jogador)
+            {
+                "duration_turns": "variable",
+                "router_id": 3,
+                "target_player": None,
+                "player_choice": True,
+                "event_type": EventType.PACKET_DROP,
+            },
+            
+            # EMPTY QUEUE Events (Event_433 to Event_504)
+            # Event_433: EMPTY QUEUE, Router 1, 1 TURN, jogadores cinzentos SEM interrogação (próprio jogador)
             {
                 "duration_turns": 1,
                 "router_id": 1,
@@ -2647,7 +4640,7 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.EMPTY_QUEUE,
             },
-            # Event_194: EMPTY QUEUE, Router 2, 1 TURN, jogadores cinzentos SEM interrogação (próprio jogador)
+            # Event_434: EMPTY QUEUE, Router 2, 1 TURN, jogadores cinzentos SEM interrogação (próprio jogador)
             {
                 "duration_turns": 1,
                 "router_id": 2,
@@ -2655,7 +4648,7 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.EMPTY_QUEUE,
             },
-            # Event_195: EMPTY QUEUE, Router 3, 1 TURN, jogadores cinzentos SEM interrogação (próprio jogador)
+            # Event_435: EMPTY QUEUE, Router 3, 1 TURN, jogadores cinzentos SEM interrogação (próprio jogador)
             {
                 "duration_turns": 1,
                 "router_id": 3,
@@ -2663,7 +4656,7 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.EMPTY_QUEUE,
             },
-            # Event_196: EMPTY QUEUE, Router 1, 1 TURN, jogador amarelo
+            # Event_436: EMPTY QUEUE, Router 1, 1 TURN, jogador amarelo
             {
                 "duration_turns": 1,
                 "router_id": 1,
@@ -2671,7 +4664,23 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.EMPTY_QUEUE,
             },
-            # Event_197: EMPTY QUEUE, Router 1, 1 TURN, jogador verde
+            # Event_437: EMPTY QUEUE, Router 2, 1 TURN, jogador amarelo
+            {
+                "duration_turns": 1,
+                "router_id": 2,
+                "target_player": "yellow",
+                "player_choice": False,
+                "event_type": EventType.EMPTY_QUEUE,
+            },
+            # Event_438: EMPTY QUEUE, Router 3, 1 TURN, jogador amarelo
+            {
+                "duration_turns": 1,
+                "router_id": 3,
+                "target_player": "yellow",
+                "player_choice": False,
+                "event_type": EventType.EMPTY_QUEUE,
+            },
+            # Event_439: EMPTY QUEUE, Router 1, 1 TURN, jogador verde
             {
                 "duration_turns": 1,
                 "router_id": 1,
@@ -2679,7 +4688,23 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.EMPTY_QUEUE,
             },
-            # Event_198: EMPTY QUEUE, Router 1, 1 TURN, jogador azul
+            # Event_440: EMPTY QUEUE, Router 2, 1 TURN, jogador verde
+            {
+                "duration_turns": 1,
+                "router_id": 2,
+                "target_player": "green",
+                "player_choice": False,
+                "event_type": EventType.EMPTY_QUEUE,
+            },
+            # Event_441: EMPTY QUEUE, Router 3, 1 TURN, jogador verde
+            {
+                "duration_turns": 1,
+                "router_id": 3,
+                "target_player": "green",
+                "player_choice": False,
+                "event_type": EventType.EMPTY_QUEUE,
+            },
+            # Event_442: EMPTY QUEUE, Router 1, 1 TURN, jogador azul
             {
                 "duration_turns": 1,
                 "router_id": 1,
@@ -2687,7 +4712,23 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.EMPTY_QUEUE,
             },
-            # Event_199: EMPTY QUEUE, Router 1, 1 TURN, jogador vermelho
+            # Event_443: EMPTY QUEUE, Router 2, 1 TURN, jogador azul
+            {
+                "duration_turns": 1,
+                "router_id": 2,
+                "target_player": "blue",
+                "player_choice": False,
+                "event_type": EventType.EMPTY_QUEUE,
+            },
+            # Event_444: EMPTY QUEUE, Router 3, 1 TURN, jogador azul
+            {
+                "duration_turns": 1,
+                "router_id": 3,
+                "target_player": "blue",
+                "player_choice": False,
+                "event_type": EventType.EMPTY_QUEUE,
+            },
+            # Event_445: EMPTY QUEUE, Router 1, 1 TURN, jogador vermelho
             {
                 "duration_turns": 1,
                 "router_id": 1,
@@ -2695,7 +4736,23 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.EMPTY_QUEUE,
             },
-            # Event_200: EMPTY QUEUE, Router 1, 1 TURN, jogadores cinzentos COM interrogação (escolha do jogador)
+            # Event_446: EMPTY QUEUE, Router 2, 1 TURN, jogador vermelho
+            {
+                "duration_turns": 1,
+                "router_id": 2,
+                "target_player": "red",
+                "player_choice": False,
+                "event_type": EventType.EMPTY_QUEUE,
+            },
+            # Event_447: EMPTY QUEUE, Router 3, 1 TURN, jogador vermelho
+            {
+                "duration_turns": 1,
+                "router_id": 3,
+                "target_player": "red",
+                "player_choice": False,
+                "event_type": EventType.EMPTY_QUEUE,
+            },
+            # Event_448: EMPTY QUEUE, Router 1, 1 TURN, jogadores cinzentos COM interrogação (escolha do jogador)
             {
                 "duration_turns": 1,
                 "router_id": 1,
@@ -2703,7 +4760,23 @@ class UserDatabase:
                 "player_choice": True,
                 "event_type": EventType.EMPTY_QUEUE,
             },
-            # Event_201: EMPTY QUEUE, Router 1, 2 TURNS, jogadores cinzentos SEM interrogação (próprio jogador)
+            # Event_449: EMPTY QUEUE, Router 2, 1 TURN, jogadores cinzentos COM interrogação (escolha do jogador)
+            {
+                "duration_turns": 1,
+                "router_id": 2,
+                "target_player": None,
+                "player_choice": True,
+                "event_type": EventType.EMPTY_QUEUE,
+            },
+            # Event_450: EMPTY QUEUE, Router 3, 1 TURN, jogadores cinzentos COM interrogação (escolha do jogador)
+            {
+                "duration_turns": 1,
+                "router_id": 3,
+                "target_player": None,
+                "player_choice": True,
+                "event_type": EventType.EMPTY_QUEUE,
+            },
+            # Event_451: EMPTY QUEUE, Router 1, 2 TURNS, jogadores cinzentos SEM interrogação (próprio jogador)
             {
                 "duration_turns": 2,
                 "router_id": 1,
@@ -2711,15 +4784,15 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.EMPTY_QUEUE,
             },
-            # Event_202: EMPTY QUEUE, Router 2, 2 TURNS, jogadores cinzentos SEM interrogação (próprio jogador) 
+            # Event_452: EMPTY QUEUE, Router 2, 2 TURNS, jogadores cinzentos SEM interrogação (próprio jogador)
             {
                 "duration_turns": 2,
                 "router_id": 2,
                 "target_player": None,
                 "player_choice": False,
                 "event_type": EventType.EMPTY_QUEUE,
-            },  
-            # Event_203: EMPTY QUEUE, Router 3, 2 TURNS, jogadores cinzentos SEM interrogação (próprio jogador)
+            },
+            # Event_453: EMPTY QUEUE, Router 3, 2 TURNS, jogadores cinzentos SEM interrogação (próprio jogador)
             {
                 "duration_turns": 2,
                 "router_id": 3,
@@ -2727,7 +4800,7 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.EMPTY_QUEUE,
             },
-            # Event_204: EMPTY QUEUE, Router 1, 2 TURNS, jogador amarelo
+            # Event_454: EMPTY QUEUE, Router 1, 2 TURNS, jogador amarelo
             {
                 "duration_turns": 2,
                 "router_id": 1,
@@ -2735,7 +4808,23 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.EMPTY_QUEUE,
             },
-            # Event_205: EMPTY QUEUE, Router 1, 2 TURNS, jogador verde
+            # Event_455: EMPTY QUEUE, Router 2, 2 TURNS, jogador amarelo
+            {
+                "duration_turns": 2,
+                "router_id": 2,
+                "target_player": "yellow",
+                "player_choice": False,
+                "event_type": EventType.EMPTY_QUEUE,
+            },
+            # Event_456: EMPTY QUEUE, Router 3, 2 TURNS, jogador amarelo
+            {
+                "duration_turns": 2,
+                "router_id": 3,
+                "target_player": "yellow",
+                "player_choice": False,
+                "event_type": EventType.EMPTY_QUEUE,
+            },
+            # Event_457: EMPTY QUEUE, Router 1, 2 TURNS, jogador verde
             {
                 "duration_turns": 2,
                 "router_id": 1,
@@ -2743,7 +4832,23 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.EMPTY_QUEUE,
             },
-            # Event_206: EMPTY QUEUE, Router 1, 2 TURNS, jogador azul
+            # Event_458: EMPTY QUEUE, Router 2, 2 TURNS, jogador verde
+            {
+                "duration_turns": 2,
+                "router_id": 2,
+                "target_player": "green",
+                "player_choice": False,
+                "event_type": EventType.EMPTY_QUEUE,
+            },
+            # Event_459: EMPTY QUEUE, Router 3, 2 TURNS, jogador verde
+            {
+                "duration_turns": 2,
+                "router_id": 3,
+                "target_player": "green",
+                "player_choice": False,
+                "event_type": EventType.EMPTY_QUEUE,
+            },
+            # Event_460: EMPTY QUEUE, Router 1, 2 TURNS, jogador azul
             {
                 "duration_turns": 2,
                 "router_id": 1,
@@ -2751,7 +4856,23 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.EMPTY_QUEUE,
             },
-            # Event_207: EMPTY QUEUE, Router 1, 2 TURNS, jogador vermelho
+            # Event_461: EMPTY QUEUE, Router 2, 2 TURNS, jogador azul
+            {
+                "duration_turns": 2,
+                "router_id": 2,
+                "target_player": "blue",
+                "player_choice": False,
+                "event_type": EventType.EMPTY_QUEUE,
+            },
+            # Event_462: EMPTY QUEUE, Router 3, 2 TURNS, jogador azul
+            {
+                "duration_turns": 2,
+                "router_id": 3,
+                "target_player": "blue",
+                "player_choice": False,
+                "event_type": EventType.EMPTY_QUEUE,
+            },
+            # Event_463: EMPTY QUEUE, Router 1, 2 TURNS, jogador vermelho
             {
                 "duration_turns": 2,
                 "router_id": 1,
@@ -2759,7 +4880,23 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.EMPTY_QUEUE,
             },
-            # Event_208: EMPTY QUEUE, Router 1, 2 TURNS, jogadores cinzentos COM interrogação (escolha do jogador)
+            # Event_464: EMPTY QUEUE, Router 2, 2 TURNS, jogador vermelho
+            {
+                "duration_turns": 2,
+                "router_id": 2,
+                "target_player": "red",
+                "player_choice": False,
+                "event_type": EventType.EMPTY_QUEUE,
+            },
+            # Event_465: EMPTY QUEUE, Router 3, 2 TURNS, jogador vermelho
+            {
+                "duration_turns": 2,
+                "router_id": 3,
+                "target_player": "red",
+                "player_choice": False,
+                "event_type": EventType.EMPTY_QUEUE,
+            },
+            # Event_466: EMPTY QUEUE, Router 1, 2 TURNS, jogadores cinzentos COM interrogação (escolha do jogador)
             {
                 "duration_turns": 2,
                 "router_id": 1,
@@ -2767,7 +4904,23 @@ class UserDatabase:
                 "player_choice": True,
                 "event_type": EventType.EMPTY_QUEUE,
             },
-            # Event_209: EMPTY QUEUE, Router 1, 4 TURNS, jogadores cinzentos SEM interrogação (próprio jogador)
+            # Event_467: EMPTY QUEUE, Router 2, 2 TURNS, jogadores cinzentos COM interrogação (escolha do jogador)
+            {
+                "duration_turns": 2,
+                "router_id": 2,
+                "target_player": None,
+                "player_choice": True,
+                "event_type": EventType.EMPTY_QUEUE,
+            },
+            # Event_468: EMPTY QUEUE, Router 3, 2 TURNS, jogadores cinzentos COM interrogação (escolha do jogador)
+            {
+                "duration_turns": 2,
+                "router_id": 3,
+                "target_player": None,
+                "player_choice": True,
+                "event_type": EventType.EMPTY_QUEUE,
+            },
+            # Event_469: EMPTY QUEUE, Router 1, 4 TURNS, jogadores cinzentos SEM interrogação (próprio jogador)
             {
                 "duration_turns": 4,
                 "router_id": 1,
@@ -2775,7 +4928,7 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.EMPTY_QUEUE,
             },
-            # Event_210: EMPTY QUEUE, Router 2, 4 TURNS, jogadores cinzentos SEM interrogação (próprio jogador)
+            # Event_470: EMPTY QUEUE, Router 2, 4 TURNS, jogadores cinzentos SEM interrogação (próprio jogador)
             {
                 "duration_turns": 4,
                 "router_id": 2,
@@ -2783,7 +4936,7 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.EMPTY_QUEUE,
             },
-            # Event_211: EMPTY QUEUE, Router 3, 4 TURNS, jogadores cinzentos SEM interrogação (próprio jogador)
+            # Event_471: EMPTY QUEUE, Router 3, 4 TURNS, jogadores cinzentos SEM interrogação (próprio jogador)
             {
                 "duration_turns": 4,
                 "router_id": 3,
@@ -2791,22 +4944,55 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.EMPTY_QUEUE,
             },
-            # Event_212: EMPTY QUEUE, Router 1, 4 TURNS, jogador amarelo
+            # Event_472: EMPTY QUEUE, Router 1, 4 TURNS, jogador amarelo
             {
                 "duration_turns": 4,
                 "router_id": 1,
                 "target_player": "yellow",
                 "player_choice": False,
+                "event_type": EventType.EMPTY_QUEUE,
             },
-            # Event_213: EMPTY QUEUE, Router 1, 4 TURNS, jogador verde
+            # Event_473: EMPTY QUEUE, Router 2, 4 TURNS, jogador amarelo
+            {
+                "duration_turns": 4,
+                "router_id": 2,
+                "target_player": "yellow",
+                "player_choice": False,
+                "event_type": EventType.EMPTY_QUEUE,
+            },
+            # Event_474: EMPTY QUEUE, Router 3, 4 TURNS, jogador amarelo
+            {
+                "duration_turns": 4,
+                "router_id": 3,
+                "target_player": "yellow",
+                "player_choice": False,
+                "event_type": EventType.EMPTY_QUEUE,
+            },
+            # Event_475: EMPTY QUEUE, Router 1, 4 TURNS, jogador verde
             {
                 "duration_turns": 4,
                 "router_id": 1,
                 "target_player": "green",
                 "player_choice": False,
                 "event_type": EventType.EMPTY_QUEUE,
-            },  
-            # Event_214: EMPTY QUEUE, Router 1, 4 TURNS, jogador azul
+            },
+            # Event_476: EMPTY QUEUE, Router 2, 4 TURNS, jogador verde
+            {
+                "duration_turns": 4,
+                "router_id": 2,
+                "target_player": "green",
+                "player_choice": False,
+                "event_type": EventType.EMPTY_QUEUE,
+            },
+            # Event_477: EMPTY QUEUE, Router 3, 4 TURNS, jogador verde
+            {
+                "duration_turns": 4,
+                "router_id": 3,
+                "target_player": "green",
+                "player_choice": False,
+                "event_type": EventType.EMPTY_QUEUE,
+            },
+            # Event_478: EMPTY QUEUE, Router 1, 4 TURNS, jogador azul
             {
                 "duration_turns": 4,
                 "router_id": 1,
@@ -2814,7 +5000,23 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.EMPTY_QUEUE,
             },
-            # Event_215: EMPTY QUEUE, Router 1, 4 TURNS, jogador vermelho
+            # Event_479: EMPTY QUEUE, Router 2, 4 TURNS, jogador azul
+            {
+                "duration_turns": 4,
+                "router_id": 2,
+                "target_player": "blue",
+                "player_choice": False,
+                "event_type": EventType.EMPTY_QUEUE,
+            },
+            # Event_480: EMPTY QUEUE, Router 3, 4 TURNS, jogador azul
+            {
+                "duration_turns": 4,
+                "router_id": 3,
+                "target_player": "blue",
+                "player_choice": False,
+                "event_type": EventType.EMPTY_QUEUE,
+            },
+            # Event_481: EMPTY QUEUE, Router 1, 4 TURNS, jogador vermelho
             {
                 "duration_turns": 4,
                 "router_id": 1,
@@ -2822,7 +5024,23 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.EMPTY_QUEUE,
             },
-            # Event_216: EMPTY QUEUE, Router 1, 4 TURNS, jogadores cinzentos COM interrogação (escolha do jogador)
+            # Event_482: EMPTY QUEUE, Router 2, 4 TURNS, jogador vermelho
+            {
+                "duration_turns": 4,
+                "router_id": 2,
+                "target_player": "red",
+                "player_choice": False,
+                "event_type": EventType.EMPTY_QUEUE,
+            },
+            # Event_483: EMPTY QUEUE, Router 3, 4 TURNS, jogador vermelho
+            {
+                "duration_turns": 4,
+                "router_id": 3,
+                "target_player": "red",
+                "player_choice": False,
+                "event_type": EventType.EMPTY_QUEUE,
+            },
+            # Event_484: EMPTY QUEUE, Router 1, 4 TURNS, jogadores cinzentos COM interrogação (escolha do jogador)
             {
                 "duration_turns": 4,
                 "router_id": 1,
@@ -2830,7 +5048,23 @@ class UserDatabase:
                 "player_choice": True,
                 "event_type": EventType.EMPTY_QUEUE,
             },
-            # Event_217: EMPTY QUEUE, Router 1, ? TURNS, jogadores cinzentos SEM interrogação (próprio jogador)
+            # Event_485: EMPTY QUEUE, Router 2, 4 TURNS, jogadores cinzentos COM interrogação (escolha do jogador)
+            {
+                "duration_turns": 4,
+                "router_id": 2,
+                "target_player": None,
+                "player_choice": True,
+                "event_type": EventType.EMPTY_QUEUE,
+            },
+            # Event_486: EMPTY QUEUE, Router 3, 4 TURNS, jogadores cinzentos COM interrogação (escolha do jogador)
+            {
+                "duration_turns": 4,
+                "router_id": 3,
+                "target_player": None,
+                "player_choice": True,
+                "event_type": EventType.EMPTY_QUEUE,
+            },
+            # Event_487: EMPTY QUEUE, Router 1, ? TURNS, jogadores cinzentos SEM interrogação (próprio jogador)
             {
                 "duration_turns": "variable",
                 "router_id": 1,
@@ -2838,7 +5072,7 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.EMPTY_QUEUE,
             },
-            # Event_218: EMPTY QUEUE, Router 2, ? TURNS, jogadores cinzentos SEM interrogação (próprio jogador)
+            # Event_488: EMPTY QUEUE, Router 2, ? TURNS, jogadores cinzentos SEM interrogação (próprio jogador)
             {
                 "duration_turns": "variable",
                 "router_id": 2,
@@ -2846,7 +5080,7 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.EMPTY_QUEUE,
             },
-            # Event_219: EMPTY QUEUE, Router 3, ? TURNS, jogadores cinzentos SEM interrogação (próprio jogador)
+            # Event_489: EMPTY QUEUE, Router 3, ? TURNS, jogadores cinzentos SEM interrogação (próprio jogador)
             {
                 "duration_turns": "variable",
                 "router_id": 3,
@@ -2854,7 +5088,7 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.EMPTY_QUEUE,
             },
-            # Event_220: EMPTY QUEUE, Router 1, ? TURNS, jogador amarelo
+            # Event_490: EMPTY QUEUE, Router 1, ? TURNS, jogador amarelo
             {
                 "duration_turns": "variable",
                 "router_id": 1,
@@ -2862,7 +5096,23 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.EMPTY_QUEUE,
             },
-            # Event_221: EMPTY QUEUE, Router 1, ? TURNS, jogador verde
+            # Event_491: EMPTY QUEUE, Router 2, ? TURNS, jogador amarelo
+            {
+                "duration_turns": "variable",
+                "router_id": 2,
+                "target_player": "yellow",
+                "player_choice": False,
+                "event_type": EventType.EMPTY_QUEUE,
+            },
+            # Event_492: EMPTY QUEUE, Router 3, ? TURNS, jogador amarelo
+            {
+                "duration_turns": "variable",
+                "router_id": 3,
+                "target_player": "yellow",
+                "player_choice": False,
+                "event_type": EventType.EMPTY_QUEUE,
+            },
+            # Event_493: EMPTY QUEUE, Router 1, ? TURNS, jogador verde
             {
                 "duration_turns": "variable",
                 "router_id": 1,
@@ -2870,15 +5120,47 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.EMPTY_QUEUE,
             },
-            # Event_222: EMPTY QUEUE, Router 1, ? TURNS, jogador azul
+            # Event_494: EMPTY QUEUE, Router 2, ? TURNS, jogador verde
+            {
+                "duration_turns": "variable",
+                "router_id": 2,
+                "target_player": "green",
+                "player_choice": False,
+                "event_type": EventType.EMPTY_QUEUE,
+            },
+            # Event_495: EMPTY QUEUE, Router 3, ? TURNS, jogador verde
+            {
+                "duration_turns": "variable",
+                "router_id": 3,
+                "target_player": "green",
+                "player_choice": False,
+                "event_type": EventType.EMPTY_QUEUE,
+            },
+            # Event_496: EMPTY QUEUE, Router 1, ? TURNS, jogador azul
             {
                 "duration_turns": "variable",
                 "router_id": 1,
                 "target_player": "blue",
-                "player_choice": False,
+                "player_choice": True,
                 "event_type": EventType.EMPTY_QUEUE,
             },
-            # Event_223: EMPTY QUEUE, Router 1, ? TURNS, jogador vermelho
+            # Event_497: EMPTY QUEUE, Router 2, ? TURNS, jogador azul
+            {
+                "duration_turns": "variable",
+                "router_id": 2,
+                "target_player": "blue",
+                "player_choice": True,
+                "event_type": EventType.EMPTY_QUEUE,
+            },
+            # Event_498: EMPTY QUEUE, Router 3, ? TURNS, jogador azul
+            {
+                "duration_turns": "variable",
+                "router_id": 3,
+                "target_player": "blue",
+                "player_choice": True,
+                "event_type": EventType.EMPTY_QUEUE,
+            },
+            # Event_499: EMPTY QUEUE, Router 1, ? TURNS, jogador vermelho
             {
                 "duration_turns": "variable",
                 "router_id": 1,
@@ -2886,7 +5168,23 @@ class UserDatabase:
                 "player_choice": False,
                 "event_type": EventType.EMPTY_QUEUE,
             },
-            # Event_224: EMPTY QUEUE, Router 1, ? TURNS, jogadores cinzentos COM interrogação (escolha do jogador)
+            # Event_500: EMPTY QUEUE, Router 2, ? TURNS, jogador vermelho
+            {
+                "duration_turns": "variable",
+                "router_id": 2,
+                "target_player": "red",
+                "player_choice": False,
+                "event_type": EventType.EMPTY_QUEUE,
+            },
+            # Event_501: EMPTY QUEUE, Router 3, ? TURNS, jogador vermelho
+            {
+                "duration_turns": "variable",
+                "router_id": 3,
+                "target_player": "red",
+                "player_choice": False,
+                "event_type": EventType.EMPTY_QUEUE,
+            },
+            # Event_502: EMPTY QUEUE, Router 1, ? TURNS, jogadores cinzentos COM interrogação (escolha do jogador)
             {
                 "duration_turns": "variable",
                 "router_id": 1,
@@ -2894,6 +5192,23 @@ class UserDatabase:
                 "player_choice": True,
                 "event_type": EventType.EMPTY_QUEUE,
             },
+            # Event_503: EMPTY QUEUE, Router 2, ? TURNS, jogadores cinzentos COM interrogação (escolha do jogador)
+            {
+                "duration_turns": "variable",
+                "router_id": 2,
+                "target_player": None,
+                "player_choice": True,
+                "event_type": EventType.EMPTY_QUEUE,
+            },
+            # Event_504: EMPTY QUEUE, Router 3, ? TURNS, jogadores cinzentos COM interrogação (escolha do jogador)
+            {
+                "duration_turns": "variable",
+                "router_id": 3,
+                "target_player": None,
+                "player_choice": True,
+                "event_type": EventType.EMPTY_QUEUE,
+            },
+            
             
         ]
         
@@ -2998,7 +5313,7 @@ class UserDatabase:
                         effect_text = "At each turn, remove all packets from the queue."
                 
                 
-            else:  # TRANSMISSION_DELAY
+            else:  # TRANSMISSION DELAY
                 title = "TRANSMISSION DELAY"
                 description = "Currently, the traffic is being transmitted through a low-capacity link, which is causing a significant delay in the delivery of the traffic."
                 # Para TRANSMISSION DELAY, usar a lógica existente baseada na regra dos jogadores cinzentos
@@ -3027,12 +5342,12 @@ class UserDatabase:
             # Determinar se deve usar target_link ou target_queue baseado no número do evento
             event_number = int(event_id.split('_')[1])
             
-            # Event_1 a Event_64: usar target_link
-            # Event_65 a Event_224: usar target_queue
-            if 1 <= event_number <= 64:
+            # Event_1 a Event_144: usar target_link
+            # Event_145 a Event_504: usar target_queue
+            if 1 <= event_number <= 144:
                 target_link = f"Link to Residential Router {router_id}"
                 target_queue = None
-            elif 65 <= event_number <= 224:
+            elif 145 <= event_number <= 504:
                 target_link = None
                 target_queue = f"Queue of Residential Router {router_id}"
             else:
