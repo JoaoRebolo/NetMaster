@@ -5,7 +5,7 @@ Base de Dados de Cartas NetMaster
 """
 
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Set
+from typing import Dict, List, Optional, Set, Union
 from enum import Enum
 import re
 
@@ -150,7 +150,7 @@ class ActivityCard:
     title: str                         # "HOME SURVEILLANCE", "HOME SAFETY", etc.
     description: str                   # Descrição da aplicação
     message_size: int                  # Número de pacotes por mensagem
-    rate: str                         # Taxa de envio: "1 packet per turn", "up to 1 packet per turn"
+    rate: Union[int, List[int]]       # Taxa de envio: "1 packet per turn" OU ["1 packet per turn", "up to 1 packet per turn"]
     destination: str                  # Destino das mensagens (sempre "Central node")
     drops_allowed: bool               # Se permite drops ou não
     reward_per_packet: int            # Picoins ganhos por pacote recebido
@@ -166,6 +166,24 @@ class ActivityCard:
     # Campos de metadados fixos
     collection: str = "Packet Switching Collection"
     level: str = "Level I"
+
+    def get_rate_options(self) -> List[int]:
+        """Retorna todas as opções de rate disponíveis para esta carta"""
+        if isinstance(self.rate, list):
+            return self.rate
+        else:
+            return [self.rate]
+    
+    def get_default_rate(self) -> int:
+        """Retorna o rate padrão (primeiro da lista se for múltiplo)"""
+        if isinstance(self.rate, list):
+            return self.rate[0]
+        else:
+            return self.rate
+    
+    def has_multiple_rates(self) -> bool:
+        """Verifica se a carta tem múltiplas opções de rate"""
+        return isinstance(self.rate, list) and len(self.rate) > 1
 
     def __str__(self):
         return f"ActivityCard(id={self.activity_id}, {self.title}, size={self.message_size}, fee={self.application_fee})"
@@ -570,7 +588,7 @@ class UserDatabase:
                 "title": "HOME SURVEILLANCE",
                 "description": "With our Home Surveillance application, you can monitor your home from anywhere. It's simple and low-traffic, but it doesn't guarantee delivery—avoid it for critical information!",
                 "message_size": 20,
-                "rate": "1 packet per turn",
+                "rate": [1],  # VALOR ÚNICO
                 "drops_allowed": True,
                 "reward_per_packet": 4,
                 "message_received": None,
@@ -584,7 +602,7 @@ class UserDatabase:
                 "title": "HOME SURVEILLANCE",
                 "description": "With our Home Surveillance application, you can monitor your home from anywhere. It's simple and low on traffic, but it doesn't guarantee delivery—avoid it for critical information!",
                 "message_size": 20,
-                "rate": "1 packet per turn",
+                "rate": [1],  # VALOR ÚNICO 
                 "drops_allowed": True,
                 "reward_per_packet": 3,
                 "packet_bonus": 4,
@@ -598,7 +616,7 @@ class UserDatabase:
                 "title": "HOME SURVEILLANCE",
                 "description": "With our Home Surveillance application, you can monitor your home from anywhere. It's simple and low-traffic, but it doesn't guarantee delivery—avoid it for critical information!",
                 "message_size": 20,
-                "rate": "1 packet per turn",
+                "rate": [1],  # VALOR ÚNICO
                 "drops_allowed": True,
                 "reward_per_packet": 4,
                 "packet_bonus": 20,
@@ -612,7 +630,7 @@ class UserDatabase:
                 "title": "HOME SURVEILLANCE",
                 "description": "With our Home Surveillance application, you can monitor your home from anywhere. It's simple and low-traffic, but it doesn't guarantee delivery—avoid it for critical information!",
                 "message_size": 20,
-                "rate": "1 packet per turn",
+                "rate": [1],  # VALOR ÚNICO
                 "drops_allowed": True,
                 "reward_per_packet": 1,
                 "message_received": 160,
@@ -627,7 +645,7 @@ class UserDatabase:
                 "title": "HOME SAFETY",
                 "description": "Keep your home safe with our Emergency application. It's simple, low-traffic, and guarantees delivery—perfect for emergency situations!",
                 "message_size": 20,
-                "rate": "up to 1 packet per turn",
+                "rate": [0,1], # MÚLTIPLAS OPÇÕES
                 "drops_allowed": False,
                 "reward_per_packet": 0,
                 "message_received": 160,
@@ -641,7 +659,7 @@ class UserDatabase:
                 "title": "HOME SAFETY",
                 "description": "Keep your home safe with our Emergency application. It's simple, low-traffic, and guarantees delivery—perfect for emergency situations!",
                 "message_size": 20,
-                "rate": "up to 1 packet per turn",
+                "rate": [0,1], # MÚLTIPLAS OPÇÕES
                 "drops_allowed": False,
                 "reward_per_packet": 0,
                 "message_received": 320,
@@ -655,7 +673,7 @@ class UserDatabase:
                 "title": "HOME SAFETY",
                 "description": "Keep your home safe with our Emergency application. It's simple, low-traffic, and guarantees delivery—perfect for emergency situations!",
                 "message_size": 20,
-                "rate": "up to 1 packet per turn",
+                "rate": [0,1], # MÚLTIPLAS OPÇÕES
                 "drops_allowed": False,
                 "reward_per_packet": 0,
                 "message_received": 480,
@@ -670,7 +688,7 @@ class UserDatabase:
                 "title": "SHORT MESSAGE",
                 "description": "Take a quick break and connect with friends using our Short Message application. It's easy to use, traffic-friendly, and ensures your packets are delivered—perfect for everyday chats!",
                 "message_size": 4,
-                "rate": "up to 1 packet per turn",
+                "rate": [0,1], # MÚLTIPLAS OPÇÕES
                 "drops_allowed": False,
                 "reward_per_packet": 0,
                 "message_received": 12,
@@ -684,7 +702,7 @@ class UserDatabase:
                 "title": "SHORT MESSAGE",
                 "description": "Take a quick break and connect with friends using our Short Message application. It's easy to use, traffic-friendly, and ensures your packets are delivered—perfect for everyday chats!",
                 "message_size": 4,
-                "rate": "up to 1 packet per turn",
+                "rate": [0,1], # MÚLTIPLAS OPÇÕES
                 "drops_allowed": False,
                 "reward_per_packet": 0,
                 "message_received": 16,
@@ -699,7 +717,7 @@ class UserDatabase:
                 "title": "GAMING",
                 "description": "Enjoy your gaming moments with our Gaming application. It's easy to use and consumes minimal traffic, but sometimes it might miss a few moves—no big deal!",
                 "message_size": 4,
-                "rate": "1 packet per turn",
+                "rate": 1, # VALOR ÚNICO
                 "drops_allowed": True,
                 "reward_per_packet": 3,
                 "message_received": None,
@@ -713,7 +731,7 @@ class UserDatabase:
                 "title": "GAMING",
                 "description": "Enjoy your gaming moments with our Gaming application. It's easy to use and consumes minimal traffic, but sometimes it might miss a few moves—no big deal!",
                 "message_size": 4,
-                "rate": "1 packet per turn",
+                "rate": 1, # VALOR ÚNICO
                 "drops_allowed": True,
                 "reward_per_packet": 2,
                 "message_received": 16,
@@ -728,7 +746,7 @@ class UserDatabase:
                 "title": "FILE TRANSFER",
                 "description": "Work from home without missing deadlines. Send your text reports using our File Transfer application. It's easy to use, consumes minimal bandwidth, but requires reliable delivery.",
                 "message_size": 8,
-                "rate": "up to 1 packet per turn",
+                "rate": [0,1], # MÚLTIPLAS OPÇÕES
                 "drops_allowed": False,
                 "reward_per_packet": 0,
                 "message_received": 80,

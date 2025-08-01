@@ -2241,6 +2241,9 @@ class StoreWindow(tk.Toplevel):
             if self.dashboard and hasattr(self.dashboard, 'adicionar_carta_inventario'):
                 self.dashboard.adicionar_carta_inventario(carta_path, tipo_inv)
                 print(f"DEBUG: Carta {carta_path} adicionada ao inventário {tipo_inv}")
+                
+                # IMPORTANTE: Remover carta do baralho local da Store para sincronização
+                self._remover_carta_do_baralho_local(carta_path, tipo_inv)
             
             # Para Actions e Events, vai para PlayerDashboard SEM botão Store
             if casa_tipo in ["actions", "action", "events", "event"]:
@@ -2351,6 +2354,9 @@ class StoreWindow(tk.Toplevel):
             if self.dashboard and hasattr(self.dashboard, 'adicionar_carta_inventario'):
                 self.dashboard.adicionar_carta_inventario(carta_path, tipo_inv)
                 print(f"DEBUG: Card added to inventory: {tipo_inv} -> {carta_path}")
+                
+                # IMPORTANTE: Remover carta do baralho local da Store para sincronização
+                self._remover_carta_do_baralho_local(carta_path, tipo_inv)
             
             # Para Actions e Events de casas neutras, volta ao PlayerDashboard
             # Para Actions e Events de casas próprias, volta à página principal da Store
@@ -3669,6 +3675,41 @@ class StoreWindow(tk.Toplevel):
         
         print(f"DEBUG: [adicionar_carta_ao_baralho] Sincronização completa - carta {os.path.basename(carta_path)} adicionada aos baralhos")
         print(f"DEBUG: [adicionar_carta_ao_baralho] Cartas agora em {carta_cor}/{carta_tipo}: local={len(self.cartas[carta_cor][carta_tipo])}, global={len(baralhos[carta_cor][carta_tipo]) if baralhos and carta_cor in baralhos and carta_tipo in baralhos[carta_cor] else 'N/A'}")
+
+    def _remover_carta_do_baralho_local(self, carta_path, carta_tipo):
+        """
+        Remove uma carta específica do baralho local da Store após ela ser tirada.
+        Usado para sincronizar com o baralho global e evitar que cartas tiradas apareçam novamente.
+        """
+        print(f"DEBUG: [_remover_carta_do_baralho_local] Removendo carta: {os.path.basename(carta_path)}, tipo: {carta_tipo}")
+        
+        if not hasattr(self, 'cartas') or not self.cartas:
+            print("DEBUG: [_remover_carta_do_baralho_local] Nenhum baralho local encontrado")
+            return
+        
+        # Para cartas Actions/Events/Challenges, elas são tipicamente neutras
+        # Mas também podem ser da cor do jogador para alguns tipos
+        cores_para_verificar = ["neutral"]
+        if hasattr(self, 'player_color') and self.player_color:
+            cores_para_verificar.append(self.player_color)
+        
+        carta_removida = False
+        for cor in cores_para_verificar:
+            if cor in self.cartas and carta_tipo in self.cartas[cor]:
+                if carta_path in self.cartas[cor][carta_tipo]:
+                    self.cartas[cor][carta_tipo].remove(carta_path)
+                    carta_removida = True
+                    print(f"DEBUG: [_remover_carta_do_baralho_local] Carta removida do baralho local {cor}/{carta_tipo}")
+                    print(f"DEBUG: [_remover_carta_do_baralho_local] Cartas restantes em {cor}/{carta_tipo}: {len(self.cartas[cor][carta_tipo])}")
+                    break
+        
+        if not carta_removida:
+            print(f"DEBUG: [_remover_carta_do_baralho_local] AVISO: Carta não encontrada nos baralhos locais para remoção")
+            # Debug das cartas disponíveis
+            for cor in cores_para_verificar:
+                if cor in self.cartas and carta_tipo in self.cartas[cor]:
+                    cartas_disponiveis = [os.path.basename(c) for c in self.cartas[cor][carta_tipo][:5]]
+                    print(f"DEBUG: [_remover_carta_do_baralho_local] Cartas disponíveis em {cor}/{carta_tipo}: {cartas_disponiveis}")
 
     def mostrar_carta_challenge_fullscreen(self, carta_path):
         """
