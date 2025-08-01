@@ -483,52 +483,65 @@ class StoreWindow(tk.Toplevel):
         saldo_lbl_bottom.place(x=root.winfo_screenwidth()-70, rely=1.0, y=-25, anchor="w")
 
         # Botão do Player no canto superior direito para ir ao PlayerDashboard
-        def abrir_playerdashboard():
-            """Abre a interface principal do PlayerDashboard (igual ao botão Player das cartas de Challenges)"""
-            print("DEBUG: Botão Player pressionado - abrindo interface principal do PlayerDashboard")
-            try:
-                if self.dashboard and hasattr(self.dashboard, "playerdashboard_interface"):
-                    # Esconder a Store primeiro
-                    self.withdraw()
-                    print("DEBUG: Store escondida")
-                    
-                    # Mostrar o PlayerDashboard
-                    self.dashboard.deiconify()
-                    self.dashboard.state('normal')
-                    self.dashboard.lift()
-                    self.dashboard.focus_force()
-                    print("DEBUG: PlayerDashboard mostrado")
-                    
-                    # Chamar a interface principal do PlayerDashboard
-                    self.dashboard.playerdashboard_interface(
-                        self.dashboard.player_name,
-                        self.dashboard.saldo,
-                        self.dashboard.other_players
-                    )
-                    print("DEBUG: Interface principal do PlayerDashboard aberta com sucesso")
-                else:
-                    print("DEBUG: ERRO - PlayerDashboard não disponível ou método playerdashboard_interface não encontrado")
-            except Exception as e:
-                print(f"DEBUG: Erro ao abrir PlayerDashboard: {e}")
+        # IMPORTANTE: Só mostrar o botão Player se NÃO for casa neutra (Actions/Events/Challenges)
+        show_player_button = True
+        if casa_tipo and casa_cor:
+            # Se for casa neutra (Actions, Events, Challenges), não mostrar o botão Player
+            if casa_tipo.lower() in ["actions", "action", "events", "event", "challenges", "challenge"] and casa_cor.lower() == "neutral":
+                show_player_button = False
+                print(f"DEBUG: Casa neutra detectada ({casa_tipo}, {casa_cor}) - botão Player NÃO será mostrado")
+            else:
+                print(f"DEBUG: Casa não neutra detectada ({casa_tipo}, {casa_cor}) - botão Player será mostrado")
+        
+        if show_player_button:
+            def abrir_playerdashboard():
+                """Abre a interface principal do PlayerDashboard (igual ao botão Player das cartas de Challenges)"""
+                print("DEBUG: Botão Player pressionado - abrindo interface principal do PlayerDashboard")
+                try:
+                    if self.dashboard and hasattr(self.dashboard, "playerdashboard_interface"):
+                        # Esconder a Store primeiro
+                        self.withdraw()
+                        print("DEBUG: Store escondida")
+                        
+                        # Mostrar o PlayerDashboard
+                        self.dashboard.deiconify()
+                        self.dashboard.state('normal')
+                        self.dashboard.lift()
+                        self.dashboard.focus_force()
+                        print("DEBUG: PlayerDashboard mostrado")
+                        
+                        # Chamar a interface principal do PlayerDashboard
+                        self.dashboard.playerdashboard_interface(
+                            self.dashboard.player_name,
+                            self.dashboard.saldo,
+                            self.dashboard.other_players
+                        )
+                        print("DEBUG: Interface principal do PlayerDashboard aberta com sucesso")
+                    else:
+                        print("DEBUG: ERRO - PlayerDashboard não disponível ou método playerdashboard_interface não encontrado")
+                except Exception as e:
+                    print(f"DEBUG: Erro ao abrir PlayerDashboard: {e}")
 
-        try:
-            # Carregar ícone do jogador
-            user_icon_path = os.path.join(IMG_DIR, f"{self.player_color}_user_icon.png")
-            user_icon_img = ImageTk.PhotoImage(Image.open(user_icon_path).resize((30, 30)))
-            btn_player = tk.Button(self, image=user_icon_img, bg="#DC8392", relief="flat", borderwidth=0, 
-                                  command=abrir_playerdashboard, cursor="hand2", activebackground="#DC8392",
-                                  highlightthickness=0)
-            btn_player.image = user_icon_img  # Manter referência para evitar garbage collection
-            btn_player.place(x=root.winfo_screenwidth()-10, y=5, anchor="ne")  # Movido mais para a direita e para cima
-            print(f"DEBUG: Botão Player criado com ícone {self.player_color}_user_icon.png")
-        except Exception as e:
-            print(f"DEBUG: Erro ao carregar ícone do jogador {self.player_color}_user_icon.png: {e}")
-            # Fallback para botão de texto se não conseguir carregar a imagem
-            btn_player = tk.Button(self, text="👤", font=("Helvetica", 20), bg="black", fg="white", 
-                                  relief="flat", borderwidth=0, command=abrir_playerdashboard, cursor="hand2",
-                                  activebackground="black", activeforeground="white", highlightthickness=0)
-            btn_player.place(x=root.winfo_screenwidth()-15, y=5, anchor="ne")  # Movido mais para a direita e para cima
-            print("DEBUG: Botão Player criado com ícone de fallback")
+            try:
+                # Carregar ícone do jogador
+                user_icon_path = os.path.join(IMG_DIR, f"{self.player_color}_user_icon.png")
+                user_icon_img = ImageTk.PhotoImage(Image.open(user_icon_path).resize((30, 30)))
+                btn_player = tk.Button(self, image=user_icon_img, bg="#DC8392", relief="flat", borderwidth=0, 
+                                      command=abrir_playerdashboard, cursor="hand2", activebackground="#DC8392",
+                                      highlightthickness=0)
+                btn_player.image = user_icon_img  # Manter referência para evitar garbage collection
+                btn_player.place(x=root.winfo_screenwidth()-10, y=5, anchor="ne")  # Movido mais para a direita e para cima
+                print(f"DEBUG: Botão Player criado com ícone {self.player_color}_user_icon.png")
+            except Exception as e:
+                print(f"DEBUG: Erro ao carregar ícone do jogador {self.player_color}_user_icon.png: {e}")
+                # Fallback para botão de texto se não conseguir carregar a imagem
+                btn_player = tk.Button(self, text="👤", font=("Helvetica", 20), bg="black", fg="white", 
+                                      relief="flat", borderwidth=0, command=abrir_playerdashboard, cursor="hand2",
+                                      activebackground="black", activeforeground="white", highlightthickness=0)
+                btn_player.place(x=root.winfo_screenwidth()-15, y=5, anchor="ne")  # Movido mais para a direita e para cima
+                print("DEBUG: Botão Player criado com ícone de fallback")
+        else:
+            print("DEBUG: Botão Player NÃO criado - casa neutra detectada")
 
     def __del__(self):
         print("DEBUG: StoreWindow __del__ chamado (janela destruída)")
@@ -785,18 +798,12 @@ class StoreWindow(tk.Toplevel):
         # Obter cartas disponíveis para compra do baralho LOCAL da Store (sincronizado)
         print(f"DEBUG: Buscando cartas para tipo '{tipo_atual}' e cor '{self.player_color}' no baralho LOCAL da Store")
         
-        # Verificar se o tipo existe nos baralhos LOCAIS da Store
+        # Verificar se o tipo existe nos baralhos LOCAIS da Store (APENAS da cor do jogador)
         cartas_disp = []
         if (hasattr(self, 'cartas') and self.player_color in self.cartas and 
             tipo_atual in self.cartas[self.player_color]):
             cartas_disp = self.cartas[self.player_color][tipo_atual].copy()
             print(f"DEBUG: Encontradas {len(cartas_disp)} cartas no baralho LOCAL do jogador")
-        
-        # Se não houver cartas da cor do jogador, tentar neutral no baralho LOCAL
-        if (not cartas_disp and hasattr(self, 'cartas') and "neutral" in self.cartas and 
-            tipo_atual in self.cartas["neutral"]):
-            cartas_disp = self.cartas["neutral"][tipo_atual].copy()
-            print(f"DEBUG: Encontradas {len(cartas_disp)} cartas no baralho LOCAL neutral")
         
         # Debug adicional do baralho LOCAL
         print(f"DEBUG: Baralhos LOCAL disponíveis para {self.player_color}:")
@@ -807,29 +814,99 @@ class StoreWindow(tk.Toplevel):
             print(f"  Nenhum baralho LOCAL encontrado para {self.player_color}")
         
         if not cartas_disp:
-            print(f"DEBUG: Nenhuma carta encontrada para {tipo_atual}")
-            tk.Label(self, text="Sem cartas disponíveis para compra!", font=("Helvetica", 16), bg="black", fg="white").pack(pady=20)
+            print(f"DEBUG: Nenhuma carta encontrada para {tipo_atual} na cor {self.player_color}")
+            
+            # Mostrar mensagem de "sem cartas disponíveis" com interface completa
+            sem_cartas_lbl = tk.Label(self, text="Sem cartas disponíveis!", 
+                                    font=("Helvetica", 18, "bold"), 
+                                    bg="black", fg="white")
+            sem_cartas_lbl.place(relx=0.5, rely=0.4, anchor="center")
+            
+            # Adicionar mensagem adicional
+            info_lbl = tk.Label(self, text="Não há mais cartas desta cor para comprar", 
+                              font=("Helvetica", 14), 
+                              bg="black", fg="#AAAAAA")
+            info_lbl.place(relx=0.5, rely=0.5, anchor="center")
+            
+            # Barra inferior com imagem BelowBar_store.png
+            belowbar_img = ImageTk.PhotoImage(Image.open(BELOWBAR_IMG).resize((self.winfo_screenwidth(), 50)))
+            belowbar_label = tk.Label(self, image=belowbar_img, bg="black")
+            belowbar_label.image = belowbar_img  # type: ignore[attr-defined]
+            belowbar_label.pack(side="bottom", fill="x")
+
+            # Mover saldo e piccoin para parte inferior direita (por cima do BelowBar)
+            coin_img_bottom = ImageTk.PhotoImage(Image.open(COIN_IMG).resize((24, 24)))
+            coin_lbl_bottom = tk.Label(self, image=coin_img_bottom, bg="#DC8392")
+            coin_lbl_bottom.image = coin_img_bottom  # type: ignore[attr-defined]
+            coin_lbl_bottom.place(x=self.winfo_screenwidth()-100, rely=1.0, y=-25, anchor="w")
+            
+            saldo_lbl_bottom = tk.Label(self, text=f"{self.saldo}", font=("Helvetica", 16, "bold"), fg="black", bg="#DC8392")
+            saldo_lbl_bottom.place(x=self.winfo_screenwidth()-70, rely=1.0, y=-25, anchor="w")
+
+            # Botão Back para voltar à Store principal
+            btn_voltar = tk.Button(self, text="Back", font=("Helvetica", 14, "bold"), 
+                                  bg="#8C04A0", fg="white", width=6, 
+                                  command=self.voltar_para_store)
+            btn_voltar.place(relx=0.5, rely=0.98, anchor="s")
+            
             return
 
         # IMPORTANTE: Filtrar cartas que já estão no inventário do jogador (sincronização completa)
         if self.dashboard and hasattr(self.dashboard, 'inventario') and tipo_atual in self.dashboard.inventario:
             cartas_no_inventario = self.dashboard.inventario[tipo_atual]
             cartas_antes_filtro = len(cartas_disp)
-            cartas_disp = [carta for carta in cartas_disp if carta not in cartas_no_inventario]
+            
+            # Comparar apenas nomes de arquivos (não caminhos completos) para melhor sincronização
+            nomes_no_inventario = {os.path.basename(carta) for carta in cartas_no_inventario}
+            cartas_disp = [carta for carta in cartas_disp if os.path.basename(carta) not in nomes_no_inventario]
+            
             cartas_depois_filtro = len(cartas_disp)
             print(f"DEBUG: SINCRONIZAÇÃO - Filtrado cartas do inventário: {cartas_antes_filtro} → {cartas_depois_filtro} (removidas {cartas_antes_filtro - cartas_depois_filtro} cartas)")
             
             if cartas_antes_filtro != cartas_depois_filtro:
-                print(f"DEBUG: Cartas removidas do inventário:")
-                for carta in cartas_no_inventario:
-                    print(f"  - {os.path.basename(carta)}")
+                print(f"DEBUG: Cartas removidas do inventário por nome:")
+                for nome in nomes_no_inventario:
+                    print(f"  - {nome}")
         else:
             print(f"DEBUG: Sem inventário para filtrar ou tipo '{tipo_atual}' não existe no inventário")
 
         # Verificar se ainda há cartas disponíveis após filtrar o inventário
         if not cartas_disp:
             print(f"DEBUG: Todas as cartas {tipo_atual} já estão no inventário do jogador")
-            tk.Label(self, text="Todas as cartas já estão no seu inventário!", font=("Helvetica", 16), bg="black", fg="white").pack(pady=20)
+            
+            # Mostrar mensagem de "sem cartas disponíveis" com interface completa
+            sem_cartas_lbl = tk.Label(self, text="Sem cartas disponíveis!", 
+                                    font=("Helvetica", 18, "bold"), 
+                                    bg="black", fg="white")
+            sem_cartas_lbl.place(relx=0.5, rely=0.4, anchor="center")
+            
+            # Adicionar mensagem adicional
+            info_lbl = tk.Label(self, text="Todas as cartas já estão no seu inventário", 
+                              font=("Helvetica", 14), 
+                              bg="black", fg="#AAAAAA")
+            info_lbl.place(relx=0.5, rely=0.5, anchor="center")
+            
+            # Barra inferior com imagem BelowBar_store.png
+            belowbar_img = ImageTk.PhotoImage(Image.open(BELOWBAR_IMG).resize((self.winfo_screenwidth(), 50)))
+            belowbar_label = tk.Label(self, image=belowbar_img, bg="black")
+            belowbar_label.image = belowbar_img  # type: ignore[attr-defined]
+            belowbar_label.pack(side="bottom", fill="x")
+
+            # Mover saldo e piccoin para parte inferior direita (por cima do BelowBar)
+            coin_img_bottom = ImageTk.PhotoImage(Image.open(COIN_IMG).resize((24, 24)))
+            coin_lbl_bottom = tk.Label(self, image=coin_img_bottom, bg="#DC8392")
+            coin_lbl_bottom.image = coin_img_bottom  # type: ignore[attr-defined]
+            coin_lbl_bottom.place(x=self.winfo_screenwidth()-100, rely=1.0, y=-25, anchor="w")
+            
+            saldo_lbl_bottom = tk.Label(self, text=f"{self.saldo}", font=("Helvetica", 16, "bold"), fg="black", bg="#DC8392")
+            saldo_lbl_bottom.place(x=self.winfo_screenwidth()-70, rely=1.0, y=-25, anchor="w")
+
+            # Botão Back para voltar à Store principal
+            btn_voltar = tk.Button(self, text="Back", font=("Helvetica", 14, "bold"), 
+                                  bg="#8C04A0", fg="white", width=6, 
+                                  command=self.voltar_para_store)
+            btn_voltar.place(relx=0.5, rely=0.98, anchor="s")
+            
             return
 
         # Filtrar User_1.png das páginas de compra (conforme solicitado)
@@ -839,10 +916,100 @@ class StoreWindow(tk.Toplevel):
             cartas_depois = len(cartas_disp)
             if cartas_antes != cartas_depois:
                 print(f"DEBUG: Filtrado User_1.png - cartas antes: {cartas_antes}, depois: {cartas_depois}")
+        
+        # Verificar novamente se ainda há cartas disponíveis após filtragem do User_1.png
+        if not cartas_disp:
+            print(f"DEBUG: Não há cartas {tipo_atual} disponíveis após todas as filtragens")
+            
+            # Mostrar mensagem de "sem cartas disponíveis" com interface completa
+            sem_cartas_lbl = tk.Label(self, text="Sem cartas disponíveis!", 
+                                    font=("Helvetica", 18, "bold"), 
+                                    bg="black", fg="white")
+            sem_cartas_lbl.place(relx=0.5, rely=0.4, anchor="center")
+            
+            # Adicionar mensagem adicional
+            info_lbl = tk.Label(self, text="Não há mais cartas para comprar", 
+                              font=("Helvetica", 14), 
+                              bg="black", fg="#AAAAAA")
+            info_lbl.place(relx=0.5, rely=0.5, anchor="center")
+            
+            # Barra inferior com imagem BelowBar_store.png
+            belowbar_img = ImageTk.PhotoImage(Image.open(BELOWBAR_IMG).resize((self.winfo_screenwidth(), 50)))
+            belowbar_label = tk.Label(self, image=belowbar_img, bg="black")
+            belowbar_label.image = belowbar_img  # type: ignore[attr-defined]
+            belowbar_label.pack(side="bottom", fill="x")
+
+            # Mover saldo e piccoin para parte inferior direita (por cima do BelowBar)
+            coin_img_bottom = ImageTk.PhotoImage(Image.open(COIN_IMG).resize((24, 24)))
+            coin_lbl_bottom = tk.Label(self, image=coin_img_bottom, bg="#DC8392")
+            coin_lbl_bottom.image = coin_img_bottom  # type: ignore[attr-defined]
+            coin_lbl_bottom.place(x=self.winfo_screenwidth()-100, rely=1.0, y=-25, anchor="w")
+            
+            saldo_lbl_bottom = tk.Label(self, text=f"{self.saldo}", font=("Helvetica", 16, "bold"), fg="black", bg="#DC8392")
+            saldo_lbl_bottom.place(x=self.winfo_screenwidth()-70, rely=1.0, y=-25, anchor="w")
+
+            # Botão Back para voltar à Store principal
+            btn_voltar = tk.Button(self, text="Back", font=("Helvetica", 14, "bold"), 
+                                  bg="#8C04A0", fg="white", width=6, 
+                                  command=self.voltar_para_store)
+            btn_voltar.place(relx=0.5, rely=0.98, anchor="s")
+            
+            return
+
+        # Remover cartas duplicadas (mesmo nome de arquivo de diferentes caminhos)
+        cartas_unicas = []
+        nomes_vistos = set()
+        for carta_path in cartas_disp:
+            nome_arquivo = os.path.basename(carta_path)
+            if nome_arquivo not in nomes_vistos:
+                nomes_vistos.add(nome_arquivo)
+                cartas_unicas.append(carta_path)
+        
+        if len(cartas_disp) != len(cartas_unicas):
+            print(f"DEBUG: Cartas duplicadas removidas: {len(cartas_disp)} → {len(cartas_unicas)}")
+            cartas_disp = cartas_unicas
+        
+        # Verificar mais uma vez se ainda há cartas disponíveis após remover duplicatas
+        if not cartas_disp:
+            print(f"DEBUG: Não há cartas {tipo_atual} disponíveis após remover duplicatas")
+            
+            # Mostrar mensagem de "sem cartas disponíveis" com interface completa
+            sem_cartas_lbl = tk.Label(self, text="Sem cartas disponíveis!", 
+                                    font=("Helvetica", 18, "bold"), 
+                                    bg="black", fg="white")
+            sem_cartas_lbl.place(relx=0.5, rely=0.4, anchor="center")
+            
+            # Adicionar mensagem adicional
+            info_lbl = tk.Label(self, text="Não há mais cartas para comprar", 
+                              font=("Helvetica", 14), 
+                              bg="black", fg="#AAAAAA")
+            info_lbl.place(relx=0.5, rely=0.5, anchor="center")
+            
+            # Barra inferior com imagem BelowBar_store.png
+            belowbar_img = ImageTk.PhotoImage(Image.open(BELOWBAR_IMG).resize((self.winfo_screenwidth(), 50)))
+            belowbar_label = tk.Label(self, image=belowbar_img, bg="black")
+            belowbar_label.image = belowbar_img  # type: ignore[attr-defined]
+            belowbar_label.pack(side="bottom", fill="x")
+
+            # Mover saldo e piccoin para parte inferior direita (por cima do BelowBar)
+            coin_img_bottom = ImageTk.PhotoImage(Image.open(COIN_IMG).resize((24, 24)))
+            coin_lbl_bottom = tk.Label(self, image=coin_img_bottom, bg="#DC8392")
+            coin_lbl_bottom.image = coin_img_bottom  # type: ignore[attr-defined]
+            coin_lbl_bottom.place(x=self.winfo_screenwidth()-100, rely=1.0, y=-25, anchor="w")
+            
+            saldo_lbl_bottom = tk.Label(self, text=f"{self.saldo}", font=("Helvetica", 16, "bold"), fg="black", bg="#DC8392")
+            saldo_lbl_bottom.place(x=self.winfo_screenwidth()-70, rely=1.0, y=-25, anchor="w")
+
+            # Botão Back para voltar à Store principal
+            btn_voltar = tk.Button(self, text="Back", font=("Helvetica", 14, "bold"), 
+                                  bg="#8C04A0", fg="white", width=6, 
+                                  command=self.voltar_para_store)
+            btn_voltar.place(relx=0.5, rely=0.98, anchor="s")
+            
+            return
 
         # Ordenar cartas por número (User_1, User_2, User_3, etc.)
         def extrair_numero_carta(carta_path):
-            import re
             nome = os.path.basename(carta_path)
             match = re.search(r'_(\d+)\.', nome)
             return int(match.group(1)) if match else float('inf')  # Cartas sem número vão para o fim
@@ -2111,9 +2278,9 @@ class StoreWindow(tk.Toplevel):
                 print("DEBUG: Outro tipo de carta - voltando à Store")
                 self.voltar_para_store()
         
-        # Botão ✖ cinza para fechar (movido para canto superior esquerdo)
-        x_btn = tk.Button(self, text="✖", font=("Helvetica", 24, "bold"), bg="#AAAAAA", fg="white", width=2, height=1, borderwidth=0, highlightthickness=0, command=fechar, cursor="hand2", activebackground="#CCCCCC")
-        x_btn.place(relx=0.02, rely=0, anchor="nw")
+        # Botão ✔ verde para fechar (movido para canto superior direito)
+        certo_btn = tk.Button(self, text="✔", font=("Helvetica", 24, "bold"), bg="#4CAF50", fg="white", width=2, height=1, borderwidth=0, highlightthickness=0, command=fechar, cursor="hand2", activebackground="#43d17a")
+        certo_btn.place(relx=0.98, rely=0, anchor="ne")
 
     def mostrar_carta_fullscreen_simples(self, carta_path, casa_tipo):
         """Mostra uma carta em fullscreen para casas de outro jogador - apenas visualização, sem compra/venda"""
