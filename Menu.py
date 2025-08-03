@@ -37,6 +37,9 @@ GPIO.setup(KEY1_PIN, GPIO.IN, pull_up_down=GPIO.PUD_UP)
 # Variável global do estado do teclado (uppercase / lowercase)
 keyboard_state = "uppercase"
 
+# Variável global para controlar o fluxo do jogo (Create Game vs Search Game)
+game_flow = "create"  # "create" ou "search"
+
 clients = []  # Lista de clientes conectados
 
 # Tipos de carta e cores
@@ -340,6 +343,7 @@ def enter_key():
 
 # Salvar nome e avançar para página do usuário
 def submit_name():
+    global game_flow
     name = name_entry.get().strip().capitalize()
     if name:
         with open(USERNAME_FILE, "w") as f:
@@ -347,7 +351,176 @@ def submit_name():
         if keyboard_frame.winfo_ismapped():
             keyboard_frame.place_forget()
         user_window.destroy()
-        show_user_page(name)
+        
+        # Controlar o fluxo baseado na seleção
+        if game_flow == "create":
+            show_user_page(name)  # Fluxo original: Create Game -> selecionar cor -> local/remote
+        else:
+            show_game_type_page(name)  # Novo fluxo: Search Game -> local/remote -> selecionar cor
+
+# Nova função para mostrar página de seleção Local/Remote Game
+def show_game_type_page(name):
+    gtp = tk.Toplevel(root, bg="black")  # game type page
+    gtp.overrideredirect(True)
+    gtp.geometry(f"{screen_width}x{screen_height}+0+0")
+    
+    # Manter referência à imagem
+    if use_netmaster_img:
+        gtp.netmaster_img = netmaster_img
+
+    # Logo NetMaster ao centro
+    if use_netmaster_img:
+        tk.Label(gtp, image=netmaster_img, bg="black").place(relx=0.5, y=10, anchor="n")
+    else:
+        tk.Label(gtp, text="NetMaster", font=("Helvetica", 20, "bold"), bg="black", fg="white").place(relx=0.5, y=10, anchor="n")
+
+    # Frame central para texto
+    tf = tk.Frame(gtp, bg="black")
+    tf.place(relx=0.5, rely=0.28, anchor="center")
+
+    great_lbl = tk.Label(tf, text="", font=("Helvetica", 18, "bold"), bg="black", fg="white", wraplength=int(screen_width*0.8), justify="center")
+    great_lbl.pack(pady=(0,8))
+    how_lbl = tk.Label(tf, text="", font=("Helvetica", 14), bg="black", fg="white", wraplength=int(screen_width*0.8), justify="center")
+    how_lbl.pack(pady=(0,12))
+
+    # Carregar ícones de local e remote game
+    try:
+        local_icon = ImageTk.PhotoImage(Image.open(os.path.join(IMG_DIR, "local_game_icon_button.png")).resize((115, 130)))
+        gtp.local_icon = local_icon
+        use_local_icon = True
+    except (FileNotFoundError, UnidentifiedImageError):
+        use_local_icon = False
+        
+    try:
+        remote_icon = ImageTk.PhotoImage(Image.open(os.path.join(IMG_DIR, "remote_game_icon_button.png")).resize((115, 130)))
+        gtp.remote_icon = remote_icon
+        use_remote_icon = True
+    except (FileNotFoundError, UnidentifiedImageError):
+        use_remote_icon = False
+
+    def show_play_buttons():
+        btns_frame = tk.Frame(gtp, bg="black")
+        btns_frame.place(relx=0.5, rely=0.7, anchor="center")
+        
+        def select_local():
+            gtp.destroy()
+            show_color_selection_page(name, "local")
+            
+        def select_remote():
+            gtp.destroy()
+            show_color_selection_page(name, "remote")
+            
+        # Botão Local Game
+        if use_local_icon:
+            tk.Button(
+                btns_frame,
+                image=gtp.local_icon,
+                bd=0,
+                bg="black",
+                activebackground="black",
+                highlightthickness=0,
+                command=select_local
+            ).pack(side=tk.TOP, pady=10)
+        else:
+            tk.Button(
+                btns_frame,
+                text="Local Game",
+                font=("Helvetica", 16, "bold"),
+                bg="#4CAF50",
+                fg="white",
+                command=select_local
+            ).pack(side=tk.TOP, pady=10)
+            
+        # Botão Remote Game
+        if use_remote_icon:
+            tk.Button(
+                btns_frame,
+                image=gtp.remote_icon,
+                bd=0,
+                bg="black",
+                activebackground="black",
+                highlightthickness=0,
+                command=select_remote
+            ).pack(side=tk.TOP, pady=10)
+        else:
+            tk.Button(
+                btns_frame,
+                text="Remote Game",
+                font=("Helvetica", 16, "bold"),
+                bg="#2196F3",
+                fg="white",
+                command=select_remote
+            ).pack(side=tk.TOP, pady=10)
+
+    animate_typing(great_lbl, f"Welcome {name}!", delay=60,
+        callback=lambda: animate_typing(how_lbl, "How do you want to play?", delay=40, callback=show_play_buttons)
+    )
+
+# Nova função para mostrar seleção de cor (para o fluxo Search Game)
+def show_color_selection_page(name, game_type):
+    csp = tk.Toplevel(root, bg="black")  # color selection page
+    csp.overrideredirect(True)
+    csp.geometry(f"{screen_width}x{screen_height}+0+0")
+    
+    # Manter referência à imagem
+    if use_netmaster_img:
+        csp.netmaster_img = netmaster_img
+
+    # Logo NetMaster ao centro
+    if use_netmaster_img:
+        tk.Label(csp, image=netmaster_img, bg="black").place(relx=0.5, y=10, anchor="n")
+    else:
+        tk.Label(csp, text="NetMaster", font=("Helvetica", 20, "bold"), bg="black", fg="white").place(relx=0.5, y=10, anchor="n")
+
+    tf = tk.Frame(csp, bg="black")
+    tf.place(relx=0.5, rely=0.36, anchor="center")
+    lbl1 = tk.Label(tf, text="", font=("Helvetica",18,"bold"), bg="black", fg="#6F0DB6", wraplength=int(screen_width*0.8), justify="center")
+    lbl2 = tk.Label(tf, text="", font=("Helvetica",14), bg="black", fg="white", wraplength=int(screen_width*0.8), justify="center")
+    lbl1.pack(pady=(0,8))
+    lbl2.pack(pady=(0,12))
+
+    def show_buttons():
+        bf = tk.Frame(csp, bg="black")
+        bf.place(relx=0.5, rely=0.6, anchor="center")
+        # ícones de cor
+        for color, fname in [("Red","red_user_icon.png"),
+                             ("Green","green_user_icon.png"),
+                             ("Blue","blue_user_icon.png"),
+                             ("Yellow","yellow_user_icon.png")]:
+            icon = ImageTk.PhotoImage(Image.open(os.path.join(IMG_DIR, fname)).resize((65,65)))
+            tk.Button(
+                bf,
+                image=icon,
+                bd=0,
+                bg="black",
+                activebackground="black",
+                highlightthickness=0,
+                command=lambda c=color: start_selected_game(c, name, game_type)
+            ).pack(side=tk.LEFT, padx=10)
+            # manter referência
+            setattr(csp, f"{color.lower()}_icon", icon)
+
+    animate_typing(lbl1, name, delay=50,
+                   callback=lambda: animate_typing(lbl2,
+                       "pick a color that feels like you!\nThis will represent your network.",
+                       delay=50, callback=show_buttons))
+
+# Função para iniciar o jogo após todas as seleções (Search Game flow)
+def start_selected_game(color, name, game_type):
+    global host_name, host_color, jogador
+    host_color = color
+    host_name = name
+    jogador = Player(host_name, host_color.lower(), START_POSITIONS[host_color.lower()])
+    
+    # Iniciar o PlayerDashboard diretamente
+    PlayerDashboard(
+        root,
+        player_color=host_color.lower(),
+        saldo=1000,
+        other_players=[c for c in ["red", "green", "blue", "yellow"] if c != host_color.lower()],
+        player_name=host_name
+    )
+    check_gpio_key(root)
 
 # Verificar botão KEY1 para sair
 def check_gpio_key():
@@ -365,22 +538,49 @@ root.geometry(f"{screen_width}x{screen_height}+0+0")
 root.configure(bg="black")  # fundo preto
 root.attributes("-fullscreen", True)
 
-# Carregar imagens dos logos e ícones
+# Carregar imagens dos logos e ícones com fallback
 print("A carregar logo NetMaster...")
-# netmaster_img = ImageTk.PhotoImage(Image.open(os.path.join(IMG_DIR, "logo_netmaster_icon_v3.png")).resize((100,40)))
-# create_icon = ImageTk.PhotoImage(Image.open(os.path.join(IMG_DIR, "create_game_icon_button.png")).resize((100,100)))
-# search_icon = ImageTk.PhotoImage(Image.open(os.path.join(IMG_DIR, "search_game_icon_button.png")).resize((100,100)))
+try:
+    netmaster_img = ImageTk.PhotoImage(Image.open(os.path.join(IMG_DIR, "logo_netmaster_icon_v3.png")).resize((140,55)))
+    use_netmaster_img = True
+except (FileNotFoundError, UnidentifiedImageError):
+    print("Logo NetMaster não encontrado, usando texto")
+    netmaster_img = None
+    use_netmaster_img = False
+
+try:
+    create_icon = ImageTk.PhotoImage(Image.open(os.path.join(IMG_DIR, "create_game_icon_button.png")).resize((100,100)))
+    use_create_icon = True
+except (FileNotFoundError, UnidentifiedImageError):
+    print("Ícone Create Game não encontrado, usando texto")
+    create_icon = None
+    use_create_icon = False
+
+try:
+    search_icon = ImageTk.PhotoImage(Image.open(os.path.join(IMG_DIR, "search_game_icon_button.png")).resize((100,100)))
+    use_search_icon = True
+except (FileNotFoundError, UnidentifiedImageError):
+    print("Ícone Search Game não encontrado, usando texto")
+    search_icon = None
+    use_search_icon = False
 
 # Definição de open_name_input
-def open_name_input():
-    global user_window, name_entry, keyboard_frame
+def open_name_input(flow_type="create"):
+    global user_window, name_entry, keyboard_frame, game_flow
+    game_flow = flow_type
     user_window = tk.Toplevel(root, bg="black")  # fundo preto
     user_window.overrideredirect(True)
     user_window.geometry(f"{screen_width}x{screen_height}+0+0")
+    
+    # Manter referência à imagem
+    if use_netmaster_img:
+        user_window.netmaster_img = netmaster_img
 
-    # Só o logo NetMaster ao centro
-    # tk.Label(user_window, image=netmaster_img, bg="black").place(relx=0.5, y=10, anchor="n")
-    tk.Label(user_window, text="NetMaster", font=("Helvetica", 20, "bold"), bg="black", fg="white").place(relx=0.5, y=10, anchor="n")
+    # Logo NetMaster ao centro
+    if use_netmaster_img:
+        tk.Label(user_window, image=netmaster_img, bg="black").place(relx=0.5, y=10, anchor="n")
+    else:
+        tk.Label(user_window, text="NetMaster", font=("Helvetica", 20, "bold"), bg="black", fg="white").place(relx=0.5, y=10, anchor="n")
 
     tf = tk.Frame(user_window, bg="black")
     tf.place(relx=0.5, rely=0.32, anchor="center")
@@ -413,9 +613,16 @@ def show_user_page(name):
     up = tk.Toplevel(root, bg="black")  # fundo preto
     up.overrideredirect(True)
     up.geometry(f"{screen_width}x{screen_height}+0+0")
+    
+    # Manter referência à imagem
+    if use_netmaster_img:
+        up.netmaster_img = netmaster_img
 
-    # tk.Label(up, image=netmaster_img, bg="black").place(relx=0.5, y=10, anchor="n")
-    tk.Label(up, text="NetMaster", font=("Helvetica", 20, "bold"), bg="black", fg="white").place(relx=0.5, y=10, anchor="n")
+    # Logo NetMaster ao centro
+    if use_netmaster_img:
+        tk.Label(up, image=netmaster_img, bg="black").place(relx=0.5, y=10, anchor="n")
+    else:
+        tk.Label(up, text="NetMaster", font=("Helvetica", 20, "bold"), bg="black", fg="white").place(relx=0.5, y=10, anchor="n")
 
     tf = tk.Frame(up, bg="black")
     tf.place(relx=0.5, rely=0.36, anchor="center")
@@ -724,18 +931,28 @@ def show_main_menu():
     main_win = tk.Toplevel(root, bg="black")
     main_win.overrideredirect(True)
     main_win.geometry(f"{screen_width}x{screen_height}+0+0")
+    
+    # Manter referências às imagens para evitar garbage collection
+    if use_netmaster_img:
+        main_win.netmaster_img = netmaster_img
+    if use_create_icon:
+        main_win.create_icon = create_icon
+    if use_search_icon:
+        main_win.search_icon = search_icon
 
     # Barra superior com logo NetMaster ao centro
     top_bar = tk.Frame(main_win, bg="black", height=60, width=screen_width)
     top_bar.place(x=0, y=0, relwidth=1)
-    # tk.Label(top_bar, image=netmaster_img, bg="black").place(relx=0.5, y=10, anchor="n")
-    tk.Label(top_bar, text="NetMaster", font=("Helvetica", 20, "bold"), bg="black", fg="white").place(relx=0.5, y=10, anchor="n")
+    if use_netmaster_img:
+        tk.Label(top_bar, image=netmaster_img, bg="black").place(relx=0.5, y=10, anchor="n")
+    else:
+        tk.Label(top_bar, text="NetMaster", font=("Helvetica", 20, "bold"), bg="black", fg="white").place(relx=0.5, y=10, anchor="n")
 
     # Texto inicial
     init_tf = tk.Frame(main_win, bg="black")
     init_tf.place(relx=0.5, rely=0.32, anchor="center")
     il1 = tk.Label(init_tf, text="", font=("Helvetica", 18, "bold"), bg="black", fg="white", wraplength=int(screen_width*0.8), justify="center")  # AUMENTADO
-    il2 = tk.Label(init_tf, text="", font=("Helvetica", 12), bg="black", fg="white", wraplength=int(screen_width*0.8), justify="center")        # AUMENTADO
+    il2 = tk.Label(init_tf, text="", font=("Helvetica", 16), bg="black", fg="white", wraplength=int(screen_width*0.8), justify="center")        # AUMENTADO
     il1.pack(pady=(0,8))
     il2.pack(pady=(0,12))
 
@@ -744,22 +961,48 @@ def show_main_menu():
     def show_buttons():
         # Botões mais baixos (rely=0.65)
         btn_frame.place(relx=0.5, rely=0.68, anchor="center")
-        tk.Button(
-            btn_frame,
-            text="Create Game",
-            font=("Helvetica", 16, "bold"),
-            bg="#4CAF50",
-            fg="white",
-            command=lambda: [main_win.destroy(), open_name_input()]
-        ).pack(side=tk.TOP, pady=10)
-        tk.Button(
-            btn_frame,
-            text="Search Game",
-            font=("Helvetica", 16, "bold"),
-            bg="#2196F3",
-            fg="white",
-            command=lambda: [main_win.destroy(), open_name_input()]  # ou outra função para "Join Game"
-        ).pack(side=tk.TOP, pady=10)
+        
+        # Botão Create Game
+        if use_create_icon:
+            tk.Button(
+                btn_frame,
+                image=create_icon,
+                bg="black",
+                bd=0,
+                activebackground="black",
+                highlightthickness=0,
+                command=lambda: [main_win.destroy(), open_name_input("create")]
+            ).pack(side=tk.TOP, pady=10)
+        else:
+            tk.Button(
+                btn_frame,
+                text="Create Game",
+                font=("Helvetica", 16, "bold"),
+                bg="#4CAF50",
+                fg="white",
+                command=lambda: [main_win.destroy(), open_name_input("create")]
+            ).pack(side=tk.TOP, pady=10)
+            
+        # Botão Search Game
+        if use_search_icon:
+            tk.Button(
+                btn_frame,
+                image=search_icon,
+                bg="black",
+                bd=0,
+                activebackground="black",
+                highlightthickness=0,
+                command=lambda: [main_win.destroy(), open_name_input("search")]
+            ).pack(side=tk.TOP, pady=10)
+        else:
+            tk.Button(
+                btn_frame,
+                text="Search Game",
+                font=("Helvetica", 16, "bold"),
+                bg="#2196F3",
+                fg="white",
+                command=lambda: [main_win.destroy(), open_name_input("search")]
+            ).pack(side=tk.TOP, pady=10)
 
     animate_typing(il1, "Welcome to NetMaster! 👋", delay=50,
                    callback=lambda: animate_typing(il2, "What would you like to do today?", delay=40, callback=show_buttons))

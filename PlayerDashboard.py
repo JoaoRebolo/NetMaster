@@ -301,6 +301,9 @@ class PlayerDashboard(tk.Toplevel):
         
         # Variável para controlar se Next Phase está ativo (desabilita vendas)
         self._next_phase_active = False
+        
+        # Variável para controlar se Final Phase está ativo (bloqueia ativação/desativação de cartas)
+        self._final_phase_active = False
 
         # PROTEÇÃO CONTRA LOOP: Flag para evitar abrir inventário recursivamente
         self._inventory_opening = False
@@ -615,16 +618,61 @@ class PlayerDashboard(tk.Toplevel):
                                     if f.lower().endswith(('.png', '.jpg', '.jpeg'))]
                         print(f"DEBUG: [add_starter_cards] Arquivos de carta neutros filtrados: {[os.path.basename(f) for f in card_files]}")
                         if card_files:
-                            # Adicionar 2-4 cartas de cada tipo neutro para demonstração
-                            if card_type == "events":
-                                max_cards = min(5, len(card_files))  # Mais events para mostrar paginação
-                            else:
-                                max_cards = min(3, len(card_files))
+                            # Para actions e events, filtrar apenas cartas válidas para o jogador
+                            if card_type in ["actions", "events"] and hasattr(self, 'card_database') and self.card_database:
+                                valid_cards = []
+                                player_color = self.player_color.lower()
+                                
+                                for card_file in card_files:
+                                    filename = os.path.basename(card_file)
+                                    try:
+                                        if card_type == "actions":
+                                            # Action_1.png -> action_1
+                                            match = re.search(r'Action_(\d+)\.', filename)
+                                            if match:
+                                                card_id = f"action_{match.group(1)}"
+                                                card_data = self.card_database.get_action(card_id)
+                                                if card_data:
+                                                    target = getattr(card_data, 'target', None)
+                                                    player_choice = getattr(card_data, 'player_choice', False)
+                                                    # Critério de filtragem: target do jogador OU player_choice=True
+                                                    if target == player_color or (target is None and player_choice):
+                                                        valid_cards.append(card_file)
+                                                        print(f"DEBUG: [add_starter_cards] Action VÁLIDA: {filename} (target={target}, player_choice={player_choice})")
+                                        elif card_type == "events":
+                                            # Event_1.png -> event_1
+                                            match = re.search(r'Event_(\d+)\.', filename)
+                                            if match:
+                                                card_id = f"event_{match.group(1)}"
+                                                card_data = self.card_database.get_event(card_id)
+                                                if card_data:
+                                                    target = getattr(card_data, 'target_player', None)
+                                                    player_choice = getattr(card_data, 'player_choice', False)
+                                                    # Critério de filtragem: target do jogador OU player_choice=True
+                                                    if target == player_color or (target is None and player_choice):
+                                                        valid_cards.append(card_file)
+                                                        print(f"DEBUG: [add_starter_cards] Event VÁLIDO: {filename} (target_player={target}, player_choice={player_choice})")
+                                    except Exception as e:
+                                        print(f"DEBUG: [add_starter_cards] Erro ao processar carta {filename}: {e}")
+                                
+                                card_files = valid_cards
+                                print(f"DEBUG: [add_starter_cards] Cartas filtradas para {card_type}: {len(card_files)} válidas de {len(valid_cards)} totais")
                             
-                            print(f"DEBUG: [add_starter_cards] Adicionando {max_cards} cartas neutras de {card_type}")
-                            for i in range(max_cards):
-                                self.inventario[card_type].append(card_files[i])
-                                print(f"DEBUG: [PlayerDashboard] Carta inicial neutra adicionada: {os.path.basename(card_files[i])} ({card_type})")
+                            # Adicionar cartas ao inventário
+                            if card_files:
+                                if card_type == "events":
+                                    max_cards = min(8, len(card_files))  # Mais events para mostrar paginação
+                                elif card_type == "actions":
+                                    max_cards = min(6, len(card_files))  # Mais actions para variedade
+                                else:
+                                    max_cards = min(3, len(card_files))
+                                
+                                print(f"DEBUG: [add_starter_cards] Adicionando {max_cards} cartas neutras de {card_type}")
+                                for i in range(max_cards):
+                                    self.inventario[card_type].append(card_files[i])
+                                    print(f"DEBUG: [PlayerDashboard] Carta inicial neutra adicionada: {os.path.basename(card_files[i])} ({card_type})")
+                            else:
+                                print(f"DEBUG: [add_starter_cards] Nenhuma carta válida encontrada para {card_type} após filtragem")
                             cards_found = True
                             break
                         else:
@@ -640,6 +688,9 @@ class PlayerDashboard(tk.Toplevel):
         print(f"DEBUG: [PlayerDashboard] Resumo do inventário após cartas iniciais:")
         for tipo, cartas in self.inventario.items():
             print(f"DEBUG: [PlayerDashboard]   {tipo}: {len(cartas)} cartas")
+        
+        # Garantir que há cartas suficientes de Actions/Events
+        self.add_more_action_event_cards(min_actions=6, min_events=8)
     
     def _get_card_message_size(self, carta_path):
         """
@@ -1800,33 +1851,99 @@ class PlayerDashboard(tk.Toplevel):
         # Saldo no canto inferior direito (sobre a BelowBar) - criado após para ficar por cima
         self.after(100, lambda: self.create_coin_saldo_overlay(screen_width, screen_height, saldo))
 
-        # Botão Next Phase (cinza) na parte inferior central - criado no final para ficar visível
-        def next_phase_action():
-            # Esconde o botão Store
-            if hasattr(self, 'btn_store') and self.btn_store:
-                self.btn_store.place_forget()
-                print("DEBUG: Botão Store escondido")
-            # Ativa flag para desativar vendas nas páginas de inventário
-            self._next_phase_active = True
-            # Atualiza cache dos User IDs para controlo do carrossel
-            self._check_user_inventory_for_carousel_access()
-            # Atualiza destaques roxos do carrossel
-            self._update_carousel_highlights()
-            print("DEBUG: Next Phase ativado - Store escondido, vendas desativadas, User IDs verificados e destaques atualizados")
+        # Botão Next Phase OU Final Phase (cinza) na parte inferior central - criado no final para ficar visível
+        # Verificar qual botão mostrar baseado no estado atual
+        if getattr(self, '_next_phase_active', False) and not getattr(self, '_final_phase_active', False):
+            # Next Phase já foi ativado mas Final Phase ainda não, mostrar botão Final Phase
+            def final_phase_action():
+                print("DEBUG: Final Phase ativado")
+                # Ativar flag Final Phase para bloquear todas as ações de cartas
+                self._final_phase_active = True
+                print("DEBUG: Final Phase ativado - ativação/desativação de cartas bloqueada")
+                
+                # Esconder o botão Final Phase
+                if hasattr(self, 'final_phase_btn') and self.final_phase_btn:
+                    self.final_phase_btn.place_forget()
+                    print("DEBUG: Botão Final Phase escondido")
+            
+            self.final_phase_btn = tk.Button(
+                self,
+                text="Final Phase",
+                font=("Helvetica", 14, "bold"),
+                bg="#808080",  # Mesmo cinza do Next Phase
+                fg="black",
+                command=final_phase_action,
+                width=10,
+            )
+            # Mesma posição do botão Next Phase
+            self.final_phase_btn.place(relx=0.5, rely=0.98, anchor="s")
+            # Garantir que fica por cima de todos os outros elementos
+            self.final_phase_btn.lift()
+            print("DEBUG: Botão Final Phase recriado na interface principal")
+        elif getattr(self, '_final_phase_active', False):
+            # Final Phase já foi ativado, não mostrar nenhum botão de fase
+            print("DEBUG: Final Phase ativo - nenhum botão de fase mostrado")
+        else:
+            # Next Phase ainda não foi ativado, mostrar botão Next Phase
+            def next_phase_action():
+                # Esconde o botão Store
+                if hasattr(self, 'btn_store') and self.btn_store:
+                    self.btn_store.place_forget()
+                    print("DEBUG: Botão Store escondido")
+                # Ativa flag para desativar vendas nas páginas de inventário
+                self._next_phase_active = True
+                # Atualiza cache dos User IDs para controlo do carrossel
+                self._check_user_inventory_for_carousel_access()
+                # Atualiza destaques roxos do carrossel
+                self._update_carousel_highlights()
+                print("DEBUG: Next Phase ativado - Store escondido, vendas desativadas, User IDs verificados e destaques atualizados")
+                
+                # Esconder o botão Next Phase e criar o botão Final Phase na mesma posição
+                if hasattr(self, 'next_phase_btn') and self.next_phase_btn:
+                    self.next_phase_btn.place_forget()
+                    print("DEBUG: Botão Next Phase escondido")
+                
+                # Criar botão Final Phase na mesma posição e com mesmo formato
+                def final_phase_action():
+                    print("DEBUG: Final Phase ativado")
+                    # Ativar flag Final Phase para bloquear todas as ações de cartas
+                    self._final_phase_active = True
+                    print("DEBUG: Final Phase ativado - ativação/desativação de cartas bloqueada")
+                    
+                    # Esconder o botão Final Phase
+                    if hasattr(self, 'final_phase_btn') and self.final_phase_btn:
+                        self.final_phase_btn.place_forget()
+                        print("DEBUG: Botão Final Phase escondido")
+                
+                self.final_phase_btn = tk.Button(
+                    self,
+                    text="Final Phase",
+                    font=("Helvetica", 14, "bold"),
+                    bg="#808080",  # Mesmo cinza do Next Phase
+                    fg="black",
+                    command=final_phase_action,
+                    width=10,
+                )
+                # Mesma posição do botão Next Phase
+                self.final_phase_btn.place(relx=0.5, rely=0.98, anchor="s")
+                # Garantir que fica por cima de todos os outros elementos
+                self.final_phase_btn.lift()
+                print("DEBUG: Botão Final Phase criado na mesma posição")
 
-        next_phase_btn = tk.Button(
-            self,
-            text="Next Phase",
-            font=("Helvetica", 14, "bold"),
-            bg="#808080",  # Cinza
-            fg="black",
-            command=next_phase_action,
-            width=10,
-        )
-        # Posição igual aos botões Back das páginas de inventário
-        next_phase_btn.place(relx=0.5, rely=0.98, anchor="s")
-        # Garantir que fica por cima de todos os outros elementos
-        next_phase_btn.lift()
+            self.next_phase_btn = tk.Button(
+                self,
+                text="Next Phase",
+                font=("Helvetica", 14, "bold"),
+                bg="#808080",  # Cinza
+                fg="black",
+                command=next_phase_action,
+                width=10,
+            )
+            # Posição igual aos botões Back das páginas de inventário
+            self.next_phase_btn.place(relx=0.5, rely=0.98, anchor="s")
+            # Garantir que fica por cima de todos os outros elementos
+            self.next_phase_btn.lift()
+            print("DEBUG: Botão Next Phase recriado na interface principal")
 
         # NOTA: As listas de cartas ativas (active_challenge, active_users, etc.) 
         # já estão inicializadas no __init__ do PlayerDashboard
@@ -1900,6 +2017,11 @@ class PlayerDashboard(tk.Toplevel):
             print(f"DEBUG: Tentativa de ativar carta {card_type} BLOQUEADA - Next Phase não está ativo")
             return
         
+        # IMPORTANTE: Não pode ativar cartas após Final Phase ser ativado
+        if getattr(self, '_final_phase_active', False):
+            print(f"DEBUG: Tentativa de ativar carta {card_type} BLOQUEADA - Final Phase está ativo")
+            return
+        
         if card_type == "challenge":
             # Só pode haver 1 challenge ativo
             if self.active_challenge:
@@ -1948,6 +2070,11 @@ class PlayerDashboard(tk.Toplevel):
         # IMPORTANTE: Só pode desativar cartas após Next Phase ser ativado
         if not getattr(self, '_next_phase_active', False):
             print(f"DEBUG: Tentativa de desativar carta {card_type} BLOQUEADA - Next Phase não está ativo")
+            return
+        
+        # IMPORTANTE: Não pode desativar cartas após Final Phase ser ativado
+        if getattr(self, '_final_phase_active', False):
+            print(f"DEBUG: Tentativa de desativar carta {card_type} BLOQUEADA - Final Phase está ativo")
             return
         
         if card_type == "challenge":
@@ -2144,15 +2271,22 @@ class PlayerDashboard(tk.Toplevel):
             title_str = " / ".join([t.capitalize() for t in tipos])
         title = tk.Label(self, text=title_str, font=("Helvetica", 22, "bold"), fg="white", bg="black")
         title.place(relx=0.5, y=65, anchor="n")
-        # Verificar se é Actions/Events para organização especial em colunas
+        # Verificar se é Actions/Events ou Activities/Challenges para organização especial em colunas
         if set(tipos) == set(["actions", "events"]):
             # Organização especial: Actions na coluna esquerda, Events na coluna direita
             # NOVA FUNCIONALIDADE: Apenas a primeira carta do topo está virada para cima (por ordem de chegada)
             # Manter grid 2x2 com paginação conforme solicitado
-            cartas_actions = self.inventario.get("actions", [])
-            cartas_events = self.inventario.get("events", [])
-            print(f"DEBUG: [show_inventory_matrix] Cartas Actions: {len(cartas_actions)}")
-            print(f"DEBUG: [show_inventory_matrix] Cartas Events: {len(cartas_events)}")
+            cartas_actions_raw = self.inventario.get("actions", [])
+            cartas_events_raw = self.inventario.get("events", [])
+            
+            # FILTRAR cartas Actions/Events baseado no target e player_choice
+            cartas_actions = self._filter_action_event_cards(cartas_actions_raw, "actions")
+            cartas_events = self._filter_action_event_cards(cartas_events_raw, "events")
+            
+            print(f"DEBUG: [show_inventory_matrix] Cartas Actions (antes do filtro): {len(cartas_actions_raw)}")
+            print(f"DEBUG: [show_inventory_matrix] Cartas Actions (após filtro): {len(cartas_actions)}")
+            print(f"DEBUG: [show_inventory_matrix] Cartas Events (antes do filtro): {len(cartas_events_raw)}")
+            print(f"DEBUG: [show_inventory_matrix] Cartas Events (após filtro): {len(cartas_events)}")
             
             # Calcular total de cartas para paginação (2 linhas, 1 carta de cada tipo por linha)
             max_cards = max(len(cartas_actions), len(cartas_events))
@@ -2190,14 +2324,17 @@ class PlayerDashboard(tk.Toplevel):
                         cursor_type = "hand2"
                         # Usar função auxiliar para corrigir closure problem
                         def make_click_handler(path, tipos_param):
-                            return lambda e: self.show_card_fullscreen_inventory(path, tipos_param)
+                            return lambda e: self.show_card_fullscreen_inventory(path, tipos_param, page)
                         click_handler = make_click_handler(carta_path, tipos)
                         print(f"DEBUG: [show_inventory_matrix] Action do topo (virada para cima): {os.path.basename(carta_path)}")
                     else:
-                        # Cartas restantes: viradas para baixo, não clicáveis
+                        # Cartas restantes: viradas para baixo, mas clicáveis para visualização
                         img = ImageTk.PhotoImage(Image.open(CARD_IMG).resize((card_w, card_h)))
-                        cursor_type = "arrow"
-                        click_handler = None
+                        cursor_type = "hand2"
+                        # Usar função auxiliar para corrigir closure problem (visualização apenas)
+                        def make_view_handler(path, tipos_param):
+                            return lambda e: self.show_card_fullscreen_inventory(path, tipos_param, page)
+                        click_handler = make_view_handler(carta_path, tipos)
                         print(f"DEBUG: [show_inventory_matrix] Action virada para baixo (posição {original_idx}): {os.path.basename(carta_path)}")
                     
                     carta_lbl = tk.Label(matriz_frame, image=img, bg="black", cursor=cursor_type)
@@ -2229,14 +2366,17 @@ class PlayerDashboard(tk.Toplevel):
                         cursor_type = "hand2"
                         # Usar função auxiliar para corrigir closure problem
                         def make_click_handler_events(path, tipos_param):
-                            return lambda e: self.show_card_fullscreen_inventory(path, tipos_param)
+                            return lambda e: self.show_card_fullscreen_inventory(path, tipos_param, page)
                         click_handler = make_click_handler_events(carta_path, tipos)
                         print(f"DEBUG: [show_inventory_matrix] Event do topo (virada para cima): {os.path.basename(carta_path)}")
                     else:
-                        # Cartas restantes: viradas para baixo, não clicáveis
+                        # Cartas restantes: viradas para baixo, mas clicáveis para visualização
                         img = ImageTk.PhotoImage(Image.open(CARD_IMG).resize((card_w, card_h)))
-                        cursor_type = "arrow"
-                        click_handler = None
+                        cursor_type = "hand2"
+                        # Usar função auxiliar para corrigir closure problem (visualização apenas)
+                        def make_view_handler_events(path, tipos_param):
+                            return lambda e: self.show_card_fullscreen_inventory(path, tipos_param, page)
+                        click_handler = make_view_handler_events(carta_path, tipos)
                         print(f"DEBUG: [show_inventory_matrix] Event virada para baixo (posição {original_idx}): {os.path.basename(carta_path)}")
                     
                     carta_lbl = tk.Label(matriz_frame, image=img, bg="black", cursor=cursor_type)
@@ -2250,6 +2390,107 @@ class PlayerDashboard(tk.Toplevel):
                     events_row_counter += 1
                 except Exception as e:
                     print(f"DEBUG: [show_inventory_matrix] Erro ao carregar Event: {e}")
+                    continue
+        elif set(tipos) == set(["activities", "challenges"]):
+            # Organização especial: Activities na coluna esquerda, Challenges na coluna direita
+            # Estrutura igual ao Actions/Events
+            cartas_activities = self.inventario.get("activities", [])
+            cartas_challenges = self.inventario.get("challenges", [])
+            
+            print(f"DEBUG: [show_inventory_matrix] Cartas Activities: {len(cartas_activities)}")
+            print(f"DEBUG: [show_inventory_matrix] Cartas Challenges: {len(cartas_challenges)}")
+            
+            # DEBUG: Verificar se as cartas estão nos inventários corretos
+            print("DEBUG: [show_inventory_matrix] === VERIFICAÇÃO DE INVENTÁRIOS ===")
+            for i, carta in enumerate(cartas_activities[:3]):  # Mostrar primeiras 3 Activities
+                basename = os.path.basename(carta)
+                print(f"DEBUG: [show_inventory_matrix] Activities[{i}]: {basename}")
+                # Verificar se realmente é uma Activity
+                if "activity" not in basename.lower() and "activities" not in carta.lower():
+                    print(f"DEBUG: [show_inventory_matrix] *** ERRO: {basename} NÃO parece ser uma Activity! ***")
+            
+            for i, carta in enumerate(cartas_challenges[:3]):  # Mostrar primeiras 3 Challenges
+                basename = os.path.basename(carta)
+                print(f"DEBUG: [show_inventory_matrix] Challenges[{i}]: {basename}")
+                # Verificar se realmente é uma Challenge
+                if "challenge" not in basename.lower() and "challenges" not in carta.lower():
+                    print(f"DEBUG: [show_inventory_matrix] *** ERRO: {basename} NÃO parece ser uma Challenge! ***")
+            print("DEBUG: [show_inventory_matrix] === FIM VERIFICAÇÃO ===")
+            
+            # Calcular total de cartas para paginação (2 linhas, 1 carta de cada tipo por linha)
+            max_cards = max(len(cartas_activities), len(cartas_challenges))
+            cards_per_page = 2  # 2 linhas, 1 carta de cada tipo por linha
+            total_pages = max(1, (max_cards + cards_per_page - 1) // cards_per_page)
+            page = max(0, min(page, total_pages - 1))
+            start_idx = page * cards_per_page
+            end_idx = start_idx + cards_per_page
+            
+            matriz_frame = tk.Frame(self, bg="black")
+            matriz_frame.place(relx=0.5, rely=0.5, anchor="center")
+            card_w, card_h = 85, 120
+            
+            # Configurar colunas do grid para manter estrutura 2x2
+            matriz_frame.grid_columnconfigure(0, weight=1, minsize=card_w + 16)  # Coluna Activities
+            matriz_frame.grid_columnconfigure(1, weight=1, minsize=card_w + 16)  # Coluna Challenges
+            
+            # Colocar Activities na coluna da esquerda (col=0)
+            activities_to_show = []
+            for i in range(start_idx, min(end_idx, len(cartas_activities))):
+                activities_to_show.append((i, cartas_activities[i]))
+            
+            # Determinar posições das cartas Activities baseado no número de cartas a mostrar
+            activities_row_counter = 0
+            for original_idx, carta_path in activities_to_show:
+                try:
+                    img = ImageTk.PhotoImage(Image.open(carta_path).resize((card_w, card_h)))
+                    cursor_type = "hand2"
+                    # Usar função auxiliar para corrigir closure problem
+                    def make_click_handler_activities(path, tipos_param):
+                        return lambda e: self.show_card_fullscreen_inventory(path, tipos_param, page)
+                    click_handler = make_click_handler_activities(carta_path, tipos)
+                    print(f"DEBUG: [show_inventory_matrix] Activity COLUNA ESQUERDA (col=0): {os.path.basename(carta_path)}")
+                    
+                    carta_lbl = tk.Label(matriz_frame, image=img, bg="black", cursor=cursor_type)
+                    carta_lbl.image = img  # type: ignore[attr-defined]
+                    carta_lbl.grid(row=activities_row_counter, column=0, padx=8, pady=8)
+                    
+                    if click_handler:
+                        carta_lbl.bind("<Button-1>", click_handler)
+                    
+                    print(f"DEBUG: [show_inventory_matrix] Activity colocada na linha {activities_row_counter}, coluna 0 (ESQUERDA)")
+                    activities_row_counter += 1
+                except Exception as e:
+                    print(f"DEBUG: [show_inventory_matrix] Erro ao carregar Activity: {e}")
+                    continue
+            
+            # Colocar Challenges na coluna da direita (col=1)
+            challenges_to_show = []
+            for i in range(start_idx, min(end_idx, len(cartas_challenges))):
+                challenges_to_show.append((i, cartas_challenges[i]))
+            
+            # Determinar posições das cartas Challenges baseado no número de cartas a mostrar
+            challenges_row_counter = 0
+            for original_idx, carta_path in challenges_to_show:
+                try:
+                    img = ImageTk.PhotoImage(Image.open(carta_path).resize((card_w, card_h)))
+                    cursor_type = "hand2"
+                    # Usar função auxiliar para corrigir closure problem
+                    def make_click_handler_challenges(path, tipos_param):
+                        return lambda e: self.show_card_fullscreen_inventory(path, tipos_param, page)
+                    click_handler = make_click_handler_challenges(carta_path, tipos)
+                    print(f"DEBUG: [show_inventory_matrix] Challenge COLUNA DIREITA (col=1): {os.path.basename(carta_path)}")
+                    
+                    carta_lbl = tk.Label(matriz_frame, image=img, bg="black", cursor=cursor_type)
+                    carta_lbl.image = img  # type: ignore[attr-defined]
+                    carta_lbl.grid(row=challenges_row_counter, column=1, padx=8, pady=8)
+                    
+                    if click_handler:
+                        carta_lbl.bind("<Button-1>", click_handler)
+                    
+                    print(f"DEBUG: [show_inventory_matrix] Challenge colocado na linha {challenges_row_counter}, coluna 1 (DIREITA)")
+                    challenges_row_counter += 1
+                except Exception as e:
+                    print(f"DEBUG: [show_inventory_matrix] Erro ao carregar Challenge: {e}")
                     continue
         else:
             # Organização normal para outros tipos
@@ -2326,7 +2567,7 @@ class PlayerDashboard(tk.Toplevel):
                 carta_lbl = tk.Label(matriz_frame, image=img, bg="black", cursor="hand2")
                 carta_lbl.image = img  # type: ignore[attr-defined]
                 carta_lbl.grid(row=row, column=col, padx=8, pady=8)
-                carta_lbl.bind("<Button-1>", lambda e, p=carta_path, t=tipos: self.show_card_fullscreen_inventory(p, t))
+                carta_lbl.bind("<Button-1>", lambda e, p=carta_path, t=tipos, pg=page: self.show_card_fullscreen_inventory(p, t, pg))
         # Setas de navegação à direita
         if total_pages > 1:
             seta_x = 0.90
@@ -2367,24 +2608,6 @@ class PlayerDashboard(tk.Toplevel):
         self.after(100, lambda: self.create_coin_saldo_overlay(screen_width, screen_height, self.saldo))
 
     def show_card_fullscreen_inventory(self, carta_path, tipos, page=0):
-        # VERIFICAÇÃO: Para Actions/Events, apenas cartas do topo (primeira de cada tipo) podem ser vistas
-        if set(tipos) == set(["actions", "events"]):
-            # Verificar se a carta atual é uma das cartas do topo
-            cartas_actions = self.inventario.get("actions", [])
-            cartas_events = self.inventario.get("events", [])
-            
-            is_top_card = False
-            if cartas_actions and carta_path == cartas_actions[0]:
-                is_top_card = True
-                print(f"DEBUG: [show_card_fullscreen_inventory] Carta Actions do topo pode ser vista: {os.path.basename(carta_path)}")
-            elif cartas_events and carta_path == cartas_events[0]:
-                is_top_card = True
-                print(f"DEBUG: [show_card_fullscreen_inventory] Carta Events do topo pode ser vista: {os.path.basename(carta_path)}")
-            
-            if not is_top_card:
-                print(f"DEBUG: [show_card_fullscreen_inventory] BLOQUEADO: Carta {os.path.basename(carta_path)} não é do topo - não pode ser vista")
-                return  # Bloquear visualização de cartas que não são do topo
-        
         # Limpa widgets (menos barra superior)
         for widget in self.winfo_children():
             if widget == self.topbar_label:
@@ -2438,6 +2661,10 @@ class PlayerDashboard(tk.Toplevel):
         # IMPORTANTE: Se Next Phase estiver ativo, NÃO pode vender nenhuma carta
         if getattr(self, '_next_phase_active', False):
             print(f"DEBUG: NÃO pode vender carta do inventário - Next Phase está ativo (vendas desabilitadas)")
+            pode_vender = False
+        # IMPORTANTE: Se Final Phase estiver ativo, NÃO pode vender nenhuma carta
+        elif getattr(self, '_final_phase_active', False):
+            print(f"DEBUG: NÃO pode vender carta do inventário - Final Phase está ativo (vendas desabilitadas)")
             pode_vender = False
         # IMPORTANTE: Se está numa casa START, NÃO pode vender nenhuma carta
         elif casa_atual_tipo == "start":
@@ -2617,9 +2844,10 @@ class PlayerDashboard(tk.Toplevel):
                 print(f"DEBUG: [FULLSCREEN] User_1.png - sem botões especiais, só o X cinza")
             else:
                 next_phase_active = getattr(self, '_next_phase_active', False)
-                print(f"DEBUG: [FULLSCREEN] Processando carta tipo {carta_tipo} para ativação - Next Phase ativo: {next_phase_active}")
+                final_phase_active = getattr(self, '_final_phase_active', False)
+                print(f"DEBUG: [FULLSCREEN] Processando carta tipo {carta_tipo} para ativação - Next Phase ativo: {next_phase_active}, Final Phase ativo: {final_phase_active}")
                 
-                if next_phase_active:
+                if next_phase_active and not final_phase_active:
                     # Verificar se a carta está ativa
                     is_active = self.is_card_active(carta_path, carta_tipo)
                     
@@ -2642,7 +2870,10 @@ class PlayerDashboard(tk.Toplevel):
                     btn_activate.place(relx=0.98, rely=0, anchor="ne")
                     
                 else:
-                    print(f"DEBUG: [FULLSCREEN] Botões de ativação NÃO criados - Next Phase não está ativo")
+                    if final_phase_active:
+                        print(f"DEBUG: [FULLSCREEN] Botões de ativação BLOQUEADOS - Final Phase está ativo")
+                    else:
+                        print(f"DEBUG: [FULLSCREEN] Botões de ativação NÃO criados - Next Phase não está ativo")
 
     def show_inventory_for_sell(self, carta_tipo, store_window=None, page=0):
         print(f"DEBUG: show_inventory_for_sell chamado - carta_tipo: {carta_tipo}, page: {page}")
@@ -3681,6 +3912,21 @@ class PlayerDashboard(tk.Toplevel):
 
     # Corrigir fullscreen do carrossel: botão X volta sempre à interface principal
     def show_card_fullscreen_carrossel(self, carta_path):
+        # Preservar valores das barras de progresso ANTES de destruir os widgets
+        saved_progress_values = {}
+        if hasattr(self, 'progress_bars') and hasattr(self, 'progress_labels'):
+            try:
+                for stat in self.progress_bars:
+                    # Verificar se o widget ainda existe antes de acessar seus valores
+                    if self.progress_bars[stat].winfo_exists():
+                        saved_progress_values[stat] = {
+                            'value': self.progress_bars[stat]['value'],
+                            'maximum': self.progress_bars[stat]['maximum']
+                        }
+                print(f"DEBUG: Valores das barras preservados antes de fullscreen: {saved_progress_values}")
+            except Exception as e:
+                print(f"DEBUG: Erro ao preservar valores das barras: {e}")
+        
         # Limpa widgets (menos barra superior)
         for widget in self.winfo_children():
             if widget == self.topbar_label:
@@ -3699,20 +3945,44 @@ class PlayerDashboard(tk.Toplevel):
         
         # Botão X para fechar - canto superior esquerdo (cinza)
         def voltar_dashboard():
+            # Preservar seleção da carta do carrossel ao voltar do fullscreen
+            selected_carta = getattr(self, 'selected_carousel_card', None)
+            selected_index = getattr(self, 'selected_carousel_index', None)
+            
             self.playerdashboard_interface(self.player_name, self.saldo, self.other_players)
+            
+            # Restaurar seleção da carta após recriar interface
+            if selected_carta is not None and selected_index is not None:
+                self.selected_carousel_card = selected_carta
+                self.selected_carousel_index = selected_index
+                # Atualizar destaques visuais
+                if hasattr(self, 'card_labels') and self.card_labels:
+                    self._update_carousel_selection_highlights()
+                print(f"DEBUG: Seleção da carta restaurada após voltar do fullscreen: índice {selected_index}")
+            
+            # Restaurar valores das barras de progresso após recriar interface
+            if saved_progress_values and hasattr(self, 'progress_bars') and hasattr(self, 'progress_labels'):
+                for stat, values in saved_progress_values.items():
+                    if stat in self.progress_bars and stat in self.progress_labels:
+                        self.progress_bars[stat]['maximum'] = values['maximum']
+                        self.progress_bars[stat]['value'] = values['value']
+                        self.progress_labels[stat]['text'] = str(int(values['value']))
+                print(f"DEBUG: Valores das barras restaurados após recriar interface: {saved_progress_values}")
         x_btn = tk.Button(self, text="✖", font=("Helvetica", 24, "bold"), bg="#AAAAAA", fg="white", width=2, height=1, borderwidth=0, highlightthickness=0, command=voltar_dashboard, cursor="hand2", activebackground="#CCCCCC")
         x_btn.place(relx=0.02, rely=0, anchor="nw")
         
         # Botão Switch no canto superior direito com imagem switch_card.png
-        # SÓ APARECE EM ACTIVITIES/CHALLENGES DURANTE NEXT PHASE
+        # SÓ APARECE EM ACTIVITIES/CHALLENGES DURANTE NEXT PHASE (MAS NÃO DURANTE FINAL PHASE)
         switch_btn = None
         
         # Verificar se é uma carta de Activity ou Challenge
         carta_name = os.path.basename(carta_path).lower()
         is_activity_or_challenge = ("activity" in carta_name or "challenge" in carta_name)
         next_phase_active = getattr(self, '_next_phase_active', False)
+        final_phase_active = getattr(self, '_final_phase_active', False)
         
-        if is_activity_or_challenge and next_phase_active:
+        # Durante Final Phase, não mostrar botão Switch
+        if is_activity_or_challenge and next_phase_active and not final_phase_active:
             try:
                 switch_img_path = os.path.join(IMG_DIR, "switch_card.png")
                 if os.path.exists(switch_img_path):
@@ -3720,13 +3990,13 @@ class PlayerDashboard(tk.Toplevel):
                     switch_btn = tk.Button(self, image=switch_img, bg="#FF9800", borderwidth=0, highlightthickness=0, cursor="hand2", activebackground="#E68900")
                     switch_btn.image = switch_img  # Manter referência
                     switch_btn.place(relx=0.98, rely=0, anchor="ne")
-                    print(f"DEBUG: [CARROSSEL FULLSCREEN] Botão Switch criado - Activity/Challenge durante Next Phase")
+                    print(f"DEBUG: [CARROSSEL FULLSCREEN] Botão Switch criado - Activity/Challenge durante Next Phase (não Final Phase)")
                 else:
                     print(f"DEBUG: [CARROSSEL FULLSCREEN] Botão Switch NÃO criado - imagem switch_card.png não encontrada em {switch_img_path}")
             except Exception as e:
                 print(f"DEBUG: [CARROSSEL FULLSCREEN] Botão Switch NÃO criado - erro ao carregar imagem: {e}")
         else:
-            print(f"DEBUG: [CARROSSEL FULLSCREEN] Botão Switch NÃO criado - condições não atendidas (Activity/Challenge: {is_activity_or_challenge}, Next Phase: {next_phase_active})")
+            print(f"DEBUG: [CARROSSEL FULLSCREEN] Botão Switch NÃO criado - condições não atendidas (Activity/Challenge: {is_activity_or_challenge}, Next Phase: {next_phase_active}, Final Phase: {final_phase_active})")
         
         # Configurar comando do botão Switch (abrir inventário para troca)
         def abrir_inventario_troca():
@@ -3918,6 +4188,11 @@ class PlayerDashboard(tk.Toplevel):
         if getattr(self, '_inventory_opening', False):
             return
         
+        # BLOQUEIO DURANTE FINAL PHASE: Não permite abrir inventário
+        if getattr(self, '_final_phase_active', False):
+            print(f"DEBUG: Abertura de inventário BLOQUEADA durante Final Phase")
+            return
+        
         # CONTROLO DE ACESSO DURANTE NEXT PHASE
         if getattr(self, '_next_phase_active', False):
             if not self._can_access_carousel_position(carrossel_idx):
@@ -3976,51 +4251,130 @@ class PlayerDashboard(tk.Toplevel):
         title = tk.Label(self, text=title_str, font=("Helvetica", 22, "bold"), fg="white", bg="black")
         title.place(relx=0.5, y=65, anchor="n")
         
-        cartas = []
-        for t in tipos:
-            cartas += self.inventario.get(t, [])
-        print(f"DEBUG: Cartas encontradas no inventário: {len(cartas)} cartas")
-        
-        # Paginação
-        cards_per_page = 4
-        total_pages = max(1, (len(cartas) + cards_per_page - 1) // cards_per_page)
-        page = max(0, min(page, total_pages - 1))
-        start_idx = page * cards_per_page
-        end_idx = start_idx + cards_per_page
-        cartas_page = cartas[start_idx:end_idx]
-        print(f"DEBUG: Página {page}/{total_pages-1}, mostrando cartas {start_idx} a {end_idx-1}, cartas na página: {len(cartas_page)}")
-        
-        matriz_frame = tk.Frame(self, bg="black")
-        matriz_frame.place(relx=0.5, rely=0.5, anchor="center")
-        n_col = 2
-        card_w, card_h = 85, 120  # Reduzido para não tapar o título
-        
-        for idx, carta_path in enumerate(cartas_page):
-            row = idx // n_col
-            col = idx % n_col
-            try:
-                img = ImageTk.PhotoImage(Image.open(carta_path).resize((card_w, card_h)))
-            except Exception:
-                print(f"DEBUG: Erro ao carregar carta {carta_path}")
-                continue
-            carta_lbl = tk.Label(matriz_frame, image=img, bg="black", cursor="hand2")
-            carta_lbl.image = img  # type: ignore[attr-defined]
-            carta_lbl.grid(row=row, column=col, padx=8, pady=8)
+        # VERIFICAR SE É ACTIVITIES/CHALLENGES PARA LAYOUT ESPECIAL EM COLUNAS
+        if set(tipos) == set(["activities", "challenges"]):
+            print("DEBUG: Activities/Challenges detectado - usando layout em colunas")
             
-            # Verificar se Next Phase está ativo para comportamento especial
-            if getattr(self, '_next_phase_active', False):
-                # No modo Next Phase, primeira carta clicada vai direto para fullscreen com X e ✔
-                carta_lbl.bind("<Button-1>", lambda e, p=carta_path, t=tipos, pg=page: self.show_card_fullscreen_next_phase_selection(p, t, pg))
-                print(f"DEBUG: Carta {idx} configurada para modo Next Phase na posição ({row}, {col}): {os.path.basename(carta_path)}")
-            else:
-                # Comportamento normal - ir para seleção do carrossel
-                carta_lbl.bind("<Button-1>", lambda e, p=carta_path, t=tipos, pg=page: self.show_card_fullscreen_carrossel_selecao(p, t, pg))
-                print(f"DEBUG: Carta {idx} adicionada na posição ({row}, {col}): {os.path.basename(carta_path)}")
-        
-        if not cartas_page:
-            no_cards_lbl = tk.Label(matriz_frame, text="Sem cartas disponíveis!", font=("Helvetica", 16), bg="black", fg="white")
-            no_cards_lbl.pack(pady=20)
-            print("DEBUG: Nenhuma carta na página - adicionado label 'Sem cartas disponíveis!'")
+            # Separar cartas por tipo
+            cartas_activities = self.inventario.get("activities", [])
+            cartas_challenges = self.inventario.get("challenges", [])
+            print(f"DEBUG: Activities: {len(cartas_activities)} cartas, Challenges: {len(cartas_challenges)} cartas")
+            
+            # Paginação baseada no maior número de cartas de qualquer tipo
+            max_cards = max(len(cartas_activities), len(cartas_challenges))
+            cards_per_page = 2  # 2 linhas, 1 carta de cada tipo por linha
+            total_pages = max(1, (max_cards + cards_per_page - 1) // cards_per_page)
+            page = max(0, min(page, total_pages - 1))
+            start_idx = page * cards_per_page
+            end_idx = start_idx + cards_per_page
+            
+            matriz_frame = tk.Frame(self, bg="black")
+            matriz_frame.place(relx=0.5, rely=0.5, anchor="center")
+            card_w, card_h = 85, 120
+            
+            # Configurar colunas do grid
+            matriz_frame.grid_columnconfigure(0, weight=1, minsize=card_w + 16)  # Coluna Activities
+            matriz_frame.grid_columnconfigure(1, weight=1, minsize=card_w + 16)  # Coluna Challenges
+            
+            # Colocar Activities na coluna 0 (esquerda)
+            activities_row = 0
+            for i in range(start_idx, min(end_idx, len(cartas_activities))):
+                carta_path = cartas_activities[i]
+                try:
+                    img = ImageTk.PhotoImage(Image.open(carta_path).resize((card_w, card_h)))
+                    carta_lbl = tk.Label(matriz_frame, image=img, bg="black", cursor="hand2")
+                    carta_lbl.image = img  # type: ignore[attr-defined]
+                    carta_lbl.grid(row=activities_row, column=0, padx=8, pady=8)
+                    
+                    # Configurar comportamento baseado no modo
+                    if getattr(self, '_next_phase_active', False):
+                        carta_lbl.bind("<Button-1>", lambda e, p=carta_path, t=tipos, pg=page: self.show_card_fullscreen_next_phase_selection(p, t, pg))
+                        print(f"DEBUG: Activity configurada para modo Next Phase na posição ({activities_row}, 0): {os.path.basename(carta_path)}")
+                    else:
+                        carta_lbl.bind("<Button-1>", lambda e, p=carta_path, t=tipos, pg=page: self.show_card_fullscreen_carrossel_selecao(p, t, pg))
+                        print(f"DEBUG: Activity adicionada na posição ({activities_row}, 0): {os.path.basename(carta_path)}")
+                    
+                    activities_row += 1
+                except Exception:
+                    print(f"DEBUG: Erro ao carregar Activity {carta_path}")
+                    continue
+            
+            # Colocar Challenges na coluna 1 (direita)
+            challenges_row = 0
+            for i in range(start_idx, min(end_idx, len(cartas_challenges))):
+                carta_path = cartas_challenges[i]
+                try:
+                    img = ImageTk.PhotoImage(Image.open(carta_path).resize((card_w, card_h)))
+                    carta_lbl = tk.Label(matriz_frame, image=img, bg="black", cursor="hand2")
+                    carta_lbl.image = img  # type: ignore[attr-defined]
+                    carta_lbl.grid(row=challenges_row, column=1, padx=8, pady=8)
+                    
+                    # Configurar comportamento baseado no modo
+                    if getattr(self, '_next_phase_active', False):
+                        carta_lbl.bind("<Button-1>", lambda e, p=carta_path, t=tipos, pg=page: self.show_card_fullscreen_next_phase_selection(p, t, pg))
+                        print(f"DEBUG: Challenge configurado para modo Next Phase na posição ({challenges_row}, 1): {os.path.basename(carta_path)}")
+                    else:
+                        carta_lbl.bind("<Button-1>", lambda e, p=carta_path, t=tipos, pg=page: self.show_card_fullscreen_carrossel_selecao(p, t, pg))
+                        print(f"DEBUG: Challenge adicionado na posição ({challenges_row}, 1): {os.path.basename(carta_path)}")
+                    
+                    challenges_row += 1
+                except Exception:
+                    print(f"DEBUG: Erro ao carregar Challenge {carta_path}")
+                    continue
+            
+            # Se não há cartas em nenhuma das colunas
+            if activities_row == 0 and challenges_row == 0:
+                no_cards_lbl = tk.Label(matriz_frame, text="Sem cartas disponíveis!", font=("Helvetica", 16), bg="black", fg="white")
+                no_cards_lbl.grid(row=0, column=0, columnspan=2, pady=20)
+                print("DEBUG: Nenhuma carta de Activities/Challenges - adicionado label 'Sem cartas disponíveis!'")
+            
+        else:
+            # Layout normal para outros tipos (comportamento original)
+            cartas = []
+            for t in tipos:
+                cartas += self.inventario.get(t, [])
+            print(f"DEBUG: Cartas encontradas no inventário: {len(cartas)} cartas")
+            
+            # Paginação
+            cards_per_page = 4
+            total_pages = max(1, (len(cartas) + cards_per_page - 1) // cards_per_page)
+            page = max(0, min(page, total_pages - 1))
+            start_idx = page * cards_per_page
+            end_idx = start_idx + cards_per_page
+            cartas_page = cartas[start_idx:end_idx]
+            print(f"DEBUG: Página {page}/{total_pages-1}, mostrando cartas {start_idx} a {end_idx-1}, cartas na página: {len(cartas_page)}")
+            
+            matriz_frame = tk.Frame(self, bg="black")
+            matriz_frame.place(relx=0.5, rely=0.5, anchor="center")
+            n_col = 2
+            card_w, card_h = 85, 120  # Reduzido para não tapar o título
+            
+            for idx, carta_path in enumerate(cartas_page):
+                row = idx // n_col
+                col = idx % n_col
+                try:
+                    img = ImageTk.PhotoImage(Image.open(carta_path).resize((card_w, card_h)))
+                except Exception:
+                    print(f"DEBUG: Erro ao carregar carta {carta_path}")
+                    continue
+                carta_lbl = tk.Label(matriz_frame, image=img, bg="black", cursor="hand2")
+                carta_lbl.image = img  # type: ignore[attr-defined]
+                carta_lbl.grid(row=row, column=col, padx=8, pady=8)
+                
+                # Verificar se Next Phase está ativo para comportamento especial
+                if getattr(self, '_next_phase_active', False):
+                    # No modo Next Phase, primeira carta clicada vai direto para fullscreen com X e ✔
+                    carta_lbl.bind("<Button-1>", lambda e, p=carta_path, t=tipos, pg=page: self.show_card_fullscreen_next_phase_selection(p, t, pg))
+                    print(f"DEBUG: Carta {idx} configurada para modo Next Phase na posição ({row}, {col}): {os.path.basename(carta_path)}")
+                else:
+                    # Comportamento normal - ir para seleção do carrossel
+                    carta_lbl.bind("<Button-1>", lambda e, p=carta_path, t=tipos, pg=page: self.show_card_fullscreen_carrossel_selecao(p, t, pg))
+                    print(f"DEBUG: Carta {idx} adicionada na posição ({row}, {col}): {os.path.basename(carta_path)}")
+            
+            if not cartas_page:
+                no_cards_lbl = tk.Label(matriz_frame, text="Sem cartas disponíveis!", font=("Helvetica", 16), bg="black", fg="white")
+                no_cards_lbl.pack(pady=20)
+                print("DEBUG: Nenhuma carta na página - adicionado label 'Sem cartas disponíveis!'")
         
         # Setas de navegação
         if total_pages > 1:
@@ -4395,62 +4749,222 @@ class PlayerDashboard(tk.Toplevel):
         btn_x.place(relx=0.02, rely=0, anchor="nw")
         
         # Botão Switch no canto superior direito - aceita carta para o carrossel e vai para dashboard
-        def aceitar_carta():
-            print("DEBUG: [NEXT PHASE] *** aceitar_carta CHAMADA ***")
-            print(f"DEBUG: [NEXT PHASE] carta_path: {carta_path}")
-            print(f"DEBUG: [NEXT PHASE] tipos: {tipos}")
+        # APENAS se Final Phase NÃO estiver ativo
+        final_phase_active = getattr(self, '_final_phase_active', False)
+        
+        if not final_phase_active:
+            def aceitar_carta():
+                print("DEBUG: [NEXT PHASE] *** aceitar_carta CHAMADA ***")
+                print(f"DEBUG: [NEXT PHASE] carta_path: {carta_path}")
+                print(f"DEBUG: [NEXT PHASE] tipos: {tipos}")
+                
+                # Substituir a carta no carrossel
+                idx = getattr(self, 'carrossel_idx_selecao', 0)
+                print(f"DEBUG: [NEXT PHASE] carrossel_idx_selecao: {idx}")
+                
+                self.cards[idx] = carta_path
+                self.selected_card_idx = idx
+                print(f"DEBUG: [NEXT PHASE] Carta substituída no carrossel na posição {idx}")
+                
+                # Remover carta do inventário
+                for t in tipos:
+                    if carta_path in self.inventario.get(t, []):
+                        self.inventario[t].remove(carta_path)
+                        print(f"DEBUG: [NEXT PHASE] Removida carta {carta_path} do inventário {t}")
+                        break
+                
+                # Voltar à interface principal
+                print("DEBUG: [NEXT PHASE] *** CHAMANDO playerdashboard_interface ***")
+                try:
+                    self.playerdashboard_interface(self.player_name, self.saldo, self.other_players)
+                    print("DEBUG: [NEXT PHASE] playerdashboard_interface chamada com sucesso!")
+                except Exception as e:
+                    print(f"DEBUG: [NEXT PHASE] ERRO ao chamar playerdashboard_interface: {e}")
+                    import traceback
+                    traceback.print_exc()
             
-            # Substituir a carta no carrossel
-            idx = getattr(self, 'carrossel_idx_selecao', 0)
-            print(f"DEBUG: [NEXT PHASE] carrossel_idx_selecao: {idx}")
-            
-            self.cards[idx] = carta_path
-            self.selected_card_idx = idx
-            print(f"DEBUG: [NEXT PHASE] Carta substituída no carrossel na posição {idx}")
-            
-            # Remover carta do inventário
-            for t in tipos:
-                if carta_path in self.inventario.get(t, []):
-                    self.inventario[t].remove(carta_path)
-                    print(f"DEBUG: [NEXT PHASE] Removida carta {carta_path} do inventário {t}")
-                    break
-            
-            # Voltar à interface principal
-            print("DEBUG: [NEXT PHASE] *** CHAMANDO playerdashboard_interface ***")
             try:
-                self.playerdashboard_interface(self.player_name, self.saldo, self.other_players)
-                print("DEBUG: [NEXT PHASE] playerdashboard_interface chamada com sucesso!")
+                switch_img_path = os.path.join(IMG_DIR, "switch_card.png")
+                if os.path.exists(switch_img_path):
+                    switch_img = ImageTk.PhotoImage(Image.open(switch_img_path).resize((48, 48)))
+                    btn_switch_next_phase = tk.Button(self, image=switch_img, bg="#FF9800", borderwidth=0, highlightthickness=0, cursor="hand2", activebackground="#E68900")
+                    btn_switch_next_phase.image = switch_img  # Manter referência
+                    print(f"DEBUG: [NEXT PHASE] Botão Switch criado com imagem switch_card.png")
+                else:
+                    # Fallback para botão texto se imagem não existir
+                    btn_switch_next_phase = tk.Button(self, text="⇄", font=("Helvetica", 20, "bold"), bg="#FF9800", fg="white", width=2, height=1, borderwidth=0, highlightthickness=0, cursor="hand2", activebackground="#E68900")
+                    print(f"DEBUG: [NEXT PHASE] Botão Switch criado com texto (imagem não encontrada em {switch_img_path})")
             except Exception as e:
-                print(f"DEBUG: [NEXT PHASE] ERRO ao chamar playerdashboard_interface: {e}")
-                import traceback
-                traceback.print_exc()
-        
-        try:
-            switch_img_path = os.path.join(IMG_DIR, "switch_card.png")
-            if os.path.exists(switch_img_path):
-                switch_img = ImageTk.PhotoImage(Image.open(switch_img_path).resize((48, 48)))
-                btn_switch_next_phase = tk.Button(self, image=switch_img, bg="#FF9800", borderwidth=0, highlightthickness=0, cursor="hand2", activebackground="#E68900")
-                btn_switch_next_phase.image = switch_img  # Manter referência
-                print(f"DEBUG: [NEXT PHASE] Botão Switch criado com imagem switch_card.png")
-            else:
-                # Fallback para botão texto se imagem não existir
+                # Fallback para botão texto em caso de erro
                 btn_switch_next_phase = tk.Button(self, text="⇄", font=("Helvetica", 20, "bold"), bg="#FF9800", fg="white", width=2, height=1, borderwidth=0, highlightthickness=0, cursor="hand2", activebackground="#E68900")
-                print(f"DEBUG: [NEXT PHASE] Botão Switch criado com texto (imagem não encontrada em {switch_img_path})")
-        except Exception as e:
-            # Fallback para botão texto em caso de erro
-            btn_switch_next_phase = tk.Button(self, text="⇄", font=("Helvetica", 20, "bold"), bg="#FF9800", fg="white", width=2, height=1, borderwidth=0, highlightthickness=0, cursor="hand2", activebackground="#E68900")
-            print(f"DEBUG: [NEXT PHASE] Botão Switch criado com texto (erro ao carregar imagem: {e})")
-        
-        if btn_switch_next_phase is not None:
-            btn_switch_next_phase.place(relx=0.98, rely=0, anchor="ne")
-            btn_switch_next_phase.config(command=aceitar_carta)
+                print(f"DEBUG: [NEXT PHASE] Botão Switch criado com texto (erro ao carregar imagem: {e})")
+            
+            if btn_switch_next_phase is not None:
+                btn_switch_next_phase.place(relx=0.98, rely=0, anchor="ne")
+                btn_switch_next_phase.config(command=aceitar_carta)
         else:
-            # Em caso extremo, criar botão texto básico
-            btn_switch_next_phase = tk.Button(self, text="⇄", font=("Helvetica", 20, "bold"), bg="#FF9800", fg="white", width=2, height=1, borderwidth=0, highlightthickness=0, cursor="hand2", activebackground="#E68900", command=aceitar_carta)
-            btn_switch_next_phase.place(relx=0.98, rely=0, anchor="ne")
-            print(f"DEBUG: [NEXT PHASE] Botão Switch criado como fallback básico")
+            print(f"DEBUG: [NEXT PHASE] Botão Switch NÃO criado - Final Phase está ativo")
         
-        print("DEBUG: Fullscreen Next Phase configurado - apenas X e Switch disponíveis")
+        print("DEBUG: Fullscreen Next Phase configurado - apenas X disponível durante Final Phase")
+
+    def add_more_action_event_cards(self, min_actions=5, min_events=6):
+        """
+        Adiciona mais cartas de Actions/Events ao inventário se houver poucas.
+        Usa filtragem baseada na base de dados para adicionar apenas cartas válidas.
+        """
+        if not hasattr(self, 'card_database') or not self.card_database:
+            print("DEBUG: [add_more_action_event_cards] Base de dados não disponível")
+            return
+        
+        player_color = self.player_color.lower()
+        base_path = "/Users/joaop_27h1t5j/Desktop/IST/Bolsa/NetMaster"
+        
+        # Verificar Actions
+        current_actions = len(self.inventario.get("actions", []))
+        if current_actions < min_actions:
+            print(f"DEBUG: [add_more_action_event_cards] Actions insuficientes ({current_actions}/{min_actions}), adicionando mais...")
+            actions_path = os.path.join(base_path, "Actions", "Residential-level")
+            if os.path.exists(actions_path):
+                try:
+                    files = os.listdir(actions_path)
+                    action_files = [os.path.join(actions_path, f) for f in files if f.lower().endswith('.png')]
+                    
+                    valid_actions = []
+                    for card_file in action_files:
+                        filename = os.path.basename(card_file)
+                        match = re.search(r'Action_(\d+)\.', filename)
+                        if match:
+                            card_id = f"action_{match.group(1)}"
+                            card_data = self.card_database.get_action(card_id)
+                            if card_data:
+                                target = getattr(card_data, 'target', None)
+                                player_choice = getattr(card_data, 'player_choice', False)
+                                if target == player_color or (target is None and player_choice):
+                                    if card_file not in self.inventario.get("actions", []):
+                                        valid_actions.append(card_file)
+                    
+                    # Adicionar cartas até atingir o mínimo
+                    needed = min_actions - current_actions
+                    for i in range(min(needed, len(valid_actions))):
+                        self.inventario["actions"].append(valid_actions[i])
+                        print(f"DEBUG: [add_more_action_event_cards] Action adicionada: {os.path.basename(valid_actions[i])}")
+                
+                except Exception as e:
+                    print(f"DEBUG: [add_more_action_event_cards] Erro ao adicionar Actions: {e}")
+        
+        # Verificar Events
+        current_events = len(self.inventario.get("events", []))
+        if current_events < min_events:
+            print(f"DEBUG: [add_more_action_event_cards] Events insuficientes ({current_events}/{min_events}), adicionando mais...")
+            events_path = os.path.join(base_path, "Events", "Residential-level")
+            if os.path.exists(events_path):
+                try:
+                    files = os.listdir(events_path)
+                    event_files = [os.path.join(events_path, f) for f in files if f.lower().endswith('.png')]
+                    
+                    valid_events = []
+                    for card_file in event_files:
+                        filename = os.path.basename(card_file)
+                        match = re.search(r'Event_(\d+)\.', filename)
+                        if match:
+                            card_id = f"event_{match.group(1)}"
+                            card_data = self.card_database.get_event(card_id)
+                            if card_data:
+                                target = getattr(card_data, 'target_player', None)
+                                player_choice = getattr(card_data, 'player_choice', False)
+                                if target == player_color or (target is None and player_choice):
+                                    if card_file not in self.inventario.get("events", []):
+                                        valid_events.append(card_file)
+                    
+                    # Adicionar cartas até atingir o mínimo
+                    needed = min_events - current_events
+                    for i in range(min(needed, len(valid_events))):
+                        self.inventario["events"].append(valid_events[i])
+                        print(f"DEBUG: [add_more_action_event_cards] Event adicionado: {os.path.basename(valid_events[i])}")
+                
+                except Exception as e:
+                    print(f"DEBUG: [add_more_action_event_cards] Erro ao adicionar Events: {e}")
+        
+        print(f"DEBUG: [add_more_action_event_cards] Resultado final - Actions: {len(self.inventario.get('actions', []))}, Events: {len(self.inventario.get('events', []))}")
+
+    def _filter_action_event_cards(self, cartas_paths, card_type):
+        """
+        Filtra cartas de Actions/Events baseado no target e player_choice.
+        Só mostra cartas que:
+        1. Têm target igual à cor do jogador atual, OU
+        2. Têm target None e player_choice True (jogador pode escolher alvo)
+        """
+        if not hasattr(self, 'card_database') or not self.card_database:
+            print(f"DEBUG: [_filter_action_event_cards] Base de dados não disponível - mostrando todas as cartas")
+            return cartas_paths
+        
+        filtered_cards = []
+        player_color = self.player_color.lower()
+        
+        for carta_path in cartas_paths:
+            try:
+                # Extrair ID da carta do nome do arquivo
+                filename = os.path.basename(carta_path)
+                if card_type == "actions":
+                    # Action_1.png -> action_1
+                    match = re.search(r'Action_(\d+)\.', filename)
+                    if match:
+                        card_id = f"action_{match.group(1)}"
+                        card_data = self.card_database.get_action(card_id)
+                    else:
+                        continue
+                elif card_type == "events":
+                    # Event_1.png -> event_1
+                    match = re.search(r'Event_(\d+)\.', filename)
+                    if match:
+                        card_id = f"event_{match.group(1)}"
+                        card_data = self.card_database.get_event(card_id)
+                    else:
+                        continue
+                else:
+                    continue
+                
+                if card_data:
+                    # Para Events, usar target_player; para Actions, usar target
+                    if card_type == "events":
+                        target = getattr(card_data, 'target_player', None)
+                    else:
+                        target = getattr(card_data, 'target', None)
+                    player_choice = getattr(card_data, 'player_choice', False)
+                    
+                    # Critério de filtragem:
+                    # 1. Target específico igual à cor do jogador
+                    # 2. Target None com player_choice True
+                    if target == player_color or (target is None and player_choice):
+                        filtered_cards.append(carta_path)
+                        print(f"DEBUG: [_filter_action_event_cards] Carta ACEITA: {filename} (target={target}, player_choice={player_choice})")
+                    else:
+                        print(f"DEBUG: [_filter_action_event_cards] Carta REJEITADA: {filename} (target={target}, player_choice={player_choice})")
+                else:
+                    print(f"DEBUG: [_filter_action_event_cards] Carta não encontrada na base de dados: {card_id}")
+                    
+            except Exception as e:
+                print(f"DEBUG: [_filter_action_event_cards] Erro ao processar carta {filename}: {e}")
+                continue
+        
+        print(f"DEBUG: [_filter_action_event_cards] Resultado final {card_type}: {len(filtered_cards)}/{len(cartas_paths)} cartas")
+        return filtered_cards
+
+    def reload_action_event_inventory(self):
+        """
+        Função de conveniência para recarregar o inventário de Actions/Events
+        com mais cartas válidas para o jogador atual.
+        """
+        print("DEBUG: [reload_action_event_inventory] Recarregando inventário de Actions/Events...")
+        
+        # Limpar inventário atual (opcional)
+        # self.inventario["actions"] = []
+        # self.inventario["events"] = []
+        
+        # Adicionar mais cartas
+        self.add_more_action_event_cards(min_actions=10, min_events=12)
+        
+        print(f"DEBUG: [reload_action_event_inventory] Inventário atualizado - Actions: {len(self.inventario.get('actions', []))}, Events: {len(self.inventario.get('events', []))}")
 
 # Exemplo de uso isolado:
 if __name__ == "__main__":

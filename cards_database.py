@@ -1704,21 +1704,21 @@ class UserDatabase:
                 "duration_turns": "variable",
                 "router_id": 1,
                 "target_player": "blue",
-                "player_choice": True,    
+                "player_choice": False,    
             },
             # Event_65: TRANSMISSION DELAY, Router 2, ? TURNS, jogador azul
             {
                 "duration_turns": "variable",
                 "router_id": 2,
                 "target_player": "blue",
-                "player_choice": True,    
+                "player_choice": False,    
             },
             # Event_66: TRANSMISSION DELAY, Router 3, ? TURNS, jogador azul
             {
                 "duration_turns": "variable",
                 "router_id": 3,
                 "target_player": "blue",
-                "player_choice": True,    
+                "player_choice": False,    
             },
             # Event_67: TRANSMISSION DELAY, Router 1, ? TURNS, jogador vermelho
             {
@@ -3425,7 +3425,7 @@ class UserDatabase:
                 "duration_turns": "variable",
                 "router_id": 1,
                 "target_player": "blue",
-                "player_choice": True,
+                "player_choice": False,
                 "event_type": EventType.QUEUE_CONGESTION,
             },
             # Event_281: QUEUE CONGESTION, Router 2, ? TURNS, jogador azul
@@ -3433,7 +3433,7 @@ class UserDatabase:
                 "duration_turns": "variable",
                 "router_id": 2,
                 "target_player": "blue",
-                "player_choice": True,
+                "player_choice": False,
                 "event_type": EventType.QUEUE_CONGESTION,
             },
             # Event_282: QUEUE CONGESTION, Router 3, ? TURNS, jogador azul
@@ -3441,7 +3441,7 @@ class UserDatabase:
                 "duration_turns": "variable",
                 "router_id": 3,
                 "target_player": "blue",
-                "player_choice": True,
+                "player_choice": False,
                 "event_type": EventType.QUEUE_CONGESTION,
             },
             # Event_283: QUEUE CONGESTION, Router 1, ? TURNS, jogador vermelho
@@ -4003,7 +4003,7 @@ class UserDatabase:
                 "duration_turns": "variable",
                 "router_id": 1,
                 "target_player": "blue",
-                "player_choice": True,
+                "player_choice": False,
                 "event_type": EventType.QUEUE_FULL,
             },
             # Event_353: QUEUE FULL, Router 2, ? TURNS, jogador azul
@@ -4011,7 +4011,7 @@ class UserDatabase:
                 "duration_turns": "variable",
                 "router_id": 2,
                 "target_player": "blue",
-                "player_choice": True,
+                "player_choice": False,
                 "event_type": EventType.QUEUE_FULL,
             },
             # Event_354: QUEUE FULL, Router 3, ? TURNS, jogador azul
@@ -4019,7 +4019,7 @@ class UserDatabase:
                 "duration_turns": "variable",
                 "router_id": 3,
                 "target_player": "blue",
-                "player_choice": True,
+                "player_choice": False,
                 "event_type": EventType.QUEUE_FULL,
             },
             # Event_355: QUEUE FULL, Router 1, ? TURNS, jogador vermelho
@@ -4581,7 +4581,7 @@ class UserDatabase:
                 "duration_turns": "variable",
                 "router_id": 1,
                 "target_player": "blue",
-                "player_choice": True,
+                "player_choice": False,
                 "event_type": EventType.PACKET_DROP,
             },
             # Event_425: PACKET DROP, Router 2, ? TURNS, jogador azul
@@ -4589,7 +4589,7 @@ class UserDatabase:
                 "duration_turns": "variable",
                 "router_id": 2,
                 "target_player": "blue",
-                "player_choice": True,
+                "player_choice": False,
                 "event_type": EventType.PACKET_DROP,
             },
             # Event_426: PACKET DROP, Router 3, ? TURNS, jogador azul
@@ -4597,7 +4597,7 @@ class UserDatabase:
                 "duration_turns": "variable",
                 "router_id": 3,
                 "target_player": "blue",
-                "player_choice": True,
+                "player_choice": False,
                 "event_type": EventType.PACKET_DROP,
             },
             # Event_427: PACKET DROP, Router 1, ? TURNS, jogador vermelho
@@ -5159,7 +5159,7 @@ class UserDatabase:
                 "duration_turns": "variable",
                 "router_id": 1,
                 "target_player": "blue",
-                "player_choice": True,
+                "player_choice": False,
                 "event_type": EventType.EMPTY_QUEUE,
             },
             # Event_497: EMPTY QUEUE, Router 2, ? TURNS, jogador azul
@@ -5167,7 +5167,7 @@ class UserDatabase:
                 "duration_turns": "variable",
                 "router_id": 2,
                 "target_player": "blue",
-                "player_choice": True,
+                "player_choice": False,
                 "event_type": EventType.EMPTY_QUEUE,
             },
             # Event_498: EMPTY QUEUE, Router 3, ? TURNS, jogador azul
@@ -5175,7 +5175,7 @@ class UserDatabase:
                 "duration_turns": "variable",
                 "router_id": 3,
                 "target_player": "blue",
-                "player_choice": True,
+                "player_choice": False,
                 "event_type": EventType.EMPTY_QUEUE,
             },
             # Event_499: EMPTY QUEUE, Router 1, ? TURNS, jogador vermelho

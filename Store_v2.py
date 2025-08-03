@@ -2281,8 +2281,20 @@ class StoreWindow(tk.Toplevel):
                 print("DEBUG: Outro tipo de carta - voltando à Store")
                 self.voltar_para_store()
         
-        # Botão ✔ verde para fechar (movido para canto superior direito)
-        certo_btn = tk.Button(self, text="✔", font=("Helvetica", 24, "bold"), bg="#4CAF50", fg="white", width=2, height=1, borderwidth=0, highlightthickness=0, command=fechar, cursor="hand2", activebackground="#43d17a")
+        # Botão diferente dependendo do tipo de carta (igual ao mostrar_carta_fullscreen_simples)
+        if casa_tipo in ["actions", "action", "events", "event"]:
+            # Botão ✓ verde para Actions e Events - abre overlay de seleção de jogador
+            def abrir_overlay_jogador():
+                print(f"DEBUG: *** abrir_overlay_jogador CHAMADO em mostrar_carta_fullscreen ***")
+                print(f"DEBUG: Sobre a carta: {carta_path}")
+                print(f"DEBUG: Tipo da carta: {casa_tipo}")
+                self.mostrar_overlay_selecao_jogador(carta_path, casa_tipo)
+            
+            certo_btn = tk.Button(self, text="✓", font=("Helvetica", 24, "bold"), bg="#4CAF50", fg="white", width=2, height=1, borderwidth=0, highlightthickness=0, command=abrir_overlay_jogador, cursor="hand2", activebackground="#43d17a")
+        else:
+            # Botão ✔ verde para outros tipos - funcionalidade normal
+            certo_btn = tk.Button(self, text="✔", font=("Helvetica", 24, "bold"), bg="#4CAF50", fg="white", width=2, height=1, borderwidth=0, highlightthickness=0, command=fechar, cursor="hand2", activebackground="#43d17a")
+        
         certo_btn.place(relx=0.98, rely=0, anchor="ne")
 
     def mostrar_carta_fullscreen_simples(self, carta_path, casa_tipo):
@@ -2439,8 +2451,14 @@ class StoreWindow(tk.Toplevel):
         
         # Botão diferente dependendo do tipo de carta
         if casa_tipo in ["actions", "action", "events", "event"]:
-            # Botão ✓ verde para Actions e Events
-            btn_fechar = tk.Button(self, text="✓", font=("Helvetica", 24, "bold"), bg="#4CAF50", fg="white", width=2, height=1, borderwidth=0, highlightthickness=0, command=fechar, cursor="hand2", activebackground="#43d17a")
+            # Botão ✓ verde para Actions e Events - abre overlay de seleção de jogador
+            def abrir_overlay_jogador():
+                print(f"DEBUG: *** abrir_overlay_jogador CHAMADO ***")
+                print(f"DEBUG: Sobre a carta: {carta_path}")
+                print(f"DEBUG: Tipo da carta: {casa_tipo}")
+                self.mostrar_overlay_selecao_jogador(carta_path, casa_tipo)
+            
+            btn_fechar = tk.Button(self, text="✓", font=("Helvetica", 24, "bold"), bg="#4CAF50", fg="white", width=2, height=1, borderwidth=0, highlightthickness=0, command=abrir_overlay_jogador, cursor="hand2", activebackground="#43d17a")
         else:
             # Botão ✖ cinza para outros tipos (como Challenges)
             btn_fechar = tk.Button(self, text="✖", font=("Helvetica", 24, "bold"), bg="#AAAAAA", fg="white", width=2, height=1, borderwidth=0, highlightthickness=0, command=fechar, cursor="hand2", activebackground="#CCCCCC")
@@ -2490,6 +2508,438 @@ class StoreWindow(tk.Toplevel):
                 btn_inventory = tk.Button(self, text="Player", font=("Helvetica", 16, "bold"), bg="#8A2BE2", fg="white", relief="flat", borderwidth=0, command=abrir_playerdashboard)
             
             btn_inventory.place(relx=0.5, rely=0, anchor="n")
+
+    def mostrar_overlay_selecao_jogador(self, carta_path, casa_tipo):
+        """
+        Mostra overlay para seleção de jogador para cartas Actions/Events
+        """
+        print(f"DEBUG: *** mostrar_overlay_selecao_jogador INICIADO ***")
+        print(f"DEBUG: mostrar_overlay_selecao_jogador chamado - carta: {os.path.basename(carta_path)}, tipo: {casa_tipo}")
+        print(f"DEBUG: Caminho completo da carta: {carta_path}")
+        print(f"DEBUG: Base de dados disponível: {self.card_database is not None}")
+        
+        # Primeiro, vamos determinar se a carta tem alvo específico ou permite escolha
+        # Usando a base de dados para obter informações da carta
+        if not self.card_database:
+            print("DEBUG: Base de dados não disponível - procedendo com overlay de escolha")
+            self._criar_overlay_escolha_jogador(carta_path, casa_tipo)
+            return
+        
+        try:
+            # Mapear arquivo para ID da base de dados
+            if casa_tipo in ["actions", "action"]:
+                card_id = self._map_action_file_to_id(carta_path)
+                print(f"DEBUG: Action card_id mapeado: {card_id}")
+                if card_id:
+                    action_card = self.card_database.get_action(card_id)
+                    print(f"DEBUG: Action card obtido da base de dados: {action_card}")
+                    if action_card:
+                        print(f"DEBUG: Carta Action encontrada - target: {action_card.target}")
+                        if action_card.target is None:
+                            # Target None = jogadores cinzentos = afeta o próprio jogador
+                            print("DEBUG: Carta afeta o próprio jogador - mostrando overlay com ícone próprio")
+                            self._criar_overlay_jogador_especifico(carta_path, casa_tipo, self.player_color)
+                        else:
+                            # Target específico = jogador específico
+                            print(f"DEBUG: Carta afeta jogador específico: {action_card.target} - mostrando overlay com ícone específico")
+                            self._criar_overlay_jogador_especifico(carta_path, casa_tipo, action_card.target)
+                        return
+                    else:
+                        print(f"DEBUG: Action card {card_id} não encontrado na base de dados")
+                else:
+                    print(f"DEBUG: Não foi possível mapear arquivo Action para ID: {carta_path}")
+            elif casa_tipo in ["events", "event"]:
+                card_id = self._map_event_file_to_id(carta_path)
+                print(f"DEBUG: Event card_id mapeado: {card_id}")
+                if card_id:
+                    event_card = self.card_database.get_event(card_id)
+                    print(f"DEBUG: Event card obtido da base de dados: {event_card}")
+                    if event_card:
+                        print(f"DEBUG: Carta Event encontrada - target: {event_card.target_player}, choice: {event_card.player_choice}")
+                        if event_card.player_choice:
+                            # Player choice = true = jogador pode escolher
+                            print("DEBUG: Jogador pode escolher o alvo - mostrando overlay de escolha")
+                            self._criar_overlay_escolha_jogador(carta_path, casa_tipo)
+                        elif event_card.target_player is None:
+                            # Target None = jogadores cinzentos = afeta o próprio jogador
+                            print("DEBUG: Carta afeta o próprio jogador - mostrando overlay com ícone próprio")
+                            self._criar_overlay_jogador_especifico(carta_path, casa_tipo, self.player_color)
+                        else:
+                            # Target específico = jogador específico
+                            print(f"DEBUG: Carta afeta jogador específico: {event_card.target_player} - mostrando overlay com ícone específico")
+                            self._criar_overlay_jogador_especifico(carta_path, casa_tipo, event_card.target_player)
+                        return
+                    else:
+                        print(f"DEBUG: Event card {card_id} não encontrado na base de dados")
+                else:
+                    print(f"DEBUG: Não foi possível mapear arquivo Event para ID: {carta_path}")
+        except Exception as e:
+            print(f"DEBUG: Erro ao processar carta na base de dados: {e}")
+            import traceback
+            traceback.print_exc()
+        
+        # Fallback: mostrar overlay de escolha se não conseguir determinar
+        print("DEBUG: Fallback - mostrando overlay de escolha")
+        self._criar_overlay_escolha_jogador(carta_path, casa_tipo)
+
+    def _map_action_file_to_id(self, carta_path):
+        """Mapeia arquivo Action para ID da base de dados"""
+        import re
+        nome_arquivo = os.path.basename(carta_path)
+        match = re.search(r'Action_(\d+)\.', nome_arquivo)
+        if match:
+            numero = int(match.group(1))
+            return f"action_{numero}"
+        return None
+
+    def _map_event_file_to_id(self, carta_path):
+        """Mapeia arquivo Event para ID da base de dados"""
+        import re
+        nome_arquivo = os.path.basename(carta_path)
+        match = re.search(r'Event_(\d+)\.', nome_arquivo)
+        if match:
+            numero = int(match.group(1))
+            return f"event_{numero}"
+        return None
+
+    def _criar_overlay_escolha_jogador(self, carta_path, casa_tipo):
+        """
+        Cria overlay com ícones dos outros jogadores para escolha
+        """
+        print("DEBUG: Criando overlay de escolha de jogador")
+        
+        # Limpar tela completamente
+        for widget in self.winfo_children():
+            widget.destroy()
+        self.configure(bg="black")
+        
+        # Primeiro, mostrar a carta em fullscreen como fundo
+        try:
+            pil_img = Image.open(carta_path)
+            img_w, img_h = pil_img.size
+            # Usa todo o ecrã (sem margem)
+            max_w, max_h = self.winfo_screenwidth(), self.winfo_screenheight()
+            ratio = min(max_w/img_w, max_h/img_h)
+            new_w, new_h = int(img_w*ratio), int(img_h*ratio)
+            pil_img = pil_img.resize((new_w, new_h), Image.Resampling.LANCZOS)
+
+            carta_img = ImageTk.PhotoImage(pil_img)
+            carta_bg_label = tk.Label(self, image=carta_img, bg="black")
+            carta_bg_label.image = carta_img  # Manter referência
+            carta_bg_label.place(relx=0.5, rely=0.5, anchor="center")
+            
+            print("DEBUG: Carta colocada como fundo do overlay")
+        except Exception as e:
+            print(f"DEBUG: Erro ao carregar carta como fundo: {e}")
+            self.configure(bg="black")
+        
+        # Aplicar o mesmo formato da página de confirmação de compra
+        confirm_frame = tk.Frame(self, bg="black")
+        confirm_frame.pack(expand=True)
+        
+        # Título do overlay (mesmo estilo da confirmação de compra)
+        tk.Label(confirm_frame, 
+                text="Choose target player:", 
+                font=("Helvetica", 16, "bold"), 
+                fg="white", bg="black").pack(pady=(40, 20))
+        
+        # Frame para os ícones dos jogadores (centralizado, mesmo estilo da confirmação)
+        players_frame = tk.Frame(confirm_frame, bg="black")
+        players_frame.pack(pady=(0, 10))
+        
+        # Obter lista de outros jogadores (excluindo o jogador atual)
+        if hasattr(self, 'dashboard') and hasattr(self.dashboard, 'other_players'):
+            outros_jogadores = self.dashboard.other_players.copy()
+        else:
+            # Fallback para todos os jogadores menos o atual
+            todos_jogadores = ["red", "green", "blue", "yellow"]
+            outros_jogadores = [p for p in todos_jogadores if p != self.player_color]
+        
+        print(f"DEBUG: Outros jogadores disponíveis: {outros_jogadores}")
+        
+        # Criar botões com ícones para cada jogador (em linha horizontal)
+        for i, cor_jogador in enumerate(outros_jogadores):
+            try:
+                # Carregar ícone do jogador
+                icon_path = os.path.join(IMG_DIR, f"{cor_jogador}_user_icon.png")
+                if os.path.exists(icon_path):
+                    icon_img = ImageTk.PhotoImage(Image.open(icon_path).resize((65, 65)))
+                    
+                    # Criar botão com ícone
+                    def criar_callback(cor=cor_jogador):
+                        return lambda: self._enviar_carta_para_jogador(carta_path, casa_tipo, cor)
+                    
+                    # Frame para cada jogador (ícone + nome)
+                    player_container = tk.Frame(players_frame, bg="black")
+                    player_container.pack(side="left", padx=20)
+                    
+                    btn_jogador = tk.Button(player_container, 
+                                          image=icon_img,
+                                          bg="black", 
+                                          bd=0, 
+                                          activebackground="black", 
+                                          highlightthickness=0,
+                                          command=criar_callback(),
+                                          cursor="hand2")
+                    
+                    btn_jogador.image = icon_img  # Manter referência
+                    btn_jogador.pack()
+                    
+                    # Label com nome da cor (mesmo estilo da confirmação)
+                    cor_label = tk.Label(player_container,
+                                        text=cor_jogador.upper(),
+                                        font=("Helvetica", 14, "bold"),
+                                        fg=self._get_color_hex(cor_jogador),
+                                        bg="black")
+                    cor_label.pack(pady=(5, 0))
+                else:
+                    print(f"DEBUG: Ícone não encontrado para {cor_jogador}: {icon_path}")
+            except Exception as e:
+                print(f"DEBUG: Erro ao criar botão para {cor_jogador}: {e}")
+        
+        # SEM botão Cancel - removido conforme solicitado
+
+    def _criar_overlay_jogador_especifico(self, carta_path, casa_tipo, jogador_alvo):
+        """
+        Cria overlay com apenas o ícone do jogador alvo específico
+        """
+        print(f"DEBUG: _criar_overlay_jogador_especifico chamado - jogador_alvo: {jogador_alvo}")
+        print(f"DEBUG: _criar_overlay_jogador_especifico - carta: {carta_path}, tipo: {casa_tipo}")
+        
+        # Limpar tela completamente
+        for widget in self.winfo_children():
+            widget.destroy()
+        self.configure(bg="black")
+        
+        # Primeiro, mostrar a carta em fullscreen como fundo
+        try:
+            pil_img = Image.open(carta_path)
+            img_w, img_h = pil_img.size
+            # Usa todo o ecrã (sem margem)
+            max_w, max_h = self.winfo_screenwidth(), self.winfo_screenheight()
+            ratio = min(max_w/img_w, max_h/img_h)
+            new_w, new_h = int(img_w*ratio), int(img_h*ratio)
+            pil_img = pil_img.resize((new_w, new_h), Image.Resampling.LANCZOS)
+
+            carta_img = ImageTk.PhotoImage(pil_img)
+            carta_bg_label = tk.Label(self, image=carta_img, bg="black")
+            carta_bg_label.image = carta_img  # Manter referência
+            carta_bg_label.place(relx=0.5, rely=0.5, anchor="center")
+            
+            print("DEBUG: Carta colocada como fundo do overlay específico")
+        except Exception as e:
+            print(f"DEBUG: Erro ao carregar carta como fundo: {e}")
+            self.configure(bg="black")
+        
+        
+        # Aplicar o mesmo formato da página de confirmação de compra
+        confirm_frame = tk.Frame(self, bg="black")
+        confirm_frame.pack(expand=True)
+        
+        # Título do overlay (mesmo estilo da confirmação de compra)
+        if jogador_alvo == self.player_color:
+            title_text = "        Card affects you:        " 
+            
+            tk.Label(confirm_frame, 
+            text=title_text, 
+            font=("Helvetica", 16, "bold"), 
+            fg="white", bg="black").pack(pady=(40, 20))
+            
+        else:
+            title_text = "Send card to the following player:" 
+            
+            tk.Label(confirm_frame, 
+            text=title_text, 
+            font=("Helvetica", 15, "bold"), 
+            fg="white", bg="black").pack(pady=(40, 20))
+        
+    
+        # Frame para o ícone do jogador (centralizado, mesmo estilo da confirmação)
+        player_frame = tk.Frame(confirm_frame, bg="black")
+        player_frame.pack(pady=(0, 20))
+        
+        try:
+            # Carregar ícone do jogador alvo
+            icon_path = os.path.join(IMG_DIR, f"{jogador_alvo}_user_icon.png")
+            if os.path.exists(icon_path):
+                icon_img = ImageTk.PhotoImage(Image.open(icon_path).resize((65, 65)))
+                
+                # Criar botão com ícone do jogador alvo
+                def confirmar_envio():
+                    self._enviar_carta_para_jogador(carta_path, casa_tipo, jogador_alvo)
+                
+                btn_jogador = tk.Button(player_frame, 
+                                      image=icon_img,
+                                      bg="black", 
+                                      relief="flat", 
+                                      borderwidth=0,
+                                      highlightthickness=0,
+                                      activebackground="black",
+                                      command=confirmar_envio,
+                                      cursor="hand2")
+                btn_jogador.image = icon_img  # Manter referência
+                btn_jogador.pack()
+                
+                # Label com nome da cor (mesmo estilo da confirmação)
+                cor_label = tk.Label(player_frame,
+                                    text=jogador_alvo.upper(),
+                                    font=("Helvetica", 16, "bold"),
+                                    fg=self._get_color_hex(jogador_alvo),
+                                    bg="black")
+                cor_label.pack(pady=(10, 0))
+            else:
+                print(f"DEBUG: Ícone não encontrado para {jogador_alvo}: {icon_path}")
+                # Fallback com texto (mesmo estilo da confirmação)
+                btn_text = tk.Button(player_frame,
+                                   text=jogador_alvo.upper(),
+                                   font=("Helvetica", 20, "bold"),
+                                   bg=self._get_color_hex(jogador_alvo),
+                                   fg="white",
+                                   width=12,
+                                   height=3,
+                                   command=lambda: self._enviar_carta_para_jogador(carta_path, casa_tipo, jogador_alvo))
+                btn_text.pack()
+        except Exception as e:
+            print(f"DEBUG: Erro ao criar overlay para jogador {jogador_alvo}: {e}")
+        
+        # SEM botão Cancel - removido conforme solicitado
+
+    def _get_color_hex(self, color):
+        """Retorna cor hexadecimal para uma cor de jogador"""
+        color_map = {
+            "red": "#EE6F68",
+            "green": "#70AD47", 
+            "blue": "#43BEF2",
+            "yellow": "#F2BA0D"
+        }
+        return color_map.get(color, "#FFFFFF")
+
+    def _enviar_carta_para_jogador(self, carta_path, casa_tipo, jogador_alvo):
+        """
+        Envia a carta para o jogador alvo e finaliza a ação
+        """
+        print(f"DEBUG: Enviando carta {os.path.basename(carta_path)} para jogador {jogador_alvo}")
+        
+        # Aqui você pode implementar a lógica de envio da carta
+        # Por enquanto, vamos apenas adicionar ao inventário do jogador atual
+        # e mostrar uma mensagem de confirmação
+        
+        # Adicionar carta ao inventário
+        tipo_inv = casa_tipo
+        if tipo_inv == "actions":
+            tipo_inv = "actions"
+        elif tipo_inv == "events":
+            tipo_inv = "events"
+        
+        if self.dashboard and hasattr(self.dashboard, 'adicionar_carta_inventario'):
+            self.dashboard.adicionar_carta_inventario(carta_path, tipo_inv)
+            print(f"DEBUG: Carta adicionada ao inventário: {tipo_inv} -> {carta_path}")
+            
+            # Remover carta do baralho local da Store
+            self._remover_carta_do_baralho_local(carta_path, tipo_inv)
+        
+        # Mostrar overlay de confirmação
+        self._mostrar_confirmacao_envio(carta_path, casa_tipo, jogador_alvo)
+
+    def _mostrar_confirmacao_envio(self, carta_path, casa_tipo, jogador_alvo):
+        """
+        Mostra overlay de confirmação de envio da carta
+        """
+        # Limpar tela completamente
+        for widget in self.winfo_children():
+            widget.destroy()
+        self.configure(bg="black")
+        
+        # Primeiro, mostrar a carta em fullscreen como fundo
+        try:
+            pil_img = Image.open(carta_path)
+            img_w, img_h = pil_img.size
+            # Usa todo o ecrã (sem margem)
+            max_w, max_h = self.winfo_screenwidth(), self.winfo_screenheight()
+            ratio = min(max_w/img_w, max_h/img_h)
+            new_w, new_h = int(img_w*ratio), int(img_h*ratio)
+            pil_img = pil_img.resize((new_w, new_h), Image.Resampling.LANCZOS)
+
+            carta_img = ImageTk.PhotoImage(pil_img)
+            carta_bg_label = tk.Label(self, image=carta_img, bg="black")
+            carta_bg_label.image = carta_img  # Manter referência
+            carta_bg_label.place(relx=0.5, rely=0.5, anchor="center")
+            
+            print("DEBUG: Carta colocada como fundo do overlay de confirmação")
+        except Exception as e:
+            print(f"DEBUG: Erro ao carregar carta como fundo: {e}")
+            self.configure(bg="black")
+        
+        # Aplicar o mesmo formato da página de seleção
+        confirm_frame = tk.Frame(self, bg="black")
+        confirm_frame.pack(expand=True)
+        
+        # Título da confirmação (mesmo estilo da página de seleção)
+        tk.Label(confirm_frame, 
+                text=f"   Card sent to {jogador_alvo.upper()} player!    ",
+                font=("Helvetica", 15, "bold"),
+                fg="white",
+                bg="black").pack(pady=(40,  20))
+        
+        # Frame para o ícone do jogador (centralizado, mesmo estilo da seleção)
+        player_frame = tk.Frame(confirm_frame, bg="black")
+        player_frame.pack(pady=(0, 20))
+        
+        
+        # Mostrar ícone do jogador alvo (mesmo estilo da página de seleção)
+        try:
+            icon_path = os.path.join(IMG_DIR, f"{jogador_alvo}_user_icon.png")
+            if os.path.exists(icon_path):
+                icon_img = ImageTk.PhotoImage(Image.open(icon_path).resize((65, 65)))
+                icon_label = tk.Label(player_frame, image=icon_img, bg="black")
+                icon_label.image = icon_img
+                icon_label.pack()
+                
+                # Label com nome da cor (mesmo estilo da página de seleção)
+                cor_label = tk.Label(player_frame,
+                                    text=jogador_alvo.upper(),
+                                    font=("Helvetica", 14, "bold"),
+                                    fg=self._get_color_hex(jogador_alvo),
+                                    bg="black")
+                cor_label.pack(pady=(5, 0))
+        except Exception as e:
+            print(f"DEBUG: Erro ao mostrar ícone de confirmação: {e}")
+        
+        # Botão OK centralizado (mesmo estilo)
+        btn_frame = tk.Frame(confirm_frame, bg="black")
+        btn_frame.pack(pady=5)
+        
+        # Botão OK para continuar
+        def continuar():
+            if casa_tipo in ["actions", "action", "events", "event"]:
+                # Para Actions/Events, voltar ao PlayerDashboard sem botão Store
+                try:
+                    if self.dashboard and hasattr(self.dashboard, "playerdashboard_interface"):
+                        self.withdraw()
+                        self.dashboard.deiconify()
+                        self.dashboard.state('normal')
+                        self.dashboard.lift()
+                        self.dashboard.focus_force()
+                        self.dashboard.playerdashboard_interface(
+                            self.dashboard.player_name,
+                            self.dashboard.saldo,
+                            self.dashboard.other_players,
+                            show_store_button=False
+                        )
+                        print("DEBUG: Voltando ao PlayerDashboard após envio da carta")
+                except Exception as e:
+                    print(f"DEBUG: Erro ao voltar ao PlayerDashboard: {e}")
+            else:
+                self.voltar_para_store()
+        
+        btn_ok = tk.Button(btn_frame,
+                          text="OK",
+                          font=("Helvetica", 14, "bold"),
+                          bg="#4CAF50",
+                          fg="white",
+                          width=8,
+                          command=continuar)
+        btn_ok.pack()
 
     def mostrar_carta_fullscreen_escolha(self, carta_path, carta_tipo):
         # Guardar estado da carta fullscreen para poder restaurar depois
