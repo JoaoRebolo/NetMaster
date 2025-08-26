@@ -157,11 +157,12 @@ class ActivityCard:
     application_fee: int              # Taxa de aplicação em picoins
     # Campos opcionais com valores padrão
     message_received: Optional[int] = None   # Picoins ganhos por mensagem completa recebida
+    message_received_bonus: Optional[int] = None   # Picoins ganhos por bonus mensagem completa recebida
     penalty_per_packet: Optional[int] = None # Penalização por pacote perdido
     packet_bonus: Optional[int] = None       # Bónus extra por pacote em condições específicas
     message_bonus: Optional[int] = None      # Bónus por mensagem completa recebida
-    bonus_condition: Optional[str] = None    # Condição para bónus: "After 10 packets received", "Message received", etc.
-    penalty_condition: Optional[str] = None  # Condição para penalização: "10 or fewer packets drops", etc.
+    bonus_condition: Optional[int] = None    # Condição para bónus: "After 10 packets received", "Message received", etc.
+    penalty_condition: Optional[int] = None  # Condição para penalização: "10 or fewer packets drops", etc.
     sell_cost: int = 0                # Valor de venda (sempre 0 para Activities)
     # Campos de metadados fixos
     collection: str = "Packet Switching Collection"
@@ -197,18 +198,19 @@ class ChallengeCard:
     description: str                   # Descrição do desafio
     n_turns: int                       # Número de turnos disponíveis
     message_size: int                  # Tamanho da mensagem em pacotes
-    rate: str                         # Taxa de envio de pacotes
+    rate: Union[int, List[int]]       # Taxa de envio: "1 packet per turn" OU ["1 packet per turn", "up to 1 packet per turn"]
     destination: str                  # Destino (sempre "Central node")
     drops_allowed: bool               # Se permite drops ou não
     # Campos de recompensas específicas
     reward_per_packet: Optional[int]  # Picoins por pacote recebido
     message_bonus: Optional[int]      # Bónus por mensagem completa/recebida
     time_limit_bonus: Optional[int]   # Bónus por completar dentro do prazo
+    message_received_bonus: Optional[int] = None  # Bónus por mensagem completa recebida (JACKPOT)
     # Campos de penalizações
-    challenge_quit_fee: int           # Taxa por desistir do desafio
+    challenge_quit_fee: int = 0       # Taxa por desistir do desafio
     # Campos específicos para alguns tipos
-    time_limit: Optional[int]         # Limite de tempo em turnos (MESSAGE_SPRINT)
-    time_to_receive: Optional[int]    # Tempo para receber mensagem (PACKET_RACE)
+    time_limit: Optional[int] = None  # Limite de tempo em turnos (MESSAGE_SPRINT)
+    time_to_receive: Optional[int] = None  # Tempo para receber mensagem (PACKET_RACE)
     # Campos de metadados fixos
     collection: str = "Packet Switching Collection"
     level: str = "Level I"
@@ -500,49 +502,56 @@ class UserDatabase:
             }
         }
         
-        # Definir dados das cartas Services (baseado no services_card_integration.py)
+        # Definir dados das cartas Services baseado no service_costs definido acima
         service_templates = [
-            # Bandwidth Services (1 por cor)
+            # Bandwidth Services (1 por cor) - mapeia para bandwidth_1
             {
                 "type": ServiceType.BANDWIDTH,
+                "base_key": "bandwidth_1",
                 "name_template": "Bandwidth Service {color}",
                 "title": "BANDWIDTH",
                 "description": "Subscribe to our Bandwidth Service and enjoy seamless network access whenever you need it"
             },
-            # Data Volume Services (3 por cor)
+            # Data Volume Services (3 por cor) - mapeia para data_volume_1, data_volume_2, data_volume_3
             {
                 "type": ServiceType.DATA_VOLUME,
+                "base_key": "data_volume_1",
                 "name_template": "Data Volume Service {color} 5",
                 "title": "DATA VOLUME",
                 "description": "Subscribe to our Data Volume Service and pay only for the data you actually use. Enjoy flexible access without long-term obligations!"
             },
             {
                 "type": ServiceType.DATA_VOLUME,
+                "base_key": "data_volume_2",
                 "name_template": "Data Volume Service {color} 8",
                 "title": "DATA VOLUME",
                 "description": "Subscribe to our Data Volume Service and pay only for the data you actually use. Enjoy flexible access without long-term obligations!"
             },
             {
                 "type": ServiceType.DATA_VOLUME,
+                "base_key": "data_volume_3",
                 "name_template": "Data Volume Service {color} 15",
                 "title": "DATA VOLUME",
                 "description": "Subscribe to our Data Volume Service and pay only for the data you actually use. Enjoy flexible access without long-term obligations!"
             },
-            # Temporary Services (3 por cor)
+            # Temporary Services (3 por cor) - mapeia para temporary_1, temporary_2, temporary_3
             {
                 "type": ServiceType.TEMPORARY,
+                "base_key": "temporary_1",
                 "name_template": "Temporary Service {color} 4",
                 "title": "TEMPORARY",
                 "description": "Subscribe to our Temporary Service and pay only for the time you need. Access the network as long as you require, with no long-term commitments."
             },
             {
                 "type": ServiceType.TEMPORARY,
+                "base_key": "temporary_2",
                 "name_template": "Temporary Service {color} 7",
                 "title": "TEMPORARY",
                 "description": "Subscribe to our Temporary Service and pay only for the time you need. Access the network as long as you require, with no long-term commitments."
             },
             {
                 "type": ServiceType.TEMPORARY,
+                "base_key": "temporary_3",
                 "name_template": "Temporary Service {color} 14",
                 "title": "TEMPORARY",
                 "description": "Subscribe to our Temporary Service and pay only for the time you need. Access the network as long as you require, with no long-term commitments."
@@ -553,13 +562,13 @@ class UserDatabase:
         for color in colors:
             for idx, template in enumerate(service_templates):
                 service_id = f"service_{template['type'].value}_{idx+1}_{color}"
-                base_id = f"{template['type'].value}_{idx+1}"
+                base_key = template["base_key"]
                 
-                # Obter valores do dicionário ou usar valores padrão
-                costs = service_costs.get(base_id, {
+                # Obter valores do dicionário usando a chave correta
+                costs = service_costs.get(base_key, {
                     "service_conditions": "up to 1 packet per turn",
                     "buy_price": 80,
-                    "sell_price": 40
+                    "sell_price": 0  # Services sempre têm sell_price = 0
                 })
                 
                 service_card = ServiceCard(
@@ -571,7 +580,7 @@ class UserDatabase:
                     valid_for="1 Residential User",
                     service_conditions=costs["service_conditions"],
                     buy_cost=costs["buy_price"],
-                    sell_cost=costs["sell_price"]
+                    sell_cost=0  # Services sempre têm sell_cost = 0
                 )
                 
                 self.services[service_id] = service_card
@@ -608,7 +617,7 @@ class UserDatabase:
                 "packet_bonus": 4,
                 "penalty_per_packet": None,
                 "application_fee": 40,
-                "bonus_condition": "After 10 packets received",
+                "bonus_condition": 10,  # "After 10 packets received",
                 "penalty_condition": None
             },
             {
@@ -622,7 +631,7 @@ class UserDatabase:
                 "packet_bonus": 20,
                 "penalty_per_packet": None,
                 "application_fee": 60,
-                "bonus_condition": "After 15 packets received",
+                "bonus_condition": 15,  # "After 15 packets received",
                 "penalty_condition": None
             },
             {
@@ -636,7 +645,7 @@ class UserDatabase:
                 "message_received": 160,
                 "penalty_per_packet": None,
                 "application_fee": 40,
-                "bonus_condition": "No drops",
+                "bonus_condition": 0,  # "No drops",
                 "penalty_condition": None
             },
             # HOME SAFETY - 3 variações diferentes
@@ -666,7 +675,7 @@ class UserDatabase:
                 "penalty_per_packet": 8,
                 "application_fee": 60,
                 "bonus_condition": None,
-                "penalty_condition": "10 or fewer packets drops"
+                "penalty_condition": 10  # "10 or fewer packets drops"
             },
             {
                 "type": ActivityType.HOME_SAFETY,
@@ -680,7 +689,7 @@ class UserDatabase:
                 "penalty_per_packet": 4,
                 "application_fee": 60,
                 "bonus_condition": None,
-                "penalty_condition": "5 or fewer packets drops"
+                "penalty_condition": 5  # "5 or fewer packets drops"
             },
             # SHORT MESSAGE - 2 variações diferentes
             {
@@ -709,7 +718,7 @@ class UserDatabase:
                 "penalty_per_packet": 2,
                 "application_fee": 5,
                 "bonus_condition": None,
-                "penalty_condition": "Per packet drop"
+                "penalty_condition": 1  # "Per packet drop"
             },
             # GAMING - 2 variações diferentes
             {
@@ -799,10 +808,10 @@ class UserDatabase:
                 "description": "You're on a mission to deliver an important message. Don't lose any part—receive the complete message or lose the reward!",
                 "n_turns": 2,
                 "message_size": 1,
-                "rate": "up to 1 packet per turn",
+                "rate": [0,1],
                 "drops_allowed": False,
                 "reward_per_packet": None,
-                "message_bonus": 5,
+                "message_received": 5,
                 "time_limit_bonus": None,
                 "challenge_quit_fee": 5,
                 "time_limit": None,
@@ -814,10 +823,10 @@ class UserDatabase:
                 "description": "You're on a mission to deliver an important message. Don't lose any part—receive the complete message or lose the reward!",
                 "n_turns": 4,
                 "message_size": 2,
-                "rate": "up to 1 packet per turn",
+                "rate": [0,1],
                 "drops_allowed": False,
                 "reward_per_packet": None,
-                "message_bonus": 20,
+                "message_received": 20,
                 "time_limit_bonus": None,
                 "challenge_quit_fee": 10,
                 "time_limit": None,
@@ -829,10 +838,10 @@ class UserDatabase:
                 "description": "You're on a mission to deliver an important message. Don't lose any part—receive the complete message or lose the reward!",
                 "n_turns": 8,
                 "message_size": 4,
-                "rate": "up to 1 packet per turn",
+                "rate": [0,1],
                 "drops_allowed": False,
                 "reward_per_packet": None,
-                "message_bonus": 80,
+                "message_received": 80,
                 "time_limit_bonus": None,
                 "challenge_quit_fee": 40,
                 "time_limit": None,
@@ -844,10 +853,10 @@ class UserDatabase:
                 "description": "You're on a mission to deliver an important message. Don't lose any part—receive the complete message or lose the reward!",
                 "n_turns": 16,
                 "message_size": 8,
-                "rate": "up to 1 packet per turn",
+                "rate": [0,1],
                 "drops_allowed": False,
                 "reward_per_packet": None,
-                "message_bonus": 320,
+                "message_received": 320,
                 "time_limit_bonus": None,
                 "challenge_quit_fee": 80,
                 "time_limit": None,
@@ -860,10 +869,10 @@ class UserDatabase:
                 "description": "Time is running out, and the message is urgent! It can't arrive too late! Once transmission starts, you have a limited time to receive the complete message. Good luck!",
                 "n_turns": 4,
                 "message_size": 2,
-                "rate": "up to 1 packet per turn",
+                "rate": [0,1],
                 "drops_allowed": False,
                 "reward_per_packet": None,
-                "message_bonus": 20,
+                "message_received": 20,
                 "time_limit_bonus": 20,
                 "challenge_quit_fee": 10,
                 "time_limit": 2,
@@ -875,10 +884,10 @@ class UserDatabase:
                 "description": "Time is running out, and the message is urgent! It can't arrive too late! Once transmission starts, you have a limited time to receive the complete message. Good luck!",
                 "n_turns": 8,
                 "message_size": 4,
-                "rate": "up to 1 packet per turn",
+                "rate": [0,1],
                 "drops_allowed": False,
                 "reward_per_packet": None,
-                "message_bonus": 80,
+                "message_received": 80,
                 "time_limit_bonus": 80,
                 "challenge_quit_fee": 40,
                 "time_limit": 4,
@@ -890,10 +899,10 @@ class UserDatabase:
                 "description": "Time is running out, and the message is urgent! It can't arrive too late! Once transmission starts, you have a limited time to receive the complete message. Good luck!",
                 "n_turns": 16,
                 "message_size": 8,
-                "rate": "up to 1 packet per turn",
+                "rate": [0,1],
                 "drops_allowed": False,
                 "reward_per_packet": None,
-                "message_bonus": 320,
+                "message_received": 320,
                 "time_limit_bonus": 320,
                 "challenge_quit_fee": 80,
                 "time_limit": 8,
@@ -906,10 +915,10 @@ class UserDatabase:
                 "description": "Don't waste time! Get paid for the packets received and rewarded for the message! This is an absolute jackpot!",
                 "n_turns": 2,
                 "message_size": 2,
-                "rate": "1 packet per turn",
+                "rate": [0,1],
                 "drops_allowed": True,
                 "reward_per_packet": 20,
-                "message_bonus": 40,
+                "message_received_bonus": 40,
                 "time_limit_bonus": None,
                 "challenge_quit_fee": 10,
                 "time_limit": None,
@@ -921,10 +930,10 @@ class UserDatabase:
                 "description": "Don't waste time! Get paid for the packets received and rewarded for the message! This is an absolute jackpot!",
                 "n_turns": 4,
                 "message_size": 4,
-                "rate": "1 packet per turn",
+                "rate": [0,1],
                 "drops_allowed": True,
                 "reward_per_packet": 80,
-                "message_bonus": 160,
+                "message_received_bonus": 160,
                 "time_limit_bonus": None,
                 "challenge_quit_fee": 40,
                 "time_limit": None,
@@ -936,10 +945,10 @@ class UserDatabase:
                 "description": "Don't waste time! Get paid for the packets received and rewarded for the message! This is an absolute jackpot!",
                 "n_turns": 8,
                 "message_size": 8,
-                "rate": "1 packet per turn",
+                "rate": [0,1],
                 "drops_allowed": True,
                 "reward_per_packet": 320,
-                "message_bonus": 640,
+                "message_received_bonus": 640,
                 "time_limit_bonus": None,
                 "challenge_quit_fee": 80,
                 "time_limit": None,
@@ -952,10 +961,10 @@ class UserDatabase:
                 "description": "You're in a race to deliver a message, but luckily, even a few packets are enough to understand it. Get paid for the packets received within the timeframe! A great deal! Let's go!",
                 "n_turns": 1,
                 "message_size": 1,
-                "rate": "1 packet per turn",
+                "rate": [0,1],
                 "drops_allowed": True,
                 "reward_per_packet": 2,
-                "message_bonus": None,
+                "message_received": None,
                 "time_limit_bonus": None,
                 "challenge_quit_fee": 5,
                 "time_limit": None,
@@ -967,10 +976,10 @@ class UserDatabase:
                 "description": "You're in a race to deliver a message, but luckily, even a few packets are enough to understand it. Get paid for the packets received within the timeframe! A great deal! Let's go!",
                 "n_turns": 2,
                 "message_size": 2,
-                "rate": "1 packet per turn",
+                "rate": [0,1],
                 "drops_allowed": True,
                 "reward_per_packet": 20,
-                "message_bonus": None,
+                "message_received": None,
                 "time_limit_bonus": None,
                 "challenge_quit_fee": 10,
                 "time_limit": None,
@@ -982,10 +991,10 @@ class UserDatabase:
                 "description": "You're in a race to deliver a message, but luckily, even a few packets are enough to understand it. Get paid for the packets received within the timeframe! A great deal! Let's go!",
                 "n_turns": 4,
                 "message_size": 4,
-                "rate": "1 packet per turn",
+                "rate": [0,1],
                 "drops_allowed": True,
                 "reward_per_packet": 80,
-                "message_bonus": None,
+                "message_received": None,
                 "time_limit_bonus": None,
                 "challenge_quit_fee": 40,
                 "time_limit": None,
@@ -997,10 +1006,10 @@ class UserDatabase:
                 "description": "You're in a race to deliver a message, but luckily, even a few packets are enough to understand it. Get paid for the packets received within the timeframe! A great deal! Let's go!",
                 "n_turns": 8,
                 "message_size": 4,
-                "rate": "1 packet per turn",
+                "rate": [0,1],
                 "drops_allowed": True,
                 "reward_per_packet": 320,
-                "message_bonus": None,
+                "message_received": None,
                 "time_limit_bonus": None,
                 "challenge_quit_fee": 80,
                 "time_limit": None,
@@ -1023,12 +1032,13 @@ class UserDatabase:
                 rate=template["rate"],
                 destination="Central node",
                 drops_allowed=template["drops_allowed"],
-                reward_per_packet=template["reward_per_packet"],
-                message_bonus=template["message_bonus"],
-                time_limit_bonus=template["time_limit_bonus"],
-                challenge_quit_fee=template["challenge_quit_fee"],
-                time_limit=template["time_limit"],
-                time_to_receive=template["time_to_receive"]
+                reward_per_packet=template.get("reward_per_packet"),
+                message_bonus=template.get("message_received"),
+                message_received_bonus=template.get("message_received_bonus"),  # ADICIONADO: Campo para JACKPOT
+                time_limit_bonus=template.get("time_limit_bonus"),
+                challenge_quit_fee=template.get("challenge_quit_fee", 0),
+                time_limit=template.get("time_limit"),
+                time_to_receive=template.get("time_to_receive")
             )
             
             self.challenges[challenge_id] = challenge_card
@@ -5543,6 +5553,40 @@ class UserDatabase:
             "total_cards": len(self.users) + len(self.equipments) + len(self.services) + len(self.activities) + len(self.challenges) + len(self.actions) + len(self.events)
         }
 
+def get_event_duration(carta_path: str) -> Optional[int]:
+    """
+    Obtém a duração em turnos de uma carta Event baseada no seu caminho.
+    
+    Args:
+        carta_path: Caminho para a carta Event (ex: "/path/Event_1.png")
+        
+    Returns:
+        Duração em turnos da carta ou None se não encontrada
+    """
+    import os
+    import re
+    
+    # Extrair o ID da carta do caminho (ex: "Event_1" de "/path/Event_1.png")
+    filename = os.path.basename(carta_path)
+    match = re.match(r'Event_(\d+)', filename)
+    
+    if not match:
+        return None
+    
+    event_id = f"event_{match.group(1)}"
+    
+    # Criar instância da base de dados se não existir globalmente
+    if not hasattr(get_event_duration, 'db'):
+        get_event_duration.db = UserDatabase()
+    
+    # Obter a carta Event
+    event_card = get_event_duration.db.get_event(event_id)
+    
+    if event_card:
+        return event_card.duration_turns
+    
+    return None
+
 def main():
     """
     Função de demonstração da base de dados
@@ -5559,10 +5603,10 @@ def main():
     print(f"\nEstatísticas da Base de Dados:")
     print(f"- Cartas de Utilizadores: {stats['total_users']}")
     print(f"- Cartas de Equipamentos: {stats['total_equipments']}")
-    print(f"- Cartas de Serviços: {stats['total_services']}")
+    print(f"- Cartas de Servicos: {stats['total_services']}")
     print(f"- Cartas de Atividades: {stats['total_activities']}")
     print(f"- Cartas de Desafios: {stats['total_challenges']}")
-    print(f"- Cartas de Ações: {stats['total_actions']}")
+    print(f"- Cartas de Acoes: {stats['total_actions']}")
     print(f"- Total de Cartas: {stats['total_cards']}")
     
     # Exemplo de cartas
@@ -5578,7 +5622,7 @@ def main():
     if equipment:
         print(f"- {equipment}")
     
-    # Serviço exemplo
+    # Servico exemplo
     service = db.get_service("service_bandwidth_1_red")
     if service:
         print(f"- {service}")
@@ -5593,12 +5637,12 @@ def main():
     if challenge:
         print(f"- {challenge}")
     
-    # Ação exemplo
+    # Acao exemplo
     action = db.get_action("action_1")
     if action:
         print(f"- {action}")
     
-    print(f"\nCores disponíveis: {', '.join(db.get_available_colors())}")
+    print(f"\nCores disponiveis: {', '.join(db.get_available_colors())}")
 
 if __name__ == "__main__":
     main()

@@ -1,0 +1,22 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Test PlayerDashboard Progress Bars",
+			"type": "shell",
+			"command": "cd /Users/joaop_27h1t5j/Desktop/IST/Bolsa/NetMaster && /Users/joaop_27h1t5j/Desktop/IST/Bolsa/NetMaster/.venv/bin/python PlayerDashboard.py",
+			"group": "test",
+			"isBackground": false,
+			"problemMatcher": [
+				"$python"
+			]
+		},
+		{
+			"label": "Test PlayerDashboard with python3",
+			"type": "shell",
+			"command": "cd /Users/joaop_27h1t5j/Desktop/IST/Bolsa/NetMaster && python3 PlayerDashboard.py",
+			"isBackground": true,
+			"group": "test"
+		}
+	]
+}

@@ -223,6 +223,49 @@ def tirar_carta(cor, tipo):
     print(f"DEBUG: Nenhuma carta disponível para cor={cor}, tipo={tipo}")
     return None  # Não há cartas
 
+# Definição do tabuleiro (igual ao PlayerDashboard.py)
+BOARD = [
+    # Top row (left to right)
+    ("start", "neutral"),      # 0 canto azul
+    ("users", "blue"),         # 1
+    ("actions", "neutral"),     # 2 (cinzento)
+    ("equipments", "blue"),     # 3
+    ("challenges", "neutral"), # 4 (cinzento)
+    ("activities", "red"),      # 5
+    ("events", "neutral"),     # 6 (cinzento)
+    ("services", "red"),       # 7
+
+    # Right column (top to bottom)
+    ("start", "neutral"),      # 8 canto vermelho
+    ("users", "red"),          # 9
+    ("actions", "neutral"),     # 10 (cinzento)
+    ("equipments", "red"),      # 11
+    ("challenges", "neutral"), # 12 (cinzento)
+    ("activities", "yellow"),   # 13
+    ("events", "neutral"),     # 14 (cinzento)
+    ("services", "yellow"),    # 15
+
+    # Bottom row (right to left)
+    ("start", "neutral"),      # 16 canto amarelo
+    ("users", "yellow"),       # 17
+    ("actions", "neutral"),     # 18 (cinzento)
+    ("equipments", "yellow"),   # 19
+    ("challenges", "neutral"), # 20 (cinzento)
+    ("activities", "green"),    # 21
+    ("events", "neutral"),     # 22 (cinzento)
+    ("services", "green"),     # 23
+
+    # Left column (bottom to top)
+    ("start", "neutral"),      # 24 canto verde
+    ("users", "green"),        # 25
+    ("actions", "neutral"),     # 26 (cinzento)
+    ("equipments", "green"),    # 27
+    ("challenges", "neutral"), # 28 (cinzento)
+    ("activities", "blue"),     # 29
+    ("events", "neutral"),     # 30 (cinzento)
+    ("services", "blue"),      # 31
+]
+
 class StoreWindow(tk.Toplevel):
     def __init__(self, root, player_color, player_name, saldo=1000, casa_tipo=None, casa_cor=None, inventario=None, dashboard=None, other_player_house=False):
         super().__init__(root)
@@ -231,6 +274,13 @@ class StoreWindow(tk.Toplevel):
         import time
         self._store_id = f"Store_{int(time.time() * 1000)}"
         print(f"DEBUG: [__init__] Criando nova Store com ID: {self._store_id}")
+        
+        # ADICIONAR: Verificar se há estado Challenge transferido do PlayerDashboard
+        if dashboard and hasattr(dashboard, '_store_challenge_carta_path'):
+            print(f"DEBUG: [__init__] Estado Challenge detectado no dashboard: {dashboard._store_challenge_carta_path}")
+            print(f"DEBUG: [__init__] Tipo Challenge detectado no dashboard: {getattr(dashboard, '_store_challenge_carta_tipo', None)}")
+        else:
+            print(f"DEBUG: [__init__] Nenhum estado Challenge detectado no dashboard")
         
         self.title("Store")
         self.configure(bg="black")
@@ -498,25 +548,51 @@ class StoreWindow(tk.Toplevel):
                 """Abre a interface principal do PlayerDashboard (igual ao botão Player das cartas de Challenges)"""
                 print("DEBUG: Botão Player pressionado - abrindo interface principal do PlayerDashboard")
                 try:
+                    # CORREÇÃO: TRANSFERIR estado Challenge para PlayerDashboard ANTES de limpar
+                    # Isso permite que o botão Store restaure corretamente a carta Challenge
+                    if (hasattr(self, 'fullscreen_carta_path') and self.fullscreen_carta_path and
+                        hasattr(self, 'fullscreen_carta_tipo') and self.fullscreen_carta_tipo == "challenges"):
+                        print(f"DEBUG: [Challenge Player] Transferindo estado Challenge para PlayerDashboard: {self.fullscreen_carta_path}")
+                        self.dashboard._store_challenge_carta_path = self.fullscreen_carta_path
+                        self.dashboard._store_challenge_carta_tipo = self.fullscreen_carta_tipo
+                        print("DEBUG: [Challenge Player] Estado Challenge transferido para PlayerDashboard")
+                    
+                    # DEPOIS de transferir, limpar estado Challenge da Store
+                    # Isso evita que o Next Phase apareça incorretamente
+                    if hasattr(self, 'fullscreen_carta_path'):
+                        self.fullscreen_carta_path = None
+                        print("DEBUG: [Challenge Player] fullscreen_carta_path limpo da Store")
+                    if hasattr(self, 'fullscreen_carta_tipo'):
+                        self.fullscreen_carta_tipo = None
+                        print("DEBUG: [Challenge Player] fullscreen_carta_tipo limpo da Store")
+                    
                     if self.dashboard and hasattr(self.dashboard, "playerdashboard_interface"):
                         # Esconder a Store primeiro
                         self.withdraw()
-                        print("DEBUG: Store escondida")
+                        print("DEBUG: [Challenge Player] Store escondida")
+                        
+                        # CORREÇÃO: Limpar flag Challenge no PlayerDashboard quando voltar via botão Player
+                        # Isso garante que o Next Phase não apareça incorretamente
+                        self.dashboard._challenge_accepted = False
+                        print("DEBUG: [Challenge Player] Flag _challenge_accepted resetada no PlayerDashboard")
                         
                         # Mostrar o PlayerDashboard
                         self.dashboard.deiconify()
                         self.dashboard.state('normal')
                         self.dashboard.lift()
                         self.dashboard.focus_force()
-                        print("DEBUG: PlayerDashboard mostrado")
+                        print("DEBUG: [Challenge Player] PlayerDashboard mostrado")
                         
                         # Chamar a interface principal do PlayerDashboard
+                        # CORREÇÃO PROBLEMA STORE: Sempre mostrar botão Store quando há Challenge transferido
+                        print("DEBUG: [Challenge Player] Navegação via botão Player - preservando estado Challenge")
                         self.dashboard.playerdashboard_interface(
                             self.dashboard.player_name,
                             self.dashboard.saldo,
-                            self.dashboard.other_players
+                            self.dashboard.other_players,
+                            show_store_button=True
                         )
-                        print("DEBUG: Interface principal do PlayerDashboard aberta com sucesso")
+                        print("DEBUG: [Challenge Player] PlayerDashboard interface principal criada com botão Store")
                     else:
                         print("DEBUG: ERRO - PlayerDashboard não disponível ou método playerdashboard_interface não encontrado")
                 except Exception as e:
@@ -554,6 +630,28 @@ class StoreWindow(tk.Toplevel):
             os._exit(0)  # Termina imediatamente o processo
         else:
             self.after(100, self.check_gpio_key)
+
+    def _get_casa_from_position(self, position):
+        """
+        Obter informações da casa (tipo, cor) a partir da posição no tabuleiro
+        
+        Args:
+            position (int): Posição no tabuleiro (0-31)
+            
+        Returns:
+            tuple: (casa_tipo, casa_cor) ou None se posição inválida
+        """
+        try:
+            if 0 <= position < len(BOARD):
+                casa_tipo, casa_cor = BOARD[position]
+                print(f"DEBUG: [_get_casa_from_position] Posição {position} -> {casa_tipo} {casa_cor}")
+                return (casa_tipo, casa_cor)
+            else:
+                print(f"DEBUG: [_get_casa_from_position] Posição inválida: {position}")
+                return None
+        except Exception as e:
+            print(f"DEBUG: [_get_casa_from_position] Erro: {e}")
+            return None
 
     def get_color(self, color):
         return {
@@ -796,25 +894,78 @@ class StoreWindow(tk.Toplevel):
         title_lbl.pack(pady=(20, 10))
 
         # Obter cartas disponíveis para compra do baralho LOCAL da Store (sincronizado)
-        print(f"DEBUG: Buscando cartas para tipo '{tipo_atual}' e cor '{self.player_color}' no baralho LOCAL da Store")
+        print(f"DEBUG: [CRÍTICO] Buscando cartas para tipo '{tipo_atual}'")
         
-        # Verificar se o tipo existe nos baralhos LOCAIS da Store (APENAS da cor do jogador)
+        # LÓGICA CORRETA: Jogador sempre compra cartas da SUA PRÓPRIA COR
+        # Mesmo quando está numa casa de outro jogador, compra cartas da sua cor
+        cor_para_buscar = self.player_color
+        print(f"DEBUG: [CRÍTICO] Cor determinada para busca: {cor_para_buscar} (cor do jogador)")
+        print(f"DEBUG: [CRÍTICO] Casa atual: tipo='{self.casa_tipo}', cor='{self.casa_cor}'")
+        print(f"DEBUG: [CRÍTICO] Jogador cor: {self.player_color}")
+        
+        # NOVA LÓGICA: Buscar cartas da cor do jogador + cartas vendidas de qualquer jogador
         cartas_disp = []
-        if (hasattr(self, 'cartas') and self.player_color in self.cartas and 
-            tipo_atual in self.cartas[self.player_color]):
-            cartas_disp = self.cartas[self.player_color][tipo_atual].copy()
-            print(f"DEBUG: Encontradas {len(cartas_disp)} cartas no baralho LOCAL do jogador")
+        
+        # Primeiro: cartas da cor do jogador (baralho original)
+        if (hasattr(self, 'cartas') and cor_para_buscar in self.cartas and 
+            tipo_atual in self.cartas[cor_para_buscar]):
+            cartas_disp.extend(self.cartas[cor_para_buscar][tipo_atual].copy())
+            print(f"DEBUG: Encontradas {len(self.cartas[cor_para_buscar][tipo_atual])} cartas no baralho LOCAL da COR DO JOGADOR ({cor_para_buscar})")
+        
+        # Segundo: cartas vendidas de outros jogadores (todas as cores)
+        if hasattr(self, 'cartas'):
+            for cor_jogador in ["red", "blue", "green", "yellow"]:
+                if (cor_jogador != cor_para_buscar and cor_jogador in self.cartas and 
+                    tipo_atual in self.cartas[cor_jogador]):
+                    cartas_vendidas = self.cartas[cor_jogador][tipo_atual].copy()
+                    if cartas_vendidas:
+                        print(f"DEBUG: Encontradas {len(cartas_vendidas)} cartas VENDIDAS de jogadores {cor_jogador}")
+                        
+                        # CORREÇÃO: Mapear cartas vendidas para caminhos com cor correta
+                        cartas_mapeadas = []
+                        for carta_path in cartas_vendidas:
+                            # Extrair nome do arquivo (User_5.png)
+                            nome_carta = os.path.basename(carta_path)
+                            
+                            # Construir novo caminho com a cor do jogador
+                            if cor_para_buscar in ["red", "blue", "green", "yellow"]:
+                                cor_pasta = cor_para_buscar.capitalize()  # red -> Red
+                                # CARTAS_BASE_DIR já inclui /img/cartas, só adicionar tipo
+                                novo_caminho = os.path.join(
+                                    CARTAS_BASE_DIR, 
+                                    tipo_atual,  # users, equipments, etc.
+                                    "Residential-level",
+                                    cor_pasta,
+                                    nome_carta
+                                )
+                            else:
+                                # Fallback para cor do jogador
+                                cor_pasta = self.player_color.capitalize()
+                                novo_caminho = os.path.join(
+                                    CARTAS_BASE_DIR, 
+                                    tipo_atual,  # users, equipments, etc.
+                                    "Residential-level", 
+                                    cor_pasta,
+                                    nome_carta
+                                )
+                            
+                            cartas_mapeadas.append(novo_caminho)
+                            print(f"DEBUG: Carta mapeada: {os.path.basename(carta_path)} -> {cor_pasta}/{nome_carta}")
+                        
+                        cartas_disp.extend(cartas_mapeadas)
+        
+        print(f"DEBUG: Total de cartas disponíveis após busca completa: {len(cartas_disp)}")
         
         # Debug adicional do baralho LOCAL
-        print(f"DEBUG: Baralhos LOCAL disponíveis para {self.player_color}:")
-        if hasattr(self, 'cartas') and self.player_color in self.cartas:
-            for tipo, cartas in self.cartas[self.player_color].items():
+        print(f"DEBUG: Baralhos LOCAL disponíveis para COR DO JOGADOR {cor_para_buscar}:")
+        if hasattr(self, 'cartas') and cor_para_buscar in self.cartas:
+            for tipo, cartas in self.cartas[cor_para_buscar].items():
                 print(f"  {tipo}: {len(cartas)} cartas")
         else:
-            print(f"  Nenhum baralho LOCAL encontrado para {self.player_color}")
+            print(f"  Nenhum baralho LOCAL encontrado para COR DO JOGADOR {cor_para_buscar}")
         
         if not cartas_disp:
-            print(f"DEBUG: Nenhuma carta encontrada para {tipo_atual} na cor {self.player_color}")
+            print(f"DEBUG: Nenhuma carta encontrada para {tipo_atual} na cor do jogador {cor_para_buscar}")
             
             # Mostrar mensagem de "sem cartas disponíveis" com interface completa
             sem_cartas_lbl = tk.Label(self, text="Sem cartas disponíveis!", 
@@ -2470,11 +2621,34 @@ class StoreWindow(tk.Toplevel):
             def abrir_playerdashboard():
                 print("DEBUG: Abrindo interface principal do PlayerDashboard")
                 try:
+                    # CORREÇÃO: TRANSFERIR estado Challenge para PlayerDashboard ANTES de limpar
+                    # Isso permite que o botão Store restaure corretamente a carta Challenge
+                    if (hasattr(self, 'fullscreen_carta_path') and self.fullscreen_carta_path and
+                        hasattr(self, 'fullscreen_carta_tipo') and self.fullscreen_carta_tipo == "challenges"):
+                        print(f"DEBUG: Transferindo estado Challenge para PlayerDashboard: {self.fullscreen_carta_path}")
+                        self.dashboard._store_challenge_carta_path = self.fullscreen_carta_path
+                        self.dashboard._store_challenge_carta_tipo = self.fullscreen_carta_tipo
+                        print("DEBUG: Estado Challenge transferido para PlayerDashboard")
+                    
+                    # DEPOIS de transferir, limpar estado Challenge da Store
+                    # Isso evita que o Next Phase apareça incorretamente
+                    if hasattr(self, 'fullscreen_carta_path'):
+                        self.fullscreen_carta_path = None
+                        print("DEBUG: fullscreen_carta_path limpo da Store")
+                    if hasattr(self, 'fullscreen_carta_tipo'):
+                        self.fullscreen_carta_tipo = None
+                        print("DEBUG: fullscreen_carta_tipo limpo da Store")
+                    
                     # Vai para a interface principal do PlayerDashboard
                     if self.dashboard and hasattr(self.dashboard, "playerdashboard_interface"):
                         # Esconder a Store primeiro
                         self.withdraw()
                         print("DEBUG: Store escondida")
+                        
+                        # CORREÇÃO: Limpar flag Challenge no PlayerDashboard quando voltar via botão Player
+                        # Isso garante que o Next Phase não apareça incorretamente
+                        self.dashboard._challenge_accepted = False
+                        print("DEBUG: Flag _challenge_accepted resetada no PlayerDashboard")
                         
                         # Mostrar o PlayerDashboard
                         self.dashboard.deiconify()
@@ -2820,23 +2994,26 @@ class StoreWindow(tk.Toplevel):
         """
         print(f"DEBUG: Enviando carta {os.path.basename(carta_path)} para jogador {jogador_alvo}")
         
-        # Aqui você pode implementar a lógica de envio da carta
-        # Por enquanto, vamos apenas adicionar ao inventário do jogador atual
-        # e mostrar uma mensagem de confirmação
-        
-        # Adicionar carta ao inventário
+        # Determinar tipo para controle do baralho
         tipo_inv = casa_tipo
         if tipo_inv == "actions":
             tipo_inv = "actions"
         elif tipo_inv == "events":
             tipo_inv = "events"
         
-        if self.dashboard and hasattr(self.dashboard, 'adicionar_carta_inventario'):
-            self.dashboard.adicionar_carta_inventario(carta_path, tipo_inv)
-            print(f"DEBUG: Carta adicionada ao inventário: {tipo_inv} -> {carta_path}")
-            
-            # Remover carta do baralho local da Store
-            self._remover_carta_do_baralho_local(carta_path, tipo_inv)
+        # CORREÇÃO CRÍTICA: Se o jogador alvo é o próprio jogador atual, adicionar ao inventário
+        if jogador_alvo == self.player_color:
+            print(f"DEBUG: Carta {os.path.basename(carta_path)} destinada ao próprio jogador {jogador_alvo} - ADICIONANDO ao inventário")
+            # Adicionar carta ao inventário do jogador atual via dashboard
+            if self.dashboard:
+                self.dashboard.adicionar_carta_inventario(carta_path, tipo_inv)
+            print(f"DEBUG: Carta {os.path.basename(carta_path)} adicionada ao inventário {tipo_inv} do jogador {jogador_alvo}")
+        else:
+            # Para outros jogadores, a carta é consumida (aplicada/enviada)
+            print(f"DEBUG: Carta {os.path.basename(carta_path)} enviada para outro jogador {jogador_alvo} - carta consumida")
+        
+        # Remover carta do baralho local da Store (carta foi usada)
+        self._remover_carta_do_baralho_local(carta_path, tipo_inv)
         
         # Mostrar overlay de confirmação
         self._mostrar_confirmacao_envio(carta_path, casa_tipo, jogador_alvo)
@@ -2977,25 +3154,23 @@ class StoreWindow(tk.Toplevel):
                 print(f"DEBUG: [botão Player] Estado antes de ir para PlayerDashboard: fullscreen_carta_path={getattr(self, 'fullscreen_carta_path', 'NOT_SET')}, fullscreen_carta_tipo={getattr(self, 'fullscreen_carta_tipo', 'NOT_SET')}")
                 print(f"DEBUG: [botão Player] ID do objeto Store: {id(self)}")
                 try:
-                    # CRÍTICO: Garantir que o estado da carta fullscreen seja preservado
-                    # Usar os valores corretos da função atual
-                    fullscreen_carta_path_backup = carta_path  # Usar diretamente o parâmetro da função
-                    fullscreen_carta_tipo_backup = carta_tipo  # Usar diretamente o parâmetro da função
+                    # CORREÇÃO: TRANSFERIR estado Challenge para PlayerDashboard ANTES de limpar
+                    # Isso permite que o botão Store restaure corretamente a carta Challenge
+                    if (hasattr(self, 'fullscreen_carta_path') and self.fullscreen_carta_path and
+                        hasattr(self, 'fullscreen_carta_tipo') and self.fullscreen_carta_tipo == "challenges"):
+                        print(f"DEBUG: [botão Player] Transferindo estado Challenge para PlayerDashboard: {self.fullscreen_carta_path}")
+                        self.dashboard._store_challenge_carta_path = self.fullscreen_carta_path
+                        self.dashboard._store_challenge_carta_tipo = self.fullscreen_carta_tipo
+                        print("DEBUG: [botão Player] Estado Challenge transferido para PlayerDashboard")
                     
-                    print(f"DEBUG: [botão Player] Usando parâmetros da função atual: path={fullscreen_carta_path_backup}, tipo={fullscreen_carta_tipo_backup}")
-                    
-                    # IMPORTANTE: Garantir que o estado seja preservado MÚLTIPLAS VEZES
-                    self.fullscreen_carta_path = fullscreen_carta_path_backup
-                    self.fullscreen_carta_tipo = fullscreen_carta_tipo_backup
-                    self._backup_fullscreen_carta_path = fullscreen_carta_path_backup
-                    self._backup_fullscreen_carta_tipo = fullscreen_carta_tipo_backup
-                    self._original_carta_path = fullscreen_carta_path_backup
-                    self._original_carta_tipo = fullscreen_carta_tipo_backup
-                    
-                    print(f"DEBUG: [botão Player] Estado GARANTIDAMENTE preservado em todos os backups")
-                    print(f"DEBUG: [botão Player] fullscreen_carta_path = {self.fullscreen_carta_path}")
-                    print(f"DEBUG: [botão Player] _backup_fullscreen_carta_path = {self._backup_fullscreen_carta_path}")
-                    print(f"DEBUG: [botão Player] _original_carta_path = {self._original_carta_path}")
+                    # DEPOIS de transferir, limpar estado Challenge da Store
+                    # Isso evita que o Next Phase apareça incorretamente
+                    if hasattr(self, 'fullscreen_carta_path'):
+                        self.fullscreen_carta_path = None
+                        print("DEBUG: [botão Player] fullscreen_carta_path limpo da Store")
+                    if hasattr(self, 'fullscreen_carta_tipo'):
+                        self.fullscreen_carta_tipo = None
+                        print("DEBUG: [botão Player] fullscreen_carta_tipo limpo da Store")
                     
                     # Vai para a interface principal do PlayerDashboard
                     if self.dashboard and hasattr(self.dashboard, "playerdashboard_interface"):
@@ -3004,15 +3179,10 @@ class StoreWindow(tk.Toplevel):
                         self.withdraw()
                         print("DEBUG: [botão Player] Store escondida")
                         
-                        # VERIFICAÇÃO CRÍTICA: Confirmar que o estado ainda está preservado após withdraw
-                        print(f"DEBUG: [botão Player] Após withdraw - fullscreen_carta_path: {getattr(self, 'fullscreen_carta_path', 'PERDIDO!')}")
-                        print(f"DEBUG: [botão Player] Após withdraw - _backup_fullscreen_carta_path: {getattr(self, '_backup_fullscreen_carta_path', 'PERDIDO!')}")
-                        
-                        # Se perdeu o estado, restaurar dos backups
-                        if not getattr(self, 'fullscreen_carta_path', None):
-                            print("DEBUG: [botão Player] Estado perdido após withdraw - restaurando dos backups")
-                            self.fullscreen_carta_path = fullscreen_carta_path_backup
-                            self.fullscreen_carta_tipo = fullscreen_carta_tipo_backup
+                        # CORREÇÃO: Limpar flag Challenge no PlayerDashboard quando voltar via botão Player
+                        # Isso garante que o Next Phase não apareça incorretamente
+                        self.dashboard._challenge_accepted = False
+                        print("DEBUG: [botão Player] Flag _challenge_accepted resetada no PlayerDashboard")
                         
                         # Mostrar o PlayerDashboard
                         self.dashboard.deiconify()
@@ -3028,10 +3198,6 @@ class StoreWindow(tk.Toplevel):
                             self.dashboard.other_players
                         )
                         print("DEBUG: [botão Player] Interface principal do PlayerDashboard aberta com sucesso")
-                        print(f"DEBUG: [botão Player] Estado FINAL depois de ir para PlayerDashboard:")
-                        print(f"DEBUG: [botão Player] fullscreen_carta_path = {getattr(self, 'fullscreen_carta_path', 'NOT_SET')}")
-                        print(f"DEBUG: [botão Player] fullscreen_carta_tipo = {getattr(self, 'fullscreen_carta_tipo', 'NOT_SET')}")
-                        print(f"DEBUG: [botão Player] _backup_fullscreen_carta_path = {getattr(self, '_backup_fullscreen_carta_path', 'NOT_SET')}")
                     else:
                         print("DEBUG: [botão Player] ERRO - PlayerDashboard não disponível")
                 except Exception as e:
@@ -3058,6 +3224,30 @@ class StoreWindow(tk.Toplevel):
             self.fullscreen_carta_tipo = None
             print("DEBUG: Estado de fullscreen limpo ao aceitar carta")
             
+            # NOVA LÓGICA: Se for Challenge, implementar sistema de troca com Activities
+            if carta_tipo in ["challenges", "challenge"]:
+                # VERIFICAÇÃO CRÍTICA: Só aceitar Challenge se estivermos numa casa Challenge
+                casa_tipo = getattr(self, 'casa_tipo', 'neutral')
+                if casa_tipo != "challenges":
+                    print(f"DEBUG: [CHALLENGE] BLOQUEADO - Challenge não pode ser aceite em casa {casa_tipo}")
+                    # Mostrar mensagem de erro e voltar à Store
+                    self.voltar_para_store()
+                    return
+                
+                print("DEBUG: [CHALLENGE] Challenge aceite - usando fluxo da Store para substituição")
+                # Desabilitar permanentemente o botão Store
+                if self.dashboard and hasattr(self.dashboard, 'disable_store_button'):
+                    self.dashboard.disable_store_button()
+                    print("DEBUG: [CHALLENGE] Botão Store desativado permanentemente")
+                
+                # Executar a substituição Challenge→Activity pela lógica da Store
+                # A própria lógica decide a navegação:
+                #  - 0 ou 1 Activities ativas → navega de volta automaticamente
+                #  - múltiplas Activities → permanece na Store e mostra a seleção
+                self._processar_troca_challenge_activity(carta_path)
+                return
+            
+            # Lógica original para outros tipos de cartas
             tipo_inv = carta_tipo
             if tipo_inv == "equipment":
                 tipo_inv = "equipments"
@@ -3686,16 +3876,41 @@ class StoreWindow(tk.Toplevel):
             else:
                 print("DEBUG: [rebuild_store_interface] Nenhuma carta pendente - continuando com interface normal")
             
-            # --- CORREÇÃO: Aplicar destaque e comandos corretos para casas neutras e normais ---
-            if hasattr(self, 'casa_tipo') and hasattr(self, 'casa_cor') and self.casa_tipo and self.casa_cor:
-                print(f"DEBUG: Aplicando destaque para {self.casa_tipo} {self.casa_cor}")
+            # --- CORREÇÃO: Obter informações da casa atual sempre do PlayerDashboard ---
+            casa_tipo_atual = None
+            casa_cor_atual = None
+            
+            # SEMPRE obter informações atualizadas do PlayerDashboard
+            if self.dashboard:
+                # Obter a posição atual do jogador
+                player_pos = getattr(self.dashboard, 'player_pos', None)
+                if player_pos is not None:
+                    # Calcular casa atual a partir da posição
+                    casa_info = self._get_casa_from_position(player_pos)
+                    if casa_info:
+                        casa_tipo_atual, casa_cor_atual = casa_info
+                        print(f"DEBUG: [rebuild_store_interface] Casa atual calculada da posição {player_pos}: {casa_tipo_atual} {casa_cor_atual}")
+                        
+                        # Atualizar Store com as informações corretas
+                        self.casa_tipo = casa_tipo_atual
+                        self.casa_cor = casa_cor_atual
+                    else:
+                        print(f"DEBUG: [rebuild_store_interface] Não foi possível determinar casa para posição {player_pos}")
+                else:
+                    print("DEBUG: [rebuild_store_interface] Posição do jogador não disponível no PlayerDashboard")
+            else:
+                print("DEBUG: [rebuild_store_interface] PlayerDashboard não disponível")
+            
+            # Aplicar destaque e comandos corretos para casas
+            if casa_tipo_atual and casa_cor_atual:
+                print(f"DEBUG: Aplicando destaque para {casa_tipo_atual} {casa_cor_atual}")
                 # Para todos os tipos, garantir que o tipo é plural (actions, events, challenges)
                 tipo_map = {"action": "actions", "event": "events", "challenge": "challenges"}
-                casa_tipo = tipo_map.get(self.casa_tipo, self.casa_tipo)
-                print(f"DEBUG: Tipo normalizado de '{self.casa_tipo}' para '{casa_tipo}'")
-                self.highlight_casa(casa_tipo, self.casa_cor)
+                casa_tipo_normalizado = tipo_map.get(casa_tipo_atual, casa_tipo_atual)
+                print(f"DEBUG: Tipo normalizado de '{casa_tipo_atual}' para '{casa_tipo_normalizado}'")
+                self.highlight_casa(casa_tipo_normalizado, casa_cor_atual)
             else:
-                print("DEBUG: Desabilitando todos os botões - sem destaque")
+                print("DEBUG: Desabilitando todos os botões - sem destaque (casa não identificada)")
                 self.disable_all_buttons()
             
             # Força update final para garantir que tudo é exibido
@@ -3724,10 +3939,24 @@ class StoreWindow(tk.Toplevel):
                 """Abre a interface principal do PlayerDashboard (igual ao botão Player das cartas de Challenges)"""
                 print("DEBUG: Botão Player pressionado - abrindo interface principal do PlayerDashboard")
                 try:
+                    # CORREÇÃO: Limpar estado Challenge da Store antes de voltar ao PlayerDashboard
+                    # Isso evita que o Next Phase apareça incorretamente
+                    if hasattr(self, 'fullscreen_carta_path'):
+                        self.fullscreen_carta_path = None
+                        print("DEBUG: fullscreen_carta_path limpo da Store")
+                    if hasattr(self, 'fullscreen_carta_tipo'):
+                        self.fullscreen_carta_tipo = None
+                        print("DEBUG: fullscreen_carta_tipo limpo da Store")
+                    
                     if self.dashboard and hasattr(self.dashboard, "playerdashboard_interface"):
                         # Esconder a Store primeiro
                         self.withdraw()
                         print("DEBUG: Store escondida")
+                        
+                        # CORREÇÃO: Limpar flag Challenge no PlayerDashboard quando voltar via botão Player
+                        # Isso garante que o Next Phase não apareça incorretamente
+                        self.dashboard._challenge_accepted = False
+                        print("DEBUG: Flag _challenge_accepted resetada no PlayerDashboard")
                         
                         # Mostrar o PlayerDashboard
                         self.dashboard.deiconify()
@@ -3939,6 +4168,11 @@ class StoreWindow(tk.Toplevel):
             """Abre o PlayerDashboard e fecha a Store"""
             print("DEBUG: Botão Player pressionado - abrindo PlayerDashboard")
             if self.dashboard:
+                # CORREÇÃO: Limpar flag Challenge no PlayerDashboard quando voltar via botão Player
+                # Isso garante que o Next Phase não apareça incorretamente
+                self.dashboard._challenge_accepted = False
+                print("DEBUG: Flag _challenge_accepted resetada no PlayerDashboard")
+                
                 self.destroy()  # Fecha a Store
                 self.dashboard.deiconify()  # Mostra o PlayerDashboard
                 self.dashboard.lift()  # Traz para a frente
@@ -4016,10 +4250,30 @@ class StoreWindow(tk.Toplevel):
     def processar_casa_challenges(self, casa_cor):
         """
         Função específica para processar casas de tipo 'challenges'.
-        Simplifica todo o fluxo: tirar carta -> mostrar fullscreen -> botão Player funcional.
+        Simplifica todo o fluxo: tirar carta → mostrar fullscreen → botão Player funcional.
         """
+        print(f"DEBUG: [processar_casa_challenges] ====== NOVA INVOCAÇÃO ======")
         print(f"DEBUG: [processar_casa_challenges] Iniciando processamento para casa challenges cor={casa_cor}")
         print(f"DEBUG: [processar_casa_challenges] ID do objeto Store: {id(self)}")
+        print(f"DEBUG: [processar_casa_challenges] Dashboard disponível: {self.dashboard is not None}")
+        if self.dashboard:
+            print(f"DEBUG: [processar_casa_challenges] Dashboard ID: {id(self.dashboard)}")
+            print(f"DEBUG: [processar_casa_challenges] Store button disabled: {getattr(self.dashboard, '_store_button_disabled', False)}")
+            
+            # Debug do carrossel para ver estado atual
+            carrossel_cards = getattr(self.dashboard, 'cards', [])
+            print(f"DEBUG: [processar_casa_challenges] Estado do carrossel ({len(carrossel_cards)} posições):")
+            for i, carta_path in enumerate(carrossel_cards):
+                if carta_path and not os.path.basename(carta_path).startswith("back_card_"):
+                    nome_carta = os.path.basename(carta_path)
+                    if "activity" in nome_carta.lower() or "/activities/" in carta_path.lower():
+                        print(f"DEBUG: [processar_casa_challenges]   Posição {i}: {nome_carta} (ACTIVITY)")
+                    elif "challenge" in nome_carta.lower() or "/challenges/" in carta_path.lower():
+                        print(f"DEBUG: [processar_casa_challenges]   Posição {i}: {nome_carta} (CHALLENGE)")
+                    else:
+                        print(f"DEBUG: [processar_casa_challenges]   Posição {i}: {nome_carta} (OUTROS)")
+                else:
+                    print(f"DEBUG: [processar_casa_challenges]   Posição {i}: vazia ou back_card")
         
         try:
             # Tirar uma carta de challenges
@@ -4028,7 +4282,7 @@ class StoreWindow(tk.Toplevel):
                 print("DEBUG: [processar_casa_challenges] Nenhuma carta de challenges disponível")
                 return False
             
-            print(f"DEBUG: [processar_casa_challenges] Carta obtida: {carta_path}")
+            print(f"DEBUG: [processar_casa_challenges] Carta obtida: {os.path.basename(carta_path)}")
             
             # Mostrar a carta em fullscreen com opções de aceitar/recusar
             self.mostrar_carta_challenge_fullscreen(carta_path)
@@ -4092,39 +4346,80 @@ class StoreWindow(tk.Toplevel):
         Adiciona uma carta vendida de volta aos baralhos (local e global).
         Usado quando um jogador vende uma carta para a Store.
         """
+        print(f"DEBUG: [adicionar_carta_ao_baralho] ===== INÍCIO =====")
         print(f"DEBUG: [adicionar_carta_ao_baralho] Adicionando carta ao baralho - carta: {os.path.basename(carta_path)}, tipo: {carta_tipo}, cor: {carta_cor}")
         
         # Se cor não foi especificada, determinar a partir do player_color
         if carta_cor is None:
             carta_cor = self.player_color
+            print(f"DEBUG: [adicionar_carta_ao_baralho] Cor não especificada, usando player_color: {carta_cor}")
+        
+        print(f"DEBUG: [adicionar_carta_ao_baralho] Cor final a usar: {carta_cor}")
         
         # Garantir que a estrutura do baralho local existe
         if not hasattr(self, 'cartas'):
             self.cartas = {}
+            print(f"DEBUG: [adicionar_carta_ao_baralho] Criando estrutura self.cartas")
+        
         if carta_cor not in self.cartas:
             self.cartas[carta_cor] = {}
+            print(f"DEBUG: [adicionar_carta_ao_baralho] Criando estrutura para cor {carta_cor}")
+        
         if carta_tipo not in self.cartas[carta_cor]:
             self.cartas[carta_cor][carta_tipo] = []
+            print(f"DEBUG: [adicionar_carta_ao_baralho] Criando lista para {carta_cor}/{carta_tipo}")
+        
+        # Estado antes da adição
+        cartas_antes = len(self.cartas[carta_cor][carta_tipo])
+        print(f"DEBUG: [adicionar_carta_ao_baralho] Cartas antes da adição: {cartas_antes}")
         
         # Adicionar ao baralho local se ainda não existir
         if carta_path not in self.cartas[carta_cor][carta_tipo]:
             self.cartas[carta_cor][carta_tipo].append(carta_path)
             print(f"DEBUG: [adicionar_carta_ao_baralho] Carta adicionada ao baralho local {carta_cor}/{carta_tipo}")
+        else:
+            print(f"DEBUG: [adicionar_carta_ao_baralho] Carta já existe no baralho local - não adicionada novamente")
+        
+        # Estado depois da adição local
+        cartas_depois_local = len(self.cartas[carta_cor][carta_tipo])
+        print(f"DEBUG: [adicionar_carta_ao_baralho] Cartas depois da adição local: {cartas_depois_local}")
         
         # Adicionar também ao baralho global
         global baralhos
+        print(f"DEBUG: [adicionar_carta_ao_baralho] Processando baralho global...")
+        
         if baralhos:
+            print(f"DEBUG: [adicionar_carta_ao_baralho] Baralho global existe")
+            
             if carta_cor not in baralhos:
                 baralhos[carta_cor] = {}
+                print(f"DEBUG: [adicionar_carta_ao_baralho] Criando estrutura global para cor {carta_cor}")
+                
             if carta_tipo not in baralhos[carta_cor]:
                 baralhos[carta_cor][carta_tipo] = []
+                print(f"DEBUG: [adicionar_carta_ao_baralho] Criando lista global para {carta_cor}/{carta_tipo}")
+            
+            # Estado antes da adição global
+            cartas_antes_global = len(baralhos[carta_cor][carta_tipo])
+            print(f"DEBUG: [adicionar_carta_ao_baralho] Cartas no baralho global antes: {cartas_antes_global}")
             
             if carta_path not in baralhos[carta_cor][carta_tipo]:
                 baralhos[carta_cor][carta_tipo].append(carta_path)
                 print(f"DEBUG: [adicionar_carta_ao_baralho] Carta adicionada ao baralho global {carta_cor}/{carta_tipo}")
+            else:
+                print(f"DEBUG: [adicionar_carta_ao_baralho] Carta já existe no baralho global - não adicionada novamente")
+            
+            # Estado depois da adição global
+            cartas_depois_global = len(baralhos[carta_cor][carta_tipo])
+            print(f"DEBUG: [adicionar_carta_ao_baralho] Cartas no baralho global depois: {cartas_depois_global}")
+        else:
+            print(f"DEBUG: [adicionar_carta_ao_baralho] AVISO - Baralho global não existe!")
         
-        print(f"DEBUG: [adicionar_carta_ao_baralho] Sincronização completa - carta {os.path.basename(carta_path)} adicionada aos baralhos")
-        print(f"DEBUG: [adicionar_carta_ao_baralho] Cartas agora em {carta_cor}/{carta_tipo}: local={len(self.cartas[carta_cor][carta_tipo])}, global={len(baralhos[carta_cor][carta_tipo]) if baralhos and carta_cor in baralhos and carta_tipo in baralhos[carta_cor] else 'N/A'}")
+        print(f"DEBUG: [adicionar_carta_ao_baralho] Sincronização completa - carta {os.path.basename(carta_path)} processada")
+        print(f"DEBUG: [adicionar_carta_ao_baralho] Estado final:")
+        print(f"DEBUG: [adicionar_carta_ao_baralho]   Local: {len(self.cartas[carta_cor][carta_tipo]) if hasattr(self, 'cartas') and carta_cor in self.cartas and carta_tipo in self.cartas[carta_cor] else 'N/A'} cartas")
+        print(f"DEBUG: [adicionar_carta_ao_baralho]   Global: {len(baralhos[carta_cor][carta_tipo]) if baralhos and carta_cor in baralhos and carta_tipo in baralhos[carta_cor] else 'N/A'} cartas")
+        print(f"DEBUG: [adicionar_carta_ao_baralho] ===== FIM =====")
 
     def _remover_carta_do_baralho_local(self, carta_path, carta_tipo):
         """
@@ -4218,26 +4513,33 @@ class StoreWindow(tk.Toplevel):
             print(f"DEBUG: [Challenge Player] Estado atual: fullscreen_carta_path={self.fullscreen_carta_path}")
             
             try:
-                # Garantir que o estado está preservado
-                carta_backup = carta_path  # Usar parâmetro da função
-                self.fullscreen_carta_path = carta_backup
-                self.fullscreen_carta_tipo = "challenges"
-                self._backup_fullscreen_carta_path = carta_backup
-                self._backup_fullscreen_carta_tipo = "challenges"
-                self._original_carta_path = carta_backup
-                self._original_carta_tipo = "challenges"
+                # CORREÇÃO: TRANSFERIR estado Challenge para PlayerDashboard ANTES de limpar
+                # Isso permite que o botão Store restaure corretamente a carta Challenge
+                if (hasattr(self, 'fullscreen_carta_path') and self.fullscreen_carta_path and
+                    hasattr(self, 'fullscreen_carta_tipo') and self.fullscreen_carta_tipo == "challenges"):
+                    print(f"DEBUG: [Challenge Player] Transferindo estado Challenge para PlayerDashboard: {self.fullscreen_carta_path}")
+                    self.dashboard._store_challenge_carta_path = self.fullscreen_carta_path
+                    self.dashboard._store_challenge_carta_tipo = self.fullscreen_carta_tipo
+                    print("DEBUG: [Challenge Player] Estado Challenge transferido para PlayerDashboard")
                 
-                print(f"DEBUG: [Challenge Player] Estado reforçado antes de ir para PlayerDashboard")
+                # DEPOIS de transferir, limpar estado Challenge da Store
+                # Isso evita que o Next Phase apareça incorretamente
+                if hasattr(self, 'fullscreen_carta_path'):
+                    self.fullscreen_carta_path = None
+                    print("DEBUG: [Challenge Player] fullscreen_carta_path limpo da Store")
+                if hasattr(self, 'fullscreen_carta_tipo'):
+                    self.fullscreen_carta_tipo = None
+                    print("DEBUG: [Challenge Player] fullscreen_carta_tipo limpo da Store")
                 
                 if self.dashboard and hasattr(self.dashboard, "playerdashboard_interface"):
-                    # CORREÇÃO: Transferir estado para o PlayerDashboard ANTES de esconder Store
-                    self.dashboard._store_challenge_carta_path = carta_backup
-                    self.dashboard._store_challenge_carta_tipo = "challenges"
-                    print(f"DEBUG: [Challenge Player] Estado transferido para PlayerDashboard: {carta_backup}")
-                    
-                    # Esconder Store DEPOIS de transferir estado
+                    # Esconder Store primeiro
                     self.withdraw()
-                    print("DEBUG: [Challenge Player] Store escondida DEPOIS de transferir estado")
+                    print("DEBUG: [Challenge Player] Store escondida")
+                    
+                    # CORREÇÃO: Não limpar estado Challenge quando navegamos via botão Player
+                    # O botão Player é apenas navegação, não aceitação/recusa de Challenge
+                    # O estado Challenge deve ser preservado para permitir voltar via Store
+                    print("DEBUG: [Challenge Player] Navegação via botão Player - preservando estado Challenge")
                     
                     # Mostrar PlayerDashboard e recriar interface principal COM botão Store
                     self.dashboard.deiconify()
@@ -4280,8 +4582,8 @@ class StoreWindow(tk.Toplevel):
         
         # Botões Aceitar/Recusar
         def aceitar_carta():
-            """Aceita a carta e adiciona ao inventário"""
-            print("DEBUG: [Challenge] Carta aceita")
+            """Aceita a carta Challenge e implementa lógica de substituição no carrossel"""
+            print("DEBUG: [Challenge] Carta aceita - iniciando lógica de substituição")
             
             # IMPORTANTE: Desativar permanentemente o botão Store
             if self.dashboard and hasattr(self.dashboard, 'disable_store_button'):
@@ -4294,15 +4596,15 @@ class StoreWindow(tk.Toplevel):
             self._backup_fullscreen_carta_path = None
             self._backup_fullscreen_carta_tipo = None
             
-            # Adicionar carta ao inventário
-            if self.dashboard and hasattr(self.dashboard, 'inventario'):
-                if 'challenges' not in self.dashboard.inventario:
-                    self.dashboard.inventario['challenges'] = []
-                self.dashboard.inventario['challenges'].append(carta_path)
-                print(f"DEBUG: [Challenge] Carta adicionada ao inventário: {carta_path}")
+            # CORREÇÃO PROBLEMA 1: Usar APENAS a lógica da Store (já implementada) 
+            # NÃO chamar processar_challenge_aceite do PlayerDashboard para evitar conflito
+            print("DEBUG: [Challenge] Usando lógica de substituição da Store (não PlayerDashboard)")
             
-            # Voltar ao PlayerDashboard SEM botão Store
-            self._voltar_playerdashboard_sem_botao_store()
+            # Implementar lógica de substituição diretamente aqui
+            # Navegação será gerida pela própria lógica:
+            # - Se 0 ou 1 Activities ativas → navega de volta automaticamente
+            # - Se múltiplas Activities → mantém-se na Store e mostra interface de seleção
+            self._processar_troca_challenge_activity(carta_path)
         
         def recusar_carta():
             """Recusa a carta"""
@@ -4571,6 +4873,7 @@ class StoreWindow(tk.Toplevel):
         """
         Função específica para restaurar uma carta em fullscreen pendente.
         Retorna True se restaurou uma carta, False caso contrário.
+        CORREÇÃO: Só restaura cartas Challenge se estivermos numa casa Challenge.
         """
         print(f"DEBUG: [restaurar_carta_fullscreen_pendente] Verificando carta pendente...")
         print(f"DEBUG: [restaurar_carta_fullscreen_pendente] ID do objeto Store: {id(self)}")
@@ -4607,6 +4910,29 @@ class StoreWindow(tk.Toplevel):
             print(f"DEBUG: [restaurar_carta_fullscreen_pendente] Nenhuma carta pendente encontrada")
             return False
         
+        # NOVA VERIFICAÇÃO: Para cartas Challenge, só restaurar se estivermos numa casa Challenge
+        if fullscreen_carta_tipo in ["challenges", "challenge"]:
+            casa_tipo = getattr(self, 'casa_tipo', 'neutral')
+            print(f"DEBUG: [restaurar_carta_fullscreen_pendente] Carta Challenge encontrada - casa atual: {casa_tipo}")
+            
+            if casa_tipo != "challenges":
+                print(f"DEBUG: [restaurar_carta_fullscreen_pendente] BLOQUEADO - Carta Challenge não pode ser restaurada em casa {casa_tipo}")
+                # Limpar estado Challenge
+                self.fullscreen_carta_path = None
+                self.fullscreen_carta_tipo = None
+                if hasattr(self, '_backup_fullscreen_carta_path'):
+                    self._backup_fullscreen_carta_path = None
+                if hasattr(self, '_backup_fullscreen_carta_tipo'):
+                    self._backup_fullscreen_carta_tipo = None
+                if hasattr(self, '_original_carta_path'):
+                    self._original_carta_path = None
+                if hasattr(self, '_original_carta_tipo'):
+                    self._original_carta_tipo = None
+                print(f"DEBUG: [restaurar_carta_fullscreen_pendente] Estado Challenge limpo da Store")
+                return False
+            else:
+                print(f"DEBUG: [restaurar_carta_fullscreen_pendente] Carta Challenge permitida - estamos numa casa Challenge")
+        
         # Verificar se o arquivo da carta existe
         if not os.path.exists(fullscreen_carta_path):
             print(f"DEBUG: [restaurar_carta_fullscreen_pendente] Arquivo da carta não existe: {fullscreen_carta_path}")
@@ -4624,3 +4950,805 @@ class StoreWindow(tk.Toplevel):
         
         print(f"DEBUG: [restaurar_carta_fullscreen_pendente] Carta restaurada com sucesso")
         return True
+    
+    def _processar_troca_challenge_activity(self, challenge_path):
+        """
+        Processa a troca de Challenge por Activity no carrossel.
+        
+        Lógica:
+        1. Se há Activities ativas no carrossel → substitui por Challenge (jogador escolhe qual se múltiplas)
+        2. Se não há Activities ativas → Challenge vai para inventário
+        3. Activity substituída vai para inventário + reset de progresso
+        """
+        print(f"DEBUG: [TROCA] Iniciando processamento de troca Challenge por Activity")
+        print(f"DEBUG: [TROCA] Challenge: {os.path.basename(challenge_path)}")
+        print(f"DEBUG: [TROCA] Store ID: {id(self)}")
+        
+        if not self.dashboard:
+            print(f"DEBUG: [TROCA] ERRO - Dashboard não disponível")
+            return
+        
+        print(f"DEBUG: [TROCA] Dashboard ID: {id(self.dashboard)}")
+        print(f"DEBUG: [TROCA] Store button disabled: {getattr(self.dashboard, '_store_button_disabled', False)}")
+        
+        # Encontrar Activities ativas no carrossel
+        activities_ativas_indices = []
+        carrossel_cards = getattr(self.dashboard, 'cards', [])
+        print(f"DEBUG: [TROCA] Carrossel tem {len(carrossel_cards)} posições")
+        
+        for i, carta_path in enumerate(carrossel_cards):
+            if carta_path and not os.path.basename(carta_path).startswith("back_card_"):
+                print(f"DEBUG: [TROCA] Posição {i}: {os.path.basename(carta_path)}")
+                # Verificar se é Activity
+                if ("activity" in os.path.basename(carta_path).lower() or 
+                    "/activities/" in carta_path.lower()):
+                    activities_ativas_indices.append(i)
+                    print(f"DEBUG: [TROCA] Activity ativa encontrada na posição {i}: {os.path.basename(carta_path)}")
+            else:
+                print(f"DEBUG: [TROCA] Posição {i}: vazia ou back_card")
+        
+        print(f"DEBUG: [TROCA] Total de Activities ativas no carrossel: {len(activities_ativas_indices)}")
+        
+        if len(activities_ativas_indices) == 0:
+            # Não há Activities ativas → Challenge vai para inventário
+            print(f"DEBUG: [TROCA] Não há Activities ativas - Challenge vai para inventário")
+            self._enviar_challenge_para_inventario(challenge_path)
+        elif len(activities_ativas_indices) == 1:
+            # Apenas uma Activity ativa → substitui automaticamente
+            idx_substituir = activities_ativas_indices[0]
+            print(f"DEBUG: [TROCA] Uma Activity ativa - substituindo automaticamente na posição {idx_substituir}")
+            self._executar_troca_challenge_activity(challenge_path, idx_substituir)
+        else:
+            # Múltiplas Activities ativas → jogador escolhe qual substituir
+            print(f"DEBUG: [TROCA] Múltiplas Activities ativas - mostrando interface de escolha")
+            print(f"DEBUG: [TROCA] Activities encontradas nas posições: {activities_ativas_indices}")
+            self._mostrar_interface_escolha_activity(challenge_path, activities_ativas_indices, 0)
+    
+    def _enviar_challenge_para_inventario(self, challenge_path):
+        """Envia Challenge diretamente para o inventário Activities/Challenges"""
+        print(f"DEBUG: [TROCA] Enviando Challenge para inventário: {os.path.basename(challenge_path)}")
+        
+        # Adicionar Challenge ao inventário
+        if hasattr(self.dashboard, 'inventario'):
+            if 'challenges' not in self.dashboard.inventario:
+                self.dashboard.inventario['challenges'] = []
+            self.dashboard.inventario['challenges'].append(challenge_path)
+            print(f"DEBUG: [TROCA] Challenge adicionado ao inventário challenges")
+        
+        # Desabilitar botão Store (Challenge aceite)
+        self.dashboard.disable_store_button()
+        print(f"DEBUG: [TROCA] Botão Store desabilitado - Challenge aceite")
+        
+        # Voltar para PlayerDashboard
+        self._voltar_para_playerdashboard_apos_troca()
+    
+    def _executar_troca_challenge_activity(self, challenge_path, idx_activity):
+        """Executa a troca efetiva de Challenge por Activity na posição especificada"""
+        print(f"DEBUG: [TROCA] Executando troca na posição {idx_activity}")
+        
+        carrossel_cards = getattr(self.dashboard, 'cards', [])
+        if idx_activity >= len(carrossel_cards):
+            print(f"DEBUG: [TROCA] ERRO - Índice inválido: {idx_activity}")
+            return
+        
+        activity_substituida = carrossel_cards[idx_activity]
+        print(f"DEBUG: [TROCA] Activity a ser substituída: {os.path.basename(activity_substituida)}")
+        print(f"DEBUG: [TROCA] Challenge substituto: {os.path.basename(challenge_path)}")
+        
+        # CORREÇÃO CRÍTICA: Preservar valores da Activity original ANTES da substituição
+        activity_original_stats = None
+        if (hasattr(self.dashboard, 'card_stats') and 
+            idx_activity < len(self.dashboard.card_stats)):
+            activity_original_stats = {
+                "To send": self.dashboard.card_stats[idx_activity]["To send"],
+                "Rxd": self.dashboard.card_stats[idx_activity]["Rxd"], 
+                "Lost": self.dashboard.card_stats[idx_activity]["Lost"]
+            }
+            print(f"DEBUG: [TROCA] Valores preservados da Activity original: To send={activity_original_stats['To send']}, Rxd={activity_original_stats['Rxd']}, Lost={activity_original_stats['Lost']}")
+        
+        # CORREÇÃO CRÍTICA: Preservar no backup root também para persistir entre turnos
+        root = self.dashboard.master
+        if hasattr(root, '_backup_card_stats') and idx_activity < len(root._backup_card_stats):
+            backup_original_stats = {
+                "To send": root._backup_card_stats[idx_activity]["To send"],
+                "Rxd": root._backup_card_stats[idx_activity]["Rxd"],
+                "Lost": root._backup_card_stats[idx_activity]["Lost"]
+            }
+            print(f"DEBUG: [TROCA] Valores do backup root preservados: To send={backup_original_stats['To send']}, Rxd={backup_original_stats['Rxd']}, Lost={backup_original_stats['Lost']}")
+            
+            # Preservar no dashboard também (sobrescrever se não existia)
+            if not activity_original_stats:
+                activity_original_stats = backup_original_stats
+                print(f"DEBUG: [TROCA] Usando valores do backup root como fallback")
+        
+        # 1. Enviar Activity substituída para inventário
+        if hasattr(self.dashboard, 'inventario'):
+            if 'activities' not in self.dashboard.inventario:
+                self.dashboard.inventario['activities'] = []
+            self.dashboard.inventario['activities'].append(activity_substituida)
+            print(f"DEBUG: [TROCA] Activity substituída enviada para inventário")
+        
+        # 2. Colocar Challenge no carrossel
+        self.dashboard.cards[idx_activity] = challenge_path
+        print(f"DEBUG: [TROCA] Challenge colocado no carrossel na posição {idx_activity}")
+        
+        # 3. Reset de progresso para esta posição
+        self._resetar_progresso_carrossel(idx_activity, challenge_path)
+        
+        # CORREÇÃO CRÍTICA: Criar entrada no backup para Activity substituída no inventário
+        # Isto garante que a Activity mantém os valores corretos quando for reativada
+        if activity_original_stats and hasattr(self.dashboard, 'inventario'):
+            # Criar mapeamento de valores preservados para Activities no inventário
+            if not hasattr(self.dashboard, '_activity_preserved_stats'):
+                self.dashboard._activity_preserved_stats = {}
+            
+            # Guardar valores da Activity pelo caminho da carta
+            self.dashboard._activity_preserved_stats[activity_substituida] = activity_original_stats.copy()
+            print(f"DEBUG: [TROCA] Valores da Activity original preservados no mapeamento: {activity_substituida} -> {activity_original_stats}")
+            
+            # Também preservar no backup do root para persistir entre turnos
+            if hasattr(root, '_activity_preserved_stats'):
+                root._activity_preserved_stats[activity_substituida] = activity_original_stats.copy()
+            else:
+                root._activity_preserved_stats = {activity_substituida: activity_original_stats.copy()}
+            print(f"DEBUG: [TROCA] Valores da Activity também preservados no backup root")
+        
+        # 4. Atualizar seleção do carrossel se necessário
+        if hasattr(self.dashboard, 'selected_card_idx') and self.dashboard.selected_card_idx == idx_activity:
+            self.dashboard.selected_carousel_card = challenge_path
+            print(f"DEBUG: [TROCA] Seleção do carrossel atualizada para Challenge")
+        
+        # 5. Desabilitar botão Store (Challenge aceite)
+        self.dashboard.disable_store_button()
+        print(f"DEBUG: [TROCA] Botão Store desabilitado - Challenge aceite")
+        
+        # 6. CORREÇÃO: Marcar que substituição Challenge->Activity foi concluída
+        # Isto evita que _challenge_accepted seja resetado incorretamente
+        self.dashboard._substituicao_challenge_activity_concluida = True
+        print(f"DEBUG: [TROCA] Marcando substituição Challenge->Activity como concluída")
+        
+        # 7. Voltar para PlayerDashboard
+        self._voltar_para_playerdashboard_apos_troca()
+    
+    def _resetar_progresso_carrossel(self, idx_position, challenge_path):
+        """Reset dos valores de progresso para a posição específica do carrossel"""
+        print(f"DEBUG: [RESET] Resetando progresso para posição {idx_position}")
+        
+        # Obter message_size do Challenge para definir novo máximo de "To send"
+        try:
+            message_size = self.dashboard._get_card_message_size(challenge_path)
+            print(f"DEBUG: [RESET] Message size do Challenge: {message_size}")
+        except:
+            message_size = 20  # Valor padrão
+            print(f"DEBUG: [RESET] Usando message size padrão: {message_size}")
+        
+        # Reset dos stats para esta posição
+        if hasattr(self.dashboard, 'card_stats') and idx_position < len(self.dashboard.card_stats):
+            self.dashboard.card_stats[idx_position] = {
+                "To send": message_size,  # Novo valor inicial baseado no Challenge
+                "Rxd": 0,                 # Reset para 0
+                "Lost": 0                 # Reset para 0
+            }
+            print(f"DEBUG: [RESET] Stats resetados para posição {idx_position}: To send={message_size}, Rxd=0, Lost=0")
+        
+        # Atualizar barras de progresso se esta posição estiver selecionada
+        if (hasattr(self.dashboard, 'selected_card_idx') and 
+            self.dashboard.selected_card_idx == idx_position):
+            print(f"DEBUG: [RESET] Posição {idx_position} está selecionada - atualizando barras de progresso")
+            if hasattr(self.dashboard, '_update_progress_bars_from_card'):
+                self.dashboard._update_progress_bars_from_card(challenge_path)
+    
+    def _mostrar_interface_escolha_activity(self, challenge_path, activities_indices, page=0):
+        """Mostra interface para o jogador escolher qual Activity substituir"""
+        print(f"DEBUG: [ESCOLHA] Mostrando interface de escolha entre {len(activities_indices)} Activities - página {page}")
+        
+        # VERIFICAÇÃO DE SEGURANÇA: Garantir que esta função só é chamada em contexto válido
+        if not hasattr(self, 'dashboard') or not self.dashboard:
+            print(f"DEBUG: [ESCOLHA] ERRO - Dashboard não disponível, abortando escolha")
+            return
+        
+        if not challenge_path or not activities_indices:
+            print(f"DEBUG: [ESCOLHA] ERRO - Parâmetros inválidos, abortando escolha")
+            return
+        
+        # Verificar se a Store ainda está no contexto correto (evitar execução obsoleta)
+        if hasattr(self.dashboard, 'current_casa_tipo') and self.dashboard.current_casa_tipo != "challenges":
+            print(f"DEBUG: [ESCOLHA] AVISO - Casa atual não é Challenge ({self.dashboard.current_casa_tipo}), mas continuando...")
+        
+        # Limpar interface atual
+        for widget in self.winfo_children():
+            widget.destroy()
+        self.configure(bg="black")
+        
+        # Barra superior (igual à Store) com fallback se imagem não existir
+        try:
+            awning_img = ImageTk.PhotoImage(Image.open(AWNING_IMG).resize((self.winfo_screenwidth(), 50)))
+            awning_label = tk.Label(self, image=awning_img, bg="black")
+            awning_label.image = awning_img
+            awning_label.pack(pady=(0, 10), fill="x")
+        except Exception as e:
+            print(f"DEBUG: Erro ao carregar AWNING_IMG '{AWNING_IMG}': {e} - usando header simples")
+            header_frame = tk.Frame(self, bg="#DC8392", height=50)
+            header_frame.pack(pady=(0, 10), fill="x")
+
+        # Label pequeno à esquerda do logo
+        left_label = tk.Label(self, text="••••", font=("Helvetica", 12, "bold"), bg="#DC8392", fg="#DC8392")
+        left_label.place(relx=0.46, y=10, anchor="center")
+
+        # Logo NetMaster posicionado independentemente
+        try:
+            logo_img = ImageTk.PhotoImage(Image.open(os.path.join(IMG_DIR, "logo_netmaster_store.png")).resize((24, 24)))
+            logo_lbl = tk.Label(self, image=logo_img, bg="#DC8392")
+            logo_lbl.image = logo_img
+            logo_lbl.place(relx=0.5, y=10, anchor="center")
+        except Exception as e:
+            print(f"DEBUG: Erro ao carregar logo: {e}")
+        
+        # Label largo à direita do logo para cobrir área amarela
+        right_logo_label = tk.Label(self, text="     ", font=("Helvetica", 12, "bold"), bg="#DC8392", fg="#DC8392")
+        right_logo_label.place(relx=0.53, y=10, anchor="w")
+        
+        # Label adicional para garantir cobertura completa
+        extra_cover_label = tk.Label(self, text="     ", font=("Helvetica", 10), bg="#DC8392", fg="#DC8392")
+        extra_cover_label.place(relx=0.55, y=10, anchor="w")
+        
+        # Texto "Store" posicionado independentemente
+        store_name_lbl = tk.Label(self, text="Store", 
+                                 font=("Helvetica", 15, "bold"), bg="#DC8392", fg="black")
+        store_name_lbl.place(relx=0.5, y=30, anchor="center")
+        
+        # Label pequeno à direita do nome Store
+        right_store_label = tk.Label(self, text="•", font=("Helvetica", 12, "bold"), bg="#DC8392", fg="#DC8392")
+        right_store_label.place(relx=0.6, y=30, anchor="center")
+        
+        # Título (movido mais para cima)
+        title_lbl = tk.Label(self, text="Choose Activity to be replaced", 
+                           font=("Helvetica", 17, "bold"), fg="white", bg="black")
+        title_lbl.pack(pady=(5, 5))
+        
+        # === SISTEMA GRID IGUAL À PÁGINA DE COMPRA ===
+        # Paginação
+        cards_per_page = 4  # Igual à página de compra
+        total_pages = max(1, (len(activities_indices) + cards_per_page - 1) // cards_per_page)
+        page = max(0, min(page, total_pages - 1))
+        start_idx = page * cards_per_page
+        end_idx = start_idx + cards_per_page
+        activities_page = activities_indices[start_idx:end_idx]
+        
+        # Frame para as cartas (centralizado, movido mais para cima)
+        self.matriz_frame = tk.Frame(self, bg="black")
+        self.matriz_frame.place(relx=0.5, rely=0.55, anchor="center")  # Movido mais para cima
+        
+        n_col = 2  # 2 colunas
+        card_w, card_h = 70, 100  # Tamanho menor para não tapar o título
+        
+        # Callback para fullscreen das cartas
+        def make_fullscreen_callback(activity_path, idx_carrossel, challenge_path, activities_indices, page):
+            def callback(event=None):
+                print(f"DEBUG: [ESCOLHA] Mostrando Activity {idx_carrossel} em fullscreen")
+                self._mostrar_activity_fullscreen_substituicao(activity_path, idx_carrossel, challenge_path, activities_indices, page)
+            return callback
+        
+        # Criar grid de cartas igual à página de compra
+        for i, idx_carrossel in enumerate(activities_page):
+            activity_path = self.dashboard.cards[idx_carrossel]
+            row = i // n_col
+            col = i % n_col
+            
+            # CORREÇÃO CRÍTICA: Obter valores CORRETOS de progresso desta Activity 
+            # Usar sempre os valores preservados do dashboard primeiro
+            card_stats = {"To send": 0, "Rxd": 0, "Lost": 0}  # Fallback inicial
+            
+            # DEBUG EXTRA: Verificar estado do card_stats
+            print(f"DEBUG: [VALORES-DEBUG] Activity {idx_carrossel} - verificando card_stats:")
+            print(f"DEBUG: [VALORES-DEBUG]   hasattr(dashboard, 'card_stats'): {hasattr(self.dashboard, 'card_stats')}")
+            if hasattr(self.dashboard, 'card_stats'):
+                print(f"DEBUG: [VALORES-DEBUG]   len(card_stats): {len(self.dashboard.card_stats)}")
+                print(f"DEBUG: [VALORES-DEBUG]   card_stats[{idx_carrossel}]: {self.dashboard.card_stats[idx_carrossel] if idx_carrossel < len(self.dashboard.card_stats) else 'INDEX OUT OF RANGE'}")
+            
+            # CORREÇÃO PRINCIPAL: Usar valores preservados do dashboard PRIMEIRO
+            # Depois tentar valores preservados da Activity em caso de troca recente
+            if (hasattr(self.dashboard, 'card_stats') and 
+                idx_carrossel < len(self.dashboard.card_stats)):
+                
+                # Fazer cópia dos valores preservados (não referenciar diretamente)
+                preserved_values = self.dashboard.card_stats[idx_carrossel]
+                card_stats = {
+                    "To send": preserved_values.get("To send", 0),
+                    "Rxd": preserved_values.get("Rxd", 0), 
+                    "Lost": preserved_values.get("Lost", 0)
+                }
+                
+                print(f"DEBUG: [VALORES] Activity {idx_carrossel}: To send={card_stats['To send']}, Rxd={card_stats['Rxd']}, Lost={card_stats['Lost']}")
+                
+                # VALIDAÇÃO: Se todos os valores são zero, pode ser carta nova - aplicar message_size
+                if (card_stats["To send"] == 0 and card_stats["Rxd"] == 0 and card_stats["Lost"] == 0):
+                    print(f"DEBUG: [VALORES-CHECK] Activity {idx_carrossel} tem valores zero - verificando se é carta nova")
+                    try:
+                        message_size = self.dashboard._get_card_message_size(activity_path)
+                        # Se message_size > 0, significa que deveria ter valores - inicializar
+                        if message_size > 0:
+                            card_stats = {"To send": message_size, "Rxd": 0, "Lost": 0}
+                            # Atualizar também no dashboard para manter sincronizado
+                            self.dashboard.card_stats[idx_carrossel] = card_stats.copy()
+                            print(f"DEBUG: [VALORES-INIT] Activity {idx_carrossel} inicializada: To send={message_size}, Rxd=0, Lost=0")
+                    except Exception as e:
+                        print(f"DEBUG: [VALORES-INIT] Erro ao obter message_size: {e}")
+                else:
+                    print(f"DEBUG: [VALORES-OK] Activity {idx_carrossel} tem valores preservados válidos")
+            
+            # CORREÇÃO CRÍTICA: Verificar valores preservados de Activities que foram substituídas
+            elif (hasattr(self.dashboard, '_activity_preserved_stats') and 
+                  activity_path in self.dashboard._activity_preserved_stats):
+                
+                preserved_activity_stats = self.dashboard._activity_preserved_stats[activity_path]
+                card_stats = {
+                    "To send": preserved_activity_stats.get("To send", 0),
+                    "Rxd": preserved_activity_stats.get("Rxd", 0),
+                    "Lost": preserved_activity_stats.get("Lost", 0)
+                }
+                print(f"DEBUG: [VALORES-PRESERVED] Activity {idx_carrossel} usando valores preservados da troca: To send={card_stats['To send']}, Rxd={card_stats['Rxd']}, Lost={card_stats['Lost']}")
+            
+            # CORREÇÃO CRÍTICA: Verificar backup do root se disponível
+            elif (hasattr(self.dashboard.master, '_activity_preserved_stats') and 
+                  activity_path in self.dashboard.master._activity_preserved_stats):
+                
+                root_preserved_stats = self.dashboard.master._activity_preserved_stats[activity_path]
+                card_stats = {
+                    "To send": root_preserved_stats.get("To send", 0),
+                    "Rxd": root_preserved_stats.get("Rxd", 0),
+                    "Lost": root_preserved_stats.get("Lost", 0)
+                }
+                print(f"DEBUG: [VALORES-ROOT-PRESERVED] Activity {idx_carrossel} usando valores preservados do root: To send={card_stats['To send']}, Rxd={card_stats['Rxd']}, Lost={card_stats['Lost']}")
+                    
+            else:
+                print(f"DEBUG: [VALORES-FALLBACK] Activity {idx_carrossel}: card_stats não disponível no dashboard")
+                # Tentar obter message_size da carta como fallback completo
+                try:
+                    message_size = self.dashboard._get_card_message_size(activity_path)
+                    card_stats = {"To send": message_size, "Rxd": 0, "Lost": 0}
+                    print(f"DEBUG: [VALORES-FALLBACK] Activity {idx_carrossel}: To send={message_size}, Rxd=0, Lost=0")
+                except Exception as e:
+                    print(f"DEBUG: [VALORES-FALLBACK] Erro ao obter message_size: {e}")
+                    card_stats = {"To send": 0, "Rxd": 0, "Lost": 0}
+            
+            # Frame para carta + valores
+            card_frame = tk.Frame(self.matriz_frame, bg="black")
+            card_frame.grid(row=row, column=col, padx=8, pady=8)
+            
+            # Carregar imagem da Activity
+            try:
+                img = ImageTk.PhotoImage(Image.open(activity_path).resize((card_w, card_h)))
+            except:
+                print(f"DEBUG: Erro ao carregar Activity {activity_path}")
+                continue
+            
+            # Criar label da carta igual à página de compra
+            carta_lbl = tk.Label(card_frame, image=img, bg="black", cursor="hand2")
+            carta_lbl.image = img  # Manter referência
+            carta_lbl.pack()
+            carta_lbl.bind("<Button-1>", make_fullscreen_callback(activity_path, idx_carrossel, challenge_path, activities_indices, page))
+            
+            # Valores por baixo da carta (iguais à página de compra)
+            values_frame = tk.Frame(card_frame, bg="black")
+            values_frame.pack(pady=(2, 0))
+            
+            to_send_lbl = tk.Label(values_frame, text=f"To send: {card_stats['To send']}", 
+                                 font=("Helvetica", 10, "bold"), fg="#8A2BE2", bg="black")
+            to_send_lbl.pack()
+            
+            rxd_lbl = tk.Label(values_frame, text=f"Rxd: {card_stats['Rxd']}", 
+                             font=("Helvetica", 10, "bold"), fg="#8A2BE2", bg="black")
+            rxd_lbl.pack()
+            
+            lost_lbl = tk.Label(values_frame, text=f"Lost: {card_stats['Lost']}", 
+                              font=("Helvetica", 10, "bold"), fg="#8A2BE2", bg="black")
+            lost_lbl.pack()
+        
+        # Setas de navegação iguais à página de compra
+        if total_pages > 1:
+            seta_x = 0.90  # Posição igual à página de compra
+            if page > 0:
+                seta_cima = tk.Button(self, text="▲", font=("Helvetica", 18, "bold"), bg="#222", fg="white", width=2,
+                                    command=lambda: self._mostrar_interface_escolha_activity(challenge_path, activities_indices, page - 1))
+                seta_cima.place(relx=seta_x, rely=0.38, anchor="center")  # Posição igual à página de compra
+            if page < total_pages - 1:
+                seta_baixo = tk.Button(self, text="▼", font=("Helvetica", 18, "bold"), bg="#222", fg="white", width=2,
+                                     command=lambda: self._mostrar_interface_escolha_activity(challenge_path, activities_indices, page + 1))
+                seta_baixo.place(relx=seta_x, rely=0.62, anchor="center")  # Posição igual à página de compra
+        
+        # Barra inferior com imagem BelowBar_store.png (com fallback)
+        try:
+            belowbar_img = ImageTk.PhotoImage(Image.open(BELOWBAR_IMG).resize((self.winfo_screenwidth(), 50)))
+            belowbar_label = tk.Label(self, image=belowbar_img, bg="black")
+            belowbar_label.image = belowbar_img
+            belowbar_label.pack(side="bottom", fill="x")
+        except Exception as e:
+            print(f"DEBUG: Erro ao carregar BELOWBAR_IMG '{BELOWBAR_IMG}': {e} - usando footer simples")
+            footer_frame = tk.Frame(self, bg="#DC8392", height=50)
+            footer_frame.pack(side="bottom", fill="x")
+
+        # Mover saldo e piccoin para parte inferior direita (por cima do BelowBar)
+        coin_img_bottom = ImageTk.PhotoImage(Image.open(COIN_IMG).resize((24, 24)))
+        coin_lbl_bottom = tk.Label(self, image=coin_img_bottom, bg="#DC8392")
+        coin_lbl_bottom.image = coin_img_bottom
+        coin_lbl_bottom.place(x=self.winfo_screenwidth()-100, rely=1.0, y=-25, anchor="w")
+        
+        saldo_lbl_bottom = tk.Label(self, text=f"{self.saldo}", font=("Helvetica", 16, "bold"), fg="black", bg="#DC8392")
+        saldo_lbl_bottom.place(x=self.winfo_screenwidth()-70, rely=1.0, y=-25, anchor="w")
+    
+    def _mostrar_activity_fullscreen_substituicao(self, activity_path, activity_idx, challenge_path, activities_indices, page):
+        """Mostra Activity em fullscreen com botões X (cinza) e ✓ (verde) para substituição"""
+        print(f"DEBUG: [FULLSCREEN] Mostrando Activity {activity_idx} em fullscreen para substituição")
+        
+        # Limpar interface atual
+        for widget in self.winfo_children():
+            widget.destroy()
+        self.configure(bg="black")
+        
+        # Carregar e mostrar imagem da Activity em fullscreen
+        try:
+            pil_img = Image.open(activity_path)
+            img_w, img_h = pil_img.size
+            max_w, max_h = self.winfo_screenwidth(), self.winfo_screenheight()
+            ratio = min(max_w/img_w, max_h/img_h)
+            new_w, new_h = int(img_w*ratio), int(img_h*ratio)
+            pil_img = pil_img.resize((new_w, new_h), Image.Resampling.LANCZOS)
+            
+            carta_img = ImageTk.PhotoImage(pil_img)
+            carta_real_lbl = tk.Label(self, image=carta_img, bg="black", borderwidth=0, highlightthickness=0)
+            carta_real_lbl.image = carta_img
+            carta_real_lbl.place(relx=0.5, rely=0.5, anchor="center")
+            
+        except Exception as e:
+            print(f"DEBUG: Erro ao carregar carta: {e}")
+            # Mostrar placeholder em caso de erro
+            error_lbl = tk.Label(self, text="Error loading card", font=("Helvetica", 20), fg="red", bg="black")
+            error_lbl.place(relx=0.5, rely=0.5, anchor="center")
+        
+        # Botão X (cinza) no canto superior esquerdo - cancelar substituição
+        def cancelar_substituicao():
+            print(f"DEBUG: [FULLSCREEN] Substituição cancelada - voltando para seleção")
+            self._mostrar_interface_escolha_activity(challenge_path, activities_indices, page)
+        
+        btn_cancel = tk.Button(self, text="✖", font=("Helvetica", 24, "bold"), 
+                             bg="#AAAAAA", fg="white", width=2, height=1,
+                             borderwidth=0, highlightthickness=0, command=cancelar_substituicao, 
+                             cursor="hand2", activebackground="#CCCCCC")
+        btn_cancel.place(relx=0.02, rely=0, anchor="nw")
+        
+        # Botão ✓ (verde) no canto superior direito - confirmar substituição
+        def confirmar_substituicao():
+            print(f"DEBUG: [FULLSCREEN] Substituição confirmada - mostrando confirmação final")
+            self._mostrar_confirmacao_substituicao(challenge_path, activity_idx, activity_path, activities_indices, page)
+        
+        btn_confirm = tk.Button(self, text="✓", font=("Helvetica", 24, "bold"), 
+                              bg="#4CAF50", fg="white", width=2, height=1,
+                              borderwidth=0, highlightthickness=0, command=confirmar_substituicao, 
+                              cursor="hand2", activebackground="#66BB6A")
+        btn_confirm.place(relx=0.98, rely=0, anchor="ne")
+    
+    def _mostrar_confirmacao_substituicao(self, challenge_path, activity_idx, activity_path, activities_indices, page):
+        """Mostra página de confirmação final com Yes/No"""
+        print(f"DEBUG: [CONFIRMACAO] Mostrando confirmação final para substituir Activity {activity_idx}")
+        
+        # VERIFICAÇÃO DE SEGURANÇA: Garantir que esta função só é chamada em contexto válido
+        if not hasattr(self, 'dashboard') or not self.dashboard:
+            print(f"DEBUG: [CONFIRMACAO] ERRO - Dashboard não disponível, abortando confirmação")
+            return
+        
+        if not challenge_path or not activity_path:
+            print(f"DEBUG: [CONFIRMACAO] ERRO - Parâmetros inválidos, abortando confirmação")
+            return
+        
+        # Verificar se a Store ainda está no contexto correto (evitar execução obsoleta)
+        if hasattr(self.dashboard, 'current_casa_tipo') and self.dashboard.current_casa_tipo != "challenges":
+            print(f"DEBUG: [CONFIRMACAO] AVISO - Casa atual não é Challenge ({self.dashboard.current_casa_tipo}), mas continuando...")
+        
+        # Limpar interface atual
+        for widget in self.winfo_children():
+            widget.destroy()
+        self.configure(bg="black")
+        
+        # Barra superior (igual à confirmação de compra) com fallback
+        try:
+            awning_img = ImageTk.PhotoImage(Image.open(AWNING_IMG).resize((self.winfo_screenwidth(), 50)))
+            awning_label = tk.Label(self, image=awning_img, bg="black")
+            awning_label.image = awning_img
+            awning_label.pack(pady=(0, 10), fill="x")
+        except Exception as e:
+            print(f"DEBUG: Erro ao carregar AWNING_IMG '{AWNING_IMG}': {e} - usando header simples")
+            header_frame = tk.Frame(self, bg="#DC8392", height=50)
+            header_frame.pack(pady=(0, 10), fill="x")
+
+        # Label pequeno à esquerda do logo
+        left_label = tk.Label(self, text="••••", font=("Helvetica", 12, "bold"), bg="#DC8392", fg="#DC8392")
+        left_label.place(relx=0.46, y=10, anchor="center")
+
+        # Logo NetMaster posicionado independentemente
+        try:
+            logo_img = ImageTk.PhotoImage(Image.open(os.path.join(IMG_DIR, "logo_netmaster_store.png")).resize((24, 24)))
+            logo_lbl = tk.Label(self, image=logo_img, bg="#DC8392")
+            logo_lbl.image = logo_img
+            logo_lbl.place(relx=0.5, y=10, anchor="center")
+        except Exception as e:
+            print(f"DEBUG: Erro ao carregar logo: {e}")
+        
+        # Label largo à direita do logo para cobrir área amarela
+        right_logo_label = tk.Label(self, text="     ", font=("Helvetica", 12, "bold"), bg="#DC8392", fg="#DC8392")
+        right_logo_label.place(relx=0.53, y=10, anchor="w")
+        
+        # Label adicional para garantir cobertura completa
+        extra_cover_label = tk.Label(self, text="     ", font=("Helvetica", 10), bg="#DC8392", fg="#DC8392")
+        extra_cover_label.place(relx=0.55, y=10, anchor="w")
+        
+        # Texto "Store" posicionado independentemente
+        store_name_lbl = tk.Label(self, text="Store", 
+                                 font=("Helvetica", 15, "bold"), bg="#DC8392", fg="black")
+        store_name_lbl.place(relx=0.5, y=30, anchor="center")
+        
+        # Label pequeno à direita do nome Store
+        right_store_label = tk.Label(self, text="•", font=("Helvetica", 12, "bold"), bg="#DC8392", fg="#DC8392")
+        right_store_label.place(relx=0.6, y=30, anchor="center")
+        
+        # Frame de confirmação (igual à confirmação de compra)
+        confirm_frame = tk.Frame(self, bg="black")
+        confirm_frame.pack(expand=True)
+        
+        # Pergunta de confirmação (igual à compra)
+        tk.Label(confirm_frame, text="Are you sure you want to replace?", 
+                font=("Helvetica", 16, "bold"), fg="white", bg="black").pack(pady=(40, 20))
+        
+        # Informação sobre a substituição
+        tk.Label(confirm_frame, text=f"Activity at User {activity_idx + 1} will be replaced", 
+                font=("Helvetica", 16), fg="yellow", bg="black").pack(pady=(0, 10))
+        
+        # Valor da substituição (similar ao valor da carta na compra)
+        value_frame = tk.Frame(confirm_frame, bg="black")
+        value_frame.pack(pady=(0, 30))
+        
+        value_text_lbl = tk.Label(value_frame, text="Progress will be: ", 
+                                 font=("Helvetica", 16), fg="white", bg="black")
+        value_text_lbl.pack(side="left")
+        
+        value_amount_lbl = tk.Label(value_frame, text="LOST", 
+                                   font=("Helvetica", 16, "bold"), fg="#FF6666", bg="black")
+        value_amount_lbl.pack(side="left", padx=(5, 5))
+        
+        # Ícone de aviso (em vez do ícone da moeda)
+        warning_lbl = tk.Label(value_frame, text="⚠️", font=("Helvetica", 20), bg="black")
+        warning_lbl.pack(side="left")
+        
+        # Frame para botões (igual à confirmação de compra)
+        btns_frame = tk.Frame(confirm_frame, bg="black")
+        btns_frame.pack()
+        
+        def confirmar_substituicao():
+            print(f"DEBUG: [CONFIRMACAO] Substituição confirmada - executando troca")
+            self._executar_troca_challenge_activity(challenge_path, activity_idx)
+        
+        def cancelar_substituicao():
+            print(f"DEBUG: [CONFIRMACAO] Substituição cancelada - voltando para página de seleção")
+            
+            # VERIFICAÇÃO DE SEGURANÇA: Evitar loops infinitos
+            if not hasattr(self, 'dashboard') or not self.dashboard:
+                print(f"DEBUG: [CONFIRMACAO] ERRO - Dashboard não disponível durante cancelamento")
+                return
+            
+            if hasattr(self.dashboard, 'current_casa_tipo') and self.dashboard.current_casa_tipo != "challenges":
+                print(f"DEBUG: [CONFIRMACAO] AVISO - Casa atual não é Challenge, não deve voltar para seleção de Activities")
+                # Em vez de voltar para seleção, volta para a Store principal
+                self.voltar_para_store()
+                return
+            
+            # Voltar para a página de seleção de Activities em vez de cancelar completamente
+            self._mostrar_interface_escolha_activity(challenge_path, activities_indices, page)
+        
+        # Botões Yes/No (iguais à confirmação de compra)
+        btn_no = tk.Button(btns_frame, text="No", font=("Helvetica", 14, "bold"), 
+                         bg="#FF4444", fg="white", width=8, height=2,
+                         command=cancelar_substituicao, cursor="hand2")
+        btn_no.pack(side=tk.LEFT, padx=10)
+        
+        btn_yes = tk.Button(btns_frame, text="Yes", font=("Helvetica", 14, "bold"), 
+                          bg="#44AA44", fg="white", width=8, height=2,
+                          command=confirmar_substituicao, cursor="hand2")
+        btn_yes.pack(side=tk.RIGHT, padx=10)
+        
+        # Barra inferior com imagem BelowBar_store.png (com fallback)
+        try:
+            belowbar_img = ImageTk.PhotoImage(Image.open(BELOWBAR_IMG).resize((self.winfo_screenwidth(), 50)))
+            belowbar_label = tk.Label(self, image=belowbar_img, bg="black")
+            belowbar_label.image = belowbar_img
+            belowbar_label.pack(side="bottom", fill="x")
+        except Exception as e:
+            print(f"DEBUG: Erro ao carregar BELOWBAR_IMG '{BELOWBAR_IMG}': {e} - usando footer simples")
+            footer_frame = tk.Frame(self, bg="#DC8392", height=50)
+            footer_frame.pack(side="bottom", fill="x")
+
+        # Mover saldo e piccoin para parte inferior direita (por cima do BelowBar)
+        coin_img_bottom = ImageTk.PhotoImage(Image.open(COIN_IMG).resize((24, 24)))
+        coin_lbl_bottom = tk.Label(self, image=coin_img_bottom, bg="#DC8392")
+        coin_lbl_bottom.image = coin_img_bottom
+        coin_lbl_bottom.place(x=self.winfo_screenwidth()-100, rely=1.0, y=-25, anchor="w")
+        
+        saldo_lbl_bottom = tk.Label(self, text=f"{self.saldo}", font=("Helvetica", 16, "bold"), fg="black", bg="#DC8392")
+        saldo_lbl_bottom.place(x=self.winfo_screenwidth()-70, rely=1.0, y=-25, anchor="w")
+    
+    def _voltar_para_playerdashboard_apos_troca(self):
+        """Volta para o PlayerDashboard após completar a troca"""
+        print(f"DEBUG: [TROCA] Voltando para PlayerDashboard após troca")
+        
+        try:
+            # Esconder a Store
+            self.withdraw()
+            print("DEBUG: [TROCA] Store escondida")
+            
+            # CRÍTICO: Limpar COMPLETAMENTE o estado da Store para evitar reaparição da página de substituição
+            self._limpar_estado_completo_store()
+            
+            # Mostrar o PlayerDashboard
+            self.dashboard.deiconify()
+            self.dashboard.state('normal')
+            self.dashboard.lift()
+            self.dashboard.focus_force()
+            print("DEBUG: [TROCA] PlayerDashboard mostrado")
+            
+            # Chamar a interface principal do PlayerDashboard sem botão Store
+            self.dashboard.playerdashboard_interface(
+                self.dashboard.player_name,
+                self.dashboard.saldo,
+                self.dashboard.other_players,
+                show_store_button=False  # Challenge aceite = sem botão Store
+            )
+            print("DEBUG: [TROCA] Interface PlayerDashboard carregada com sucesso")
+        except Exception as e:
+            print(f"DEBUG: [TROCA] Erro ao voltar para PlayerDashboard: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    def _limpar_estado_completo_store(self):
+        """
+        Limpa COMPLETAMENTE o estado da Store após uma substituição Challenge→Activity
+        para garantir que a página de substituição não reapareça em turnos futuros
+        """
+        print(f"DEBUG: [LIMPEZA] Iniciando limpeza completa do estado da Store")
+        
+        # 1. Limpar estados de Challenge transferido do PlayerDashboard
+        if hasattr(self, '_store_challenge_carta_path'):
+            old_path = self._store_challenge_carta_path
+            self._store_challenge_carta_path = None
+            print(f"DEBUG: [LIMPEZA] _store_challenge_carta_path limpo: {old_path} -> None")
+        
+        if hasattr(self, '_store_challenge_carta_tipo'):
+            old_tipo = self._store_challenge_carta_tipo
+            self._store_challenge_carta_tipo = None
+            print(f"DEBUG: [LIMPEZA] _store_challenge_carta_tipo limpo: {old_tipo} -> None")
+        
+        # 2. Limpar estados de carta fullscreen
+        if hasattr(self, 'fullscreen_carta_path'):
+            old_path = self.fullscreen_carta_path
+            self.fullscreen_carta_path = None
+            print(f"DEBUG: [LIMPEZA] fullscreen_carta_path limpo: {old_path} -> None")
+        
+        if hasattr(self, 'fullscreen_carta_tipo'):
+            old_tipo = self.fullscreen_carta_tipo
+            self.fullscreen_carta_tipo = None
+            print(f"DEBUG: [LIMPEZA] fullscreen_carta_tipo limpo: {old_tipo} -> None")
+        
+        # 3. Limpar estados de backup
+        backup_attrs = [
+            '_backup_fullscreen_carta_path',
+            '_backup_fullscreen_carta_tipo',
+            '_original_carta_path',
+            '_original_carta_tipo'
+        ]
+        
+        for attr in backup_attrs:
+            if hasattr(self, attr):
+                old_value = getattr(self, attr)
+                setattr(self, attr, None)
+                print(f"DEBUG: [LIMPEZA] {attr} limpo: {old_value} -> None")
+        
+        # 4. CORREÇÃO CRÍTICA: Limpar estados de substituição Challenge→Activity
+        # IMPORTANTE: Limpar TODAS as variáveis que possam causar reaparição da página de confirmação
+        substitution_attrs = [
+            '_challenge_substitution_path',
+            '_challenge_substitution_activities', 
+            '_substitution_activity_idx',
+            '_substitution_activity_path',
+            '_substitution_confirmed',
+            '_activity_indices',
+            '_current_challenge_path',
+            # ADICIONAIS: Variáveis que podem persistir da interface de escolha
+            '_choice_challenge_path',
+            '_choice_activities_indices',
+            '_choice_current_page',
+            '_last_substitution_state',
+            '_pending_substitution'
+        ]
+        
+        for attr in substitution_attrs:
+            if hasattr(self, attr):
+                old_value = getattr(self, attr)
+                setattr(self, attr, None)
+                print(f"DEBUG: [LIMPEZA] {attr} limpo: {old_value} -> None")
+        
+        # CRITICAL: Verificar se existe algum callback ou estado ativo que possa restaurar a página
+        print(f"DEBUG: [LIMPEZA] Verificando se há widgets filho que possam causar problemas...")
+        try:
+            # FORÇA A DESTRUIÇÃO DE TODOS OS WIDGETS FILHOS ANTES DA LIMPEZA
+            for widget in self.winfo_children():
+                try:
+                    widget.destroy()
+                except:
+                    pass
+            # Forçar update para garantir que todos os widgets foram destruídos
+            self.update_idletasks()
+            print(f"DEBUG: [LIMPEZA] Todos os widgets filho destruídos")
+        except Exception as e:
+            print(f"DEBUG: [LIMPEZA] Erro ao destruir widgets: {e}")
+        
+        # FORCE CLEANUP: Garantir que não há referências pendentes
+        print(f"DEBUG: [LIMPEZA] Forçando limpeza de qualquer estado de interface ativa...")
+        if hasattr(self, '_active_interface_type'):
+            old_interface = self._active_interface_type
+            self._active_interface_type = None
+            print(f"DEBUG: [LIMPEZA] _active_interface_type limpo: {old_interface} -> None")
+        
+        # ADICIONAL: Limpar qualquer callback pendente que possa estar preservado
+        callback_attrs = [
+            '_pending_callback',
+            '_active_callback',
+            '_substitution_callback',
+            '_confirmation_callback',
+            '_activity_selection_callback'
+        ]
+        
+        for attr in callback_attrs:
+            if hasattr(self, attr):
+                old_value = getattr(self, attr)
+                setattr(self, attr, None)
+                print(f"DEBUG: [LIMPEZA] {attr} limpo: {old_value} -> None")
+        
+        # 5. Limpar estados de navegação
+        navigation_attrs = [
+            'current_card_type',
+            'current_sell_type', 
+            'current_sell_page'
+        ]
+        
+        for attr in navigation_attrs:
+            if hasattr(self, attr):
+                old_value = getattr(self, attr)
+                setattr(self, attr, None)
+                print(f"DEBUG: [LIMPEZA] {attr} limpo: {old_value} -> None")
+        
+        # 6. CORREÇÃO: NÃO limpar casa_tipo e casa_cor se vieram do PlayerDashboard
+        # Essas informações são necessárias para o funcionamento correto da Store
+        # e agora são automaticamente obtidas do PlayerDashboard no rebuild_store_interface
+        # if hasattr(self, 'casa_tipo'):
+        #     old_tipo = self.casa_tipo
+        #     self.casa_tipo = None
+        #     print(f"DEBUG: [LIMPEZA] casa_tipo limpo: {old_tipo} -> None")
+        
+        # if hasattr(self, 'casa_cor'):
+        #     old_cor = self.casa_cor
+        #     self.casa_cor = None
+        #     print(f"DEBUG: [LIMPEZA] casa_cor limpo: {old_cor} -> None")
+        
+        print(f"DEBUG: [LIMPEZA] casa_tipo e casa_cor preservados - serão obtidos do PlayerDashboard se necessário")
+        
+        # 7. Limpar flags de Challenge aceite no PlayerDashboard para próximo turno
+        if hasattr(self.dashboard, '_challenge_accepted'):
+            old_flag = self.dashboard._challenge_accepted
+            self.dashboard._challenge_accepted = False
+            print(f"DEBUG: [LIMPEZA] PlayerDashboard _challenge_accepted resetado: {old_flag} -> False")
+        
+        if hasattr(self.dashboard, '_store_button_disabled'):
+            old_flag = self.dashboard._store_button_disabled
+            self.dashboard._store_button_disabled = False
+            print(f"DEBUG: [LIMPEZA] PlayerDashboard _store_button_disabled resetado: {old_flag} -> False")
+        
+        print(f"DEBUG: [LIMPEZA] Limpeza completa do estado da Store concluída")
+        print(f"DEBUG: [LIMPEZA] Store pronta para próximo turno - sem dados obsoletos")

@@ -1,0 +1,45 @@
+Reward Activity
+
+Quando no campo To send de uma carta Activity chegar ao valor 0 ao clicar no botão seta e esta (carta Activity em questão) estar destacada roxo,  o overlay de congratulação aparece e a seguinte conta de Reward é feita com base no seguinte:
+
+n_Rxd -> valor que está presente no campo Rxd na altura em que o campo To send chega ao valor 0
+
+n_Lost -> valor que está presente no campo Lost na altura em que o campo To send chega ao valor 0
+
+Activity_1 (Home Surveillance):
+
+Reward =  n_Rxd x reward_per_packet
+
+Activity_2 - 3 (Home Surveillance):
+
+Reward = [n_Rxd x reward_per_packet] + [n_Rxd x packet_bonus (só acontece se o valor de n_Rxd for maior ou igual ao valor do campo bonus_condition da respetiva carta)]
+
+Activity_4 (Home Surveillance):
+
+Reward = [n_Rxd x reward_per_packet] + [ message_received (o valor deste campo presente na carta só é adicionado à reward caso se verifique que o valor do bonus_condition é igual ao valor do campo Lost da carta)]
+
+Activity_5 (Home Safety):
+
+Reward = message_received (assim que o valor do campo Rxd for igual ao valor do campo message_size da carta em questão)
+
+Activity_6 - 7 (Home Safety): 
+
+Reward = message_received (assim que o valor do campo Rxd for igual ao valor do campo message_size da carta em questão) - [n_Lost x penalty_per_packet (só acontece se o valor de n_Lost for menor ou igual que o valor do campo penalty_condition da respetiva carta)]
+
+Activity_8 (Short Message):Reward = message_received (assim que o valor do campo Rxd for igual ao valor do campo message_size da carta em questão)
+
+Activity_9 (Short Message):Reward = message_received (assim que o valor do campo Rxd for igual ao valor do campo message_size da carta em questão) - [n_Lost x penalty_per_packet (só acontece se o valor de n_Lost for maior ou igual que o valor do campo penalty_condition da respetiva carta)]
+
+Activity_10 (Gaming):
+
+Reward = n_Rxd x reward_per_packet 
+
+Activity_11 (Gaming):
+
+Reward =  [n_Rxd x reward_per_packet] + [message_received (caso se verifique que o valor de n_Rxd é igual ao valor de message_size da carta em questão)]
+
+Activity_12 (File Transfer):
+
+Reward = message_received (assim que o valor do campo Rxd for igual ao valor do campo message_size da carta em questão)
+
+De mencionar que depois de clicar no botão End Turn a carta Activity depois volta para o inventário das cartas Activity da Store, caso se tenha verificado que o valor do campo To send de uma carta Activity tenha chegado ao valor 0.

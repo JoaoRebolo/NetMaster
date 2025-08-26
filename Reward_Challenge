@@ -1,0 +1,19 @@
+Reward Challenge
+
+Após o número de turnos de jogada do jogador (aonde primeiro turno tem valor 1 e valor incrementa à medida que volta sempre para a página de lançamento de dado)  ser igual ao valor do campo n_turns de uma carta Challenge ao clicar no botão seta e esta estar destacada roxo,  o overlay de congratulação aparece e a seguinte conta de Reward é feita com base no seguinte:
+
+Challenge_1 - 4 (Message Mission):Reward = message_received (caso o valor final do To send tenha ficado a 0 e o valor final do Rxd tenha sido igual ao do message_size da carta em questão até ao fim do valor n_turns atribuido para a carta em questão)
+
+Challenge_5 - 7 (Message Sprint):
+
+Reward = [time_limit_bonus (caso o valor final do To send tenha ficado a 0 e o valor final do Rxd tenha sido igual ao do message_size da carta em questão até ao fim do valor time_limit atribuido para a carta em questão )] + [messsage_received (caso o valor final do To send tenha ficado a 0 e o valor final do Rxd tenha sido igual ao do message_size da carta em questão até ao fim do valor n_turns atribuido para a carta em questão)]
+
+Challenge_8 - 10 (Jackpot):
+
+Reward = [n x reward_per_packet (aonde n é o número do valor do Rxd ao fim do valor n_turns atribuido para a carta em questão )] + [message_received_bonus (caso o valor final do To send tenha ficado a 0 e o valor final do Rxd tenha sido igual ao do message_size da carta em questão até ao fim do valor n_turns atribuido para a carta em questão)] 
+
+Challenge_11 - 14 (Packet Race):
+
+Reward = n x reward_per_packet (aonde n é o número do valor do Rxd ao fim do valor n_turns atribuido para a carta em questão )
+
+De mencionar que depois de clicar no botão End Turn a carta Challenge depois volta para o baralho das cartas Challenge da Store, caso se tenha verificado o número de turnos de jogada do jogador ser igual ao valor do campo n_turns da carta em questão.
