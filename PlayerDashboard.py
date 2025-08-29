@@ -27,10 +27,12 @@ from Store_v2 import StoreWindow
 # Importar sistema de integração da base de dados
 try:
     from card_integration import IntegratedCardDatabase
-    print("DEBUG: IntegratedCardDatabase importada com sucesso")
+    from cards_database import ActionType
+    print("DEBUG: IntegratedCardDatabase e ActionType importadas com sucesso")
 except ImportError as e:
-    print(f"DEBUG: ERRO ao importar IntegratedCardDatabase: {e}")
+    print(f"DEBUG: ERRO ao importar IntegratedCardDatabase ou ActionType: {e}")
     IntegratedCardDatabase = None
+    ActionType = None
 
 IMG_DIR = os.path.join(os.path.dirname(__file__), "img")
 # Verificar se existe no Raspberry Pi
@@ -1000,6 +1002,11 @@ class PlayerDashboard(tk.Toplevel):
     
     def _save_dashboard_state(self):
         """Salva o estado atual da interface principal do dashboard"""
+        # PROTEÇÃO: Não salvar estado se estivermos numa página especial
+        if getattr(self, '_in_router_selection_page', False):
+            print("DEBUG: [ESTADO] ⚠️ Salvamento de estado cancelado - estamos numa página de seleção de router")
+            return
+            
         print("DEBUG: [ESTADO] Salvando estado da interface principal...")
         
         # CORREÇÃO CRÍTICA: Preservar valores das barras ANTES de salvar estado
@@ -1442,6 +1449,11 @@ class PlayerDashboard(tk.Toplevel):
         
         # Executar restauração após a interface estar pronta (delay menor para restauração rápida)
         def restore_and_cleanup():
+            # PROTEÇÃO: Não executar se estivermos numa página especial
+            if getattr(self, '_in_router_selection_page', False):
+                print("DEBUG: [ESTADO] ⚠️ Restauração cancelada - estamos numa página de seleção de router")
+                return
+                
             restore_gestao_state()
             
             # LIMPEZA FINAL: Remover estado imediato após restauração completa
@@ -1557,6 +1569,16 @@ class PlayerDashboard(tk.Toplevel):
                     try:
                         files_in_path = os.listdir(path_attempt)
                         print(f"DEBUG: [add_starter_cards] Arquivos neutros encontrados: {files_in_path}")
+                        
+                        # ESPECIAL: Para Actions, verificar explicitamente se Action_61.png existe
+                        if card_type == "actions":
+                            action_61_path = os.path.join(path_attempt, "Action_61.png")
+                            print(f"DEBUG: [add_starter_cards] Verificação explícita Action_61.png em: {action_61_path}")
+                            print(f"DEBUG: [add_starter_cards] Action_61.png existe? {os.path.exists(action_61_path)}")
+                            if os.path.exists(action_61_path) and "Action_61.png" not in files_in_path:
+                                print(f"DEBUG: [add_starter_cards] ⚠️ PROBLEMA: Action_61.png existe no filesystem mas não retornado por listdir!")
+                                files_in_path.append("Action_61.png")  # Força a adição
+                        
                         card_files = [os.path.join(path_attempt, f) for f in files_in_path 
                                     if f.lower().endswith(('.png', '.jpg', '.jpeg'))]
                         print(f"DEBUG: [add_starter_cards] Arquivos de carta neutros filtrados: {[os.path.basename(f) for f in card_files]}")
@@ -1590,33 +1612,28 @@ class PlayerDashboard(tk.Toplevel):
                                 
                                 for card_file in card_files:
                                     filename = os.path.basename(card_file)
+                                    print(f"DEBUG: [add_starter_cards] Verificando arquivo {card_type}: {filename}")
                                     try:
                                         if card_type == "actions":
-                                            # Action_1.png -> action_1
-                                            match = re.search(r'Action_(\d+)\.', filename)
-                                            if match:
-                                                card_id = f"action_{match.group(1)}"
-                                                card_data = self.card_database.get_action(card_id)
-                                                if card_data:
-                                                    target = getattr(card_data, 'target', None)
-                                                    player_choice = getattr(card_data, 'player_choice', False)
-                                                    # Critério de filtragem: target do jogador OU player_choice=True
-                                                    if target == player_color or (target is None and player_choice):
-                                                        valid_cards.append(card_file)
-                                                        print(f"DEBUG: [add_starter_cards] Action VÁLIDA: {filename} (target={target}, player_choice={player_choice})")
+                                            # ESPECÍFICO: Incluir APENAS Action_61.png
+                                            if filename == "Action_61.png":
+                                                valid_cards.append(card_file)
+                                                print(f"DEBUG: [add_starter_cards] Action FORÇADA (Action_61): {filename}")
+                                            else:
+                                                print(f"DEBUG: [add_starter_cards] Action IGNORADA (não é Action_61): {filename}")
                                         elif card_type == "events":
                                             # Event_1.png -> event_1
                                             match = re.search(r'Event_(\d+)\.', filename)
                                             if match:
-                                                card_id = f"event_{match.group(1)}"
-                                                card_data = self.card_database.get_event(card_id)
-                                                if card_data:
-                                                    target = getattr(card_data, 'target_player', None)
-                                                    player_choice = getattr(card_data, 'player_choice', False)
-                                                    # Critério de filtragem: target do jogador OU player_choice=True
-                                                    if target == player_color or (target is None and player_choice):
-                                                        valid_cards.append(card_file)
-                                                        print(f"DEBUG: [add_starter_cards] Event VÁLIDO: {filename} (target_player={target}, player_choice={player_choice})")
+                                                # ESPECIAL: Incluir APENAS Event_55 e Event_14
+                                                if filename == "Event_55.png":
+                                                    valid_cards.append(card_file)
+                                                    print(f"DEBUG: [add_starter_cards] Event FORÇADO (teste duration variável): {filename}")
+                                                elif filename == "Event_14.png":
+                                                    valid_cards.append(card_file)
+                                                    print(f"DEBUG: [add_starter_cards] Event FORÇADO (Event_14): {filename}")
+                                                else:
+                                                    print(f"DEBUG: [add_starter_cards] Event IGNORADO (não é Event_55 nem Event_14): {filename}")
                                     except Exception as e:
                                         print(f"DEBUG: [add_starter_cards] Erro ao processar carta {filename}: {e}")
                                 
@@ -1626,9 +1643,9 @@ class PlayerDashboard(tk.Toplevel):
                             # Adicionar cartas ao inventário
                             if card_files:
                                 if card_type == "events":
-                                    max_cards = min(8, len(card_files))  # Mais events para mostrar paginação
+                                    max_cards = min(2, len(card_files))  # Máximo 2 events (Event_55 e Event_14)
                                 elif card_type == "actions":
-                                    max_cards = min(6, len(card_files))  # Mais actions para variedade
+                                    max_cards = min(1, len(card_files))  # Apenas 1 action (Action_61.png)
                                 elif card_type == "challenges":
                                     max_cards = min(1, len(card_files))  # Apenas 1 Challenge inicial (Challenge_8.png)
                                 else:
@@ -1653,13 +1670,25 @@ class PlayerDashboard(tk.Toplevel):
                                         # Obter duration_turns da carta
                                         from cards_database import get_event_duration
                                         duration_turns = get_event_duration(carta_path)
+                                        print(f"DEBUG: [add_starter_cards] get_event_duration({os.path.basename(carta_path)}) returned: {duration_turns} (type: {type(duration_turns)})")
                                         if duration_turns is not None:
-                                            self._event_duration_tracking[carta_path] = {
-                                                'start_turn': current_turn,
-                                                'duration_turns': duration_turns,
-                                                'expires_turn': current_turn + duration_turns  # expira após duration_turns turnos
-                                            }
-                                            print(f"DEBUG: [add_starter_cards] Event tracking adicionado: {os.path.basename(carta_path)} - turno:{current_turn}, duração:{duration_turns}, expira:{current_turn + duration_turns}")
+                                            # CORREÇÃO: Verificar se é duração variável
+                                            if duration_turns == "variable":
+                                                print(f"DEBUG: [add_starter_cards] Event {os.path.basename(carta_path)} detectado como duração VARIÁVEL")
+                                                self._event_duration_tracking[carta_path] = {
+                                                    'start_turn': current_turn,
+                                                    'duration_turns': duration_turns,
+                                                    'expires_turn': None  # Será definido após o dado
+                                                }
+                                                print(f"DEBUG: [add_starter_cards] Event tracking adicionado: {os.path.basename(carta_path)} - turno:{current_turn}, duração:{duration_turns} (variável), expira:A ser determinado")
+                                            else:
+                                                print(f"DEBUG: [add_starter_cards] Event {os.path.basename(carta_path)} detectado como duração FIXA: {duration_turns}")
+                                                self._event_duration_tracking[carta_path] = {
+                                                    'start_turn': current_turn,
+                                                    'duration_turns': duration_turns,
+                                                    'expires_turn': current_turn + duration_turns  # expira após duration_turns turnos
+                                                }
+                                                print(f"DEBUG: [add_starter_cards] Event tracking adicionado: {os.path.basename(carta_path)} - turno:{current_turn}, duração:{duration_turns}, expira:{current_turn + duration_turns}")
                                         else:
                                             print(f"DEBUG: [add_starter_cards] Duração não encontrada para Event: {os.path.basename(carta_path)}")
                             else:
@@ -1680,8 +1709,18 @@ class PlayerDashboard(tk.Toplevel):
         for tipo, cartas in self.inventario.items():
             print(f"DEBUG: [PlayerDashboard]   {tipo}: {len(cartas)} cartas")
         
-        # Garantir que há cartas suficientes de Actions/Events
-        self.add_more_action_event_cards(min_actions=6, min_events=8)
+        # Verificar se temos Action_61.png no inventário
+        action_61_present = any("Action_61.png" in carta for carta in self.inventario.get("actions", []))
+        print(f"DEBUG: [PlayerDashboard] Action_61.png presente? {action_61_present}")
+        
+        if action_61_present:
+            print(f"DEBUG: [PlayerDashboard] ✅ Action_61.png encontrada! NÃO adicionando Actions extras")
+            # Só garantir que há Events suficientes, mas não Actions extras
+            self.add_more_action_event_cards(min_actions=1, min_events=2)  # Mínimo 1 action (a que já temos)
+        else:
+            print(f"DEBUG: [PlayerDashboard] ⚠️ Action_61.png NÃO encontrada, adicionando Actions padrão")
+            # Garantir que há cartas suficientes de Actions/Events  
+            self.add_more_action_event_cards(min_actions=6, min_events=2)
     
     def _get_card_message_size(self, carta_path):
         """
@@ -2687,6 +2726,20 @@ class PlayerDashboard(tk.Toplevel):
                 action_num = int(match.group(1))
                 return f"action_{action_num}"
         
+        return None
+    
+    def _extract_event_id_from_path(self, carta_path):
+        """Extrai o ID do Event a partir do caminho da carta"""
+        try:
+            nome = os.path.basename(carta_path)
+            # Event_123.png -> event_123
+            import re
+            match = re.search(r'Event_(\d+)\.', nome)
+            if match:
+                event_num = int(match.group(1))
+                return f"event_{event_num}"
+        except Exception as e:
+            print(f"DEBUG: [_extract_event_id_from_path] Erro ao extrair ID do Event: {e}")
         return None
     
     def _get_color_from_path(self, carta_path):
@@ -4367,20 +4420,103 @@ class PlayerDashboard(tk.Toplevel):
                 # Aguardar um momento para garantir que a carta foi adicionada
                 self.after(100, self._update_carousel_highlights)
             
-            # Se for uma carta Event, registrar o momento em que foi adicionada
+            # Se for uma carta Event, registrar no tracking mas só ativar se for posição 0
             if carta_tipo == "events":
                 current_turn = getattr(self, '_current_turn', 0)
-                self._event_start_turns[carta_path] = current_turn
                 
                 # Obter duration_turns da carta
                 from cards_database import get_event_duration
                 duration_turns = get_event_duration(carta_path)
+                
                 if duration_turns is not None:
-                    self._event_duration_tracking[carta_path] = {
-                        'start_turn': current_turn,
-                        'duration_turns': duration_turns,
-                        'expires_turn': current_turn + duration_turns  # expira após duration_turns turnos
-                    }
+                    # Verificar se este Event será o primeiro na fila (posição 0)
+                    cartas_events = self.inventario.get("events", [])
+                    is_first_event = len(cartas_events) == 0  # Se não há Events, este será o primeiro
+                    
+                    if is_first_event:
+                        # Event vai para posição 0 - ativar imediatamente
+                        self._event_start_turns[carta_path] = current_turn
+                        self._event_duration_tracking[carta_path] = {
+                            'start_turn': current_turn,
+                            'duration_turns': duration_turns,
+                            'expires_turn': current_turn + duration_turns,
+                            'is_active': True  # Marcador para indicar que está ativo
+                        }
+                        print(f"DEBUG: [ADD_EVENT] Event adicionado na posição 0 (ativo): {os.path.basename(carta_path)}")
+                    else:
+                        # Event vai para fila - não ativar ainda
+                        self._event_start_turns[carta_path] = None  # Não ativo ainda
+                        self._event_duration_tracking[carta_path] = {
+                            'start_turn': None,  # Será definido quando mover para posição 0
+                            'duration_turns': duration_turns,
+                            'expires_turn': None,  # Será calculado quando ativar
+                            'is_active': False  # Em fila, não ativo
+                        }
+                        print(f"DEBUG: [ADD_EVENT] Event adicionado na fila (inativo): {os.path.basename(carta_path)}")
+                        
+                self._ensure_active_event_tracking()
+
+    def _ensure_active_event_tracking(self):
+        """
+        Garante que apenas o Event na posição 0 está ativo e contando tempo.
+        Ativa o próximo Event na fila quando necessário.
+        """
+        if not hasattr(self, '_event_duration_tracking'):
+            return
+            
+        cartas_events = self.inventario.get("events", [])
+        if not cartas_events:
+            return
+            
+        current_turn = getattr(self, '_current_turn', 0)
+        event_do_topo = cartas_events[0]
+        
+        # Verificar se o Event do topo está ativo
+        if (event_do_topo in self._event_duration_tracking and 
+            self._event_duration_tracking[event_do_topo].get('is_active', False) == False):
+            
+            # Ativar o Event do topo
+            duration_turns = self._event_duration_tracking[event_do_topo]['duration_turns']
+            
+            # CORREÇÃO: Verificar se é duração variável
+            if duration_turns == "variable":
+                # Para Events com duração variável, não calcular expires_turn ainda
+                # Será calculado apenas quando o dado for lançado
+                self._event_duration_tracking[event_do_topo].update({
+                    'start_turn': current_turn,
+                    'expires_turn': None,  # Será definido após o dado
+                    'is_active': True
+                })
+                print(f"DEBUG: [ACTIVATE_EVENT] Event ativado na posição 0: {os.path.basename(event_do_topo)}")
+                print(f"DEBUG: [ACTIVATE_EVENT]   Turno início: {current_turn}")
+                print(f"DEBUG: [ACTIVATE_EVENT]   Duration: {duration_turns} (será determinada por dado)")
+                print(f"DEBUG: [ACTIVATE_EVENT]   Expira no turno: A ser determinado")
+            else:
+                # Para Events com duração fixa
+                self._event_duration_tracking[event_do_topo].update({
+                    'start_turn': current_turn,
+                    'expires_turn': current_turn + duration_turns,
+                    'is_active': True
+                })
+                print(f"DEBUG: [ACTIVATE_EVENT] Event ativado na posição 0: {os.path.basename(event_do_topo)}")
+                print(f"DEBUG: [ACTIVATE_EVENT]   Turno início: {current_turn}")
+                print(f"DEBUG: [ACTIVATE_EVENT]   Duration: {duration_turns}")
+                print(f"DEBUG: [ACTIVATE_EVENT]   Expira no turno: {current_turn + duration_turns}")
+            
+            self._event_start_turns[event_do_topo] = current_turn
+        
+        # Garantir que Events em outras posições permanecem inativos
+        for i, carta_path in enumerate(cartas_events[1:], 1):  # Começar do índice 1
+            if carta_path in self._event_duration_tracking:
+                if self._event_duration_tracking[carta_path].get('is_active', False) == True:
+                    # Desativar Events que não estão na posição 0
+                    self._event_duration_tracking[carta_path].update({
+                        'start_turn': None,
+                        'expires_turn': None,
+                        'is_active': False
+                    })
+                    self._event_start_turns[carta_path] = None
+                    print(f"DEBUG: [DEACTIVATE_EVENT] Event desativado na posição {i}: {os.path.basename(carta_path)}")
 
     def _verificar_events_expirados(self):
         """
@@ -4395,16 +4531,25 @@ class PlayerDashboard(tk.Toplevel):
         
         print(f"DEBUG: Verificando Events expirados no turno {current_turn}")
         
+        # GARANTIR que o tracking está correto antes de verificar expiração
+        self._ensure_active_event_tracking()
+        
         for carta_path, event_data in self._event_duration_tracking.items():
-            start_turn = event_data['start_turn']
-            duration_turns = event_data['duration_turns']
-            expires_turn = start_turn + duration_turns  # expira após duration_turns turnos
+            is_active = event_data.get('is_active', False)
+            start_turn = event_data.get('start_turn')
+            duration_turns = event_data.get('duration_turns')
             
-            print(f"DEBUG: Event {os.path.basename(carta_path)} - start: {start_turn}, duration: {duration_turns}, expires: {expires_turn}")
-            
-            if current_turn >= expires_turn:
-                print(f"DEBUG: Event {os.path.basename(carta_path)} expirou (turno {current_turn} >= {expires_turn})")
-                events_para_remover.append(carta_path)
+            # Só verificar expiração para Events ativos
+            if is_active and start_turn is not None and duration_turns is not None:
+                expires_turn = start_turn + duration_turns  # expira após duration_turns turnos
+                
+                print(f"DEBUG: Event {os.path.basename(carta_path)} (ativo) - start: {start_turn}, duration: {duration_turns}, expires: {expires_turn}")
+                
+                if current_turn >= expires_turn:
+                    print(f"DEBUG: Event {os.path.basename(carta_path)} expirou (turno {current_turn} >= {expires_turn})")
+                    events_para_remover.append(carta_path)
+            else:
+                print(f"DEBUG: Event {os.path.basename(carta_path)} (inativo) - ignorando verificação de expiração")
         
         # Remover Events expirados
         for carta_path in events_para_remover:
@@ -4433,7 +4578,9 @@ class PlayerDashboard(tk.Toplevel):
             except Exception as e:
                 print(f"DEBUG: Erro ao processar Event expirado {carta_path}: {e}")
         
+        # ATIVAR próximo Event na fila após remoções
         if events_para_remover:
+            self._ensure_active_event_tracking()
             print(f"DEBUG: {len(events_para_remover)} Events expirados removidos automaticamente")
         else:
             print("DEBUG: Nenhum Event expirado encontrado")
@@ -6311,12 +6458,30 @@ class PlayerDashboard(tk.Toplevel):
                 # VERIFICAÇÃO CRÍTICA: Se gestão está ativa mas não há cartas para processar, finalizar imediatamente
                 gestao_esta_ativa = (hasattr(self, '_final_phase_gestao_ativa') and self._final_phase_gestao_ativa)
                 
-                # LÓGICA DECISÓRIA PRINCIPAL: Determinar se gestão deve continuar
-                gestao_deve_continuar = (gestao_esta_ativa and
-                                       cartas_reais_no_carrossel > 0 and 
-                                       cartas_gestao_restantes > 0 and
-                                       hasattr(self, '_carta_atual_gestao') and
-                                       self._carta_atual_gestao < len(self._cartas_gestao))
+                # LÓGICA DECISÓRIA CORRIGIDA: Gestão só continua se há cartas VÁLIDAS na lista de gestão
+                # Uma gestão deve finalizar quando:
+                # 1. Não há mais cartas na lista de gestão, OU
+                # 2. Todas as cartas restantes são inválidas (back_card ou não Activity/Challenge)
+                
+                gestao_deve_continuar = False
+                
+                if gestao_esta_ativa and hasattr(self, '_cartas_gestao') and self._cartas_gestao:
+                    # Verificar se há pelo menos uma carta válida restante na lista de gestão QUE AINDA PODE SER PROCESSADA
+                    for i, carta in enumerate(self._cartas_gestao):
+                        if carta:
+                            carta_basename = os.path.basename(carta).lower()
+                            # Carta deve ser Activity ou Challenge E existir no carrossel
+                            if (not carta_basename.startswith("back_card_") and 
+                                ("activity" in carta_basename or "challenge" in carta_basename) and
+                                hasattr(self, 'cards') and carta in self.cards):
+                                
+                                # VERIFICAÇÃO CRÍTICA: A carta deve ter capacidade de processamento restante
+                                pode_processar = self._carta_pode_processar_pacotes(carta)
+                                print(f"DEBUG: [COMPLETION] Carta {os.path.basename(carta)} pode processar mais pacotes: {pode_processar}")
+                                
+                                if pode_processar:
+                                    gestao_deve_continuar = True
+                                    break
                 
                 print(f"DEBUG: [COMPLETION] ===== DECISÃO DE CONTINUAÇÃO DA GESTÃO =====")
                 print(f"DEBUG: [COMPLETION] gestao_esta_ativa: {gestao_esta_ativa}")
@@ -6324,7 +6489,13 @@ class PlayerDashboard(tk.Toplevel):
                 print(f"DEBUG: [COMPLETION] cartas_gestao_restantes: {cartas_gestao_restantes}")
                 print(f"DEBUG: [COMPLETION] len(_cartas_gestao): {len(getattr(self, '_cartas_gestao', []))}")
                 print(f"DEBUG: [COMPLETION] _carta_atual_gestao: {getattr(self, '_carta_atual_gestao', 'N/A')}")
+                print(f"DEBUG: [COMPLETION] cartas_validas_gestao: {[os.path.basename(c) for c in cartas_validas_gestao]}")
                 print(f"DEBUG: [COMPLETION] gestao_deve_continuar: {gestao_deve_continuar}")
+                
+                # CORREÇÃO CRÍTICA: Se não há cartas válidas, garantir que gestão finaliza
+                if gestao_esta_ativa and len(cartas_validas_gestao) == 0:
+                    print(f"DEBUG: [COMPLETION] ⚠️ FORÇANDO FINALIZAÇÃO - Não há cartas válidas para continuar gestão")
+                    gestao_deve_continuar = False
                 
                 # Fechar overlay atual (destruir todos os widgets)
                 for widget in self.winfo_children():
@@ -6343,16 +6514,25 @@ class PlayerDashboard(tk.Toplevel):
                     print(f"DEBUG: [COMPLETION] ✅ Gestão de pacotes finalizada - não há mais cartas para processar")
                     print(f"DEBUG: [COMPLETION] Voltando ao dashboard normal com End Turn habilitado")
                     
-                    # CORREÇÃO CRÍTICA: Limpar flags de gestão antes de reconstruir
+                    # CORREÇÃO CRÍTICA: Finalizar gestão mas MANTER Final Phase ativo para End Turn
                     self._final_phase_gestao_ativa = False
-                    self._final_phase_active = False  # Também limpar Final Phase
+                    # NÃO limpar _final_phase_active - o jogador ainda está em Final Phase!
+                    # self._final_phase_active = False  # ❌ REMOVIDO - Final Phase deve continuar ativo
+                    
+                    # CORREÇÃO: Ativar End Turn quando gestão termina por completion
+                    self._show_end_turn_button = True
+                    
                     if hasattr(self, '_cartas_gestao'):
                         self._cartas_gestao = []
                     if hasattr(self, '_carta_atual_gestao'):
                         self._carta_atual_gestao = 0
                     
-                    # Voltar ao dashboard principal SEM gestão ativa
+                    # CORREÇÃO CRÍTICA: Voltar ao dashboard MANTENDO Final Phase ativo
+                    print(f"DEBUG: [COMPLETION] Estado final: _final_phase_active={self._final_phase_active}, _show_end_turn_button={self._show_end_turn_button}")
                     self.playerdashboard_interface(self.player_name, self.saldo, self.other_players)
+                    
+                    # CORREÇÃO CRÍTICA: Ativar o botão End Turn APÓS reconstruir a interface
+                    self.after(100, self._ativar_botao_end_turn)
         
         # Texto do botão baseado no tipo de carta
         if card_type == "Activity":
@@ -7100,6 +7280,101 @@ class PlayerDashboard(tk.Toplevel):
                 except:
                     continue
     
+    def _carta_pode_processar_pacotes(self, carta_path):
+        """
+        Verifica se uma carta ainda tem capacidade de processamento restante.
+        Uma carta NÃO pode processar mais se:
+        1. Para Activities: Rxd >= message_size E To send <= 0
+        2. Para Activities: Já processou rate_max pacotes neste turno
+        3. Para Challenges: Similar mas com regras específicas
+        
+        Returns:
+            bool: True se a carta pode processar mais pacotes, False caso contrário
+        """
+        try:
+            carta_basename = os.path.basename(carta_path).lower()
+            
+            # Obter dados da carta
+            dados_carta = self._obter_dados_carta(carta_path)
+            if not dados_carta:
+                print(f"DEBUG: [PODE_PROCESSAR] Carta {os.path.basename(carta_path)}: sem dados - NÃO pode processar")
+                return False
+            
+            rate_max = dados_carta.get('rate', 1)
+            message_size = dados_carta.get('message_size', 20)
+            
+            # Encontrar posição da carta no carrossel para obter valores atuais
+            posicao_carrossel = None
+            if hasattr(self, 'cards') and carta_path in self.cards:
+                posicao_carrossel = self.cards.index(carta_path)
+            
+            if posicao_carrossel is None:
+                print(f"DEBUG: [PODE_PROCESSAR] Carta {os.path.basename(carta_path)}: não encontrada no carrossel - NÃO pode processar")
+                return False
+            
+            # Obter valores atuais das barras
+            if hasattr(self, 'card_stats') and posicao_carrossel < len(self.card_stats):
+                stats = self.card_stats[posicao_carrossel]
+                to_send_atual = stats.get('To send', 0)
+                rxd_atual = stats.get('Rxd', 0)
+                lost_atual = stats.get('Lost', 0)
+            else:
+                print(f"DEBUG: [PODE_PROCESSAR] Carta {os.path.basename(carta_path)}: sem stats - NÃO pode processar")
+                return False
+            
+            # Verificar quantos pacotes foram processados NESTE turno
+            rxd_processado_turno = self._get_processed_this_turn(carta_path, 'rxd')
+            lost_processado_turno = self._get_processed_this_turn(carta_path, 'lost')
+            total_processado_turno = rxd_processado_turno + lost_processado_turno
+            
+            print(f"DEBUG: [PODE_PROCESSAR] === VERIFICAÇÃO CARTA {os.path.basename(carta_path)} ===")
+            print(f"DEBUG: [PODE_PROCESSAR] Valores atuais: To send={to_send_atual}, Rxd={rxd_atual}, Lost={lost_atual}")
+            print(f"DEBUG: [PODE_PROCESSAR] Rate máximo por turno: {rate_max}")
+            print(f"DEBUG: [PODE_PROCESSAR] Message size (limite total): {message_size}")
+            print(f"DEBUG: [PODE_PROCESSAR] Processado neste turno: Rxd={rxd_processado_turno}, Lost={lost_processado_turno}, Total={total_processado_turno}")
+            
+            # REGRA 1: Verificar limite por turno (rate_max)
+            if total_processado_turno >= rate_max:
+                print(f"DEBUG: [PODE_PROCESSAR] ❌ Limite por turno atingido ({total_processado_turno}/{rate_max})")
+                return False
+            
+            # REGRA 2: Para Activities - verificar completion
+            if "activity" in carta_basename:
+                # Activity completa quando: To send = 0 E Rxd >= message_size
+                if to_send_atual <= 0 and rxd_atual >= message_size:
+                    print(f"DEBUG: [PODE_PROCESSAR] ❌ Activity completada (To send={to_send_atual}, Rxd={rxd_atual}/{message_size})")
+                    return False
+                
+                # Verificar se ainda pode incrementar Rxd ou Lost
+                pode_incrementar_rxd = (rxd_atual < message_size and rxd_processado_turno < rate_max)
+                
+                # Para Lost: verificar se drops são permitidos
+                drops_allowed = dados_carta.get('drops_allowed', False)
+                penalty_per_packet = dados_carta.get('penalty_per_packet')
+                lost_permitido = drops_allowed or penalty_per_packet is not None
+                pode_incrementar_lost = (lost_permitido and lost_atual < message_size and lost_processado_turno < rate_max)
+                
+                pode_processar = pode_incrementar_rxd or pode_incrementar_lost
+                print(f"DEBUG: [PODE_PROCESSAR] Activity pode processar: Rxd={pode_incrementar_rxd}, Lost={pode_incrementar_lost} => {pode_processar}")
+                return pode_processar
+            
+            # REGRA 3: Para Challenges - similar mas com regras específicas
+            elif "challenge" in carta_basename:
+                # Challenge pode processar enquanto não atingir rate_max neste turno
+                pode_incrementar_rxd = (rxd_processado_turno < rate_max)
+                pode_incrementar_lost = (lost_processado_turno < rate_max)
+                
+                pode_processar = pode_incrementar_rxd or pode_incrementar_lost
+                print(f"DEBUG: [PODE_PROCESSAR] Challenge pode processar: Rxd={pode_incrementar_rxd}, Lost={pode_incrementar_lost} => {pode_processar}")
+                return pode_processar
+            
+            print(f"DEBUG: [PODE_PROCESSAR] ❌ Tipo de carta não reconhecido: {carta_basename}")
+            return False
+            
+        except Exception as e:
+            print(f"DEBUG: [PODE_PROCESSAR] ❌ ERRO ao verificar carta {os.path.basename(carta_path)}: {e}")
+            return False
+    
     def _atualizar_barras_gestao_carta_atual(self):
         """
         CORREÇÃO CRÍTICA: Atualiza barras usando sempre a carta REAL do carrossel
@@ -7359,7 +7634,76 @@ class PlayerDashboard(tk.Toplevel):
             else:
                 print(f"DEBUG: [SETA_COMPLETION] ❌ Dados da carta não encontrados")
         else:
-            print(f"DEBUG: [SETA_COMPLETION] ❌ Não é Challenge - continuar gestão normal")
+            print(f"DEBUG: [SETA_COMPLETION] ❌ Não é Challenge - verificando se é Activity...")
+            
+            # CORREÇÃO CRÍTICA: Adicionar verificação de completion para Activities
+            is_activity_card = "activity" in carta_basename
+            
+            if is_activity_card:
+                print(f"DEBUG: [SETA_COMPLETION] ✅ Activity detectado - verificando completion")
+                
+                # Obter dados da carta
+                dados_carta = self._obter_dados_carta(carta_atual)
+                
+                if dados_carta:
+                    message_size = dados_carta.get('message_size', 0)
+                    drops_allowed = dados_carta.get('drops_allowed', True)
+                    
+                    # Obter valores atuais das barras (posição atual do carrossel)
+                    current_to_send = 0
+                    current_rxd = 0
+                    
+                    try:
+                        if hasattr(self, 'progress_labels'):
+                            current_to_send = int(self.progress_labels.get("To send", tk.Label()).cget("text") or "0")
+                            current_rxd = int(self.progress_labels.get("Rxd", tk.Label()).cget("text") or "0")
+                    except:
+                        current_to_send = 0
+                        current_rxd = 0
+                    
+                    print(f"DEBUG: [SETA_COMPLETION] Activity dados completos:")
+                    print(f"DEBUG: [SETA_COMPLETION]   message_size: {message_size}")
+                    print(f"DEBUG: [SETA_COMPLETION]   current_to_send: {current_to_send}")
+                    print(f"DEBUG: [SETA_COMPLETION]   current_rxd: {current_rxd}")
+                    print(f"DEBUG: [SETA_COMPLETION]   drops_allowed: {drops_allowed}")
+                    
+                    # CONDIÇÕES DE COMPLETION PARA ACTIVITIES:
+                    # 1. To send = 0 (todos os pacotes foram enviados) E
+                    # 2. Rxd >= message_size (todos os pacotes foram recebidos) E
+                    # 3. (drops_allowed = False OU completion forçada no botão seta)
+                    
+                    pacotes_todos_enviados = (current_to_send == 0)
+                    pacotes_todos_recebidos = (current_rxd >= message_size) and (message_size > 0)
+                    
+                    # Activity é completada se TODOS os pacotes foram enviados E recebidos
+                    activity_completada = pacotes_todos_enviados and pacotes_todos_recebidos
+                    
+                    print(f"DEBUG: [SETA_COMPLETION]   Condição 1 (todos enviados): {pacotes_todos_enviados}")
+                    print(f"DEBUG: [SETA_COMPLETION]   Condição 2 (todos recebidos): {pacotes_todos_recebidos}")
+                    print(f"DEBUG: [SETA_COMPLETION]   activity_completada: {activity_completada}")
+                    
+                    if activity_completada:
+                        print(f"DEBUG: [SETA_COMPLETION] ✅ Activity pode ser completada - mostrar overlay")
+                        
+                        # Preservar valores antes de mostrar completion
+                        self._preservar_valores_atuais_barras()
+                        
+                        # Usar o índice correto da carta no carrossel
+                        carta_index_carrossel = getattr(self, 'selected_carousel_index', self._carta_atual_gestao)
+                        print(f"DEBUG: [SETA_COMPLETION] Usando índice do carrossel: {carta_index_carrossel} (gestão: {self._carta_atual_gestao})")
+                        
+                        # Mostrar overlay de completion diretamente
+                        self._mostrar_overlay_completion(carta_atual, dados_carta, is_sequential=False, carta_index=carta_index_carrossel)
+                        
+                        print(f"DEBUG: [SETA_COMPLETION] ✅ Overlay de completion mostrado para Activity")
+                        return
+                    else:
+                        print(f"DEBUG: [SETA_COMPLETION] ❌ Activity não pode ser completada ainda - continuar gestão normal")
+                        print(f"DEBUG: [SETA_COMPLETION]   Razão: enviados={pacotes_todos_enviados}, recebidos={pacotes_todos_recebidos}")
+                else:
+                    print(f"DEBUG: [SETA_COMPLETION] ❌ Dados da Activity não encontrados")
+            else:
+                print(f"DEBUG: [SETA_COMPLETION] ❌ Não é nem Challenge nem Activity - continuar gestão normal")
         
         print(f"DEBUG: [SETA_COMPLETION] ❌ Condições para completion não atendidas - continuar gestão normal")
         
@@ -7439,9 +7783,15 @@ class PlayerDashboard(tk.Toplevel):
             print("DEBUG: [GESTÃO_PACOTES] ❌ Não há mais cartas válidas para processar")
             print("DEBUG: [GESTÃO_PACOTES] ✅ FINALIZANDO GESTÃO DE PACOTES AUTOMATICAMENTE")
             
-            # Limpar flags de gestão
+            # CORREÇÃO CRÍTICA: Finalizar gestão mas MANTER Final Phase ativo para End Turn
+            # A gestão termina mas o jogador ainda está em Final Phase
             self._final_phase_gestao_ativa = False
-            self._final_phase_active = False
+            # NÃO limpar _final_phase_active - o jogador ainda está em Final Phase!
+            # self._final_phase_active = False  # ❌ REMOVIDO - Final Phase deve continuar ativo
+            
+            # CORREÇÃO: Ativar End Turn quando gestão termina automaticamente
+            self._show_end_turn_button = True
+            
             if hasattr(self, '_cartas_gestao'):
                 self._cartas_gestao = []
             if hasattr(self, '_carta_atual_gestao'):
@@ -7450,9 +7800,13 @@ class PlayerDashboard(tk.Toplevel):
             # Remover controles silenciosamente
             self._remover_controles_gestao_silencioso()
             
-            # Reconstruir dashboard sem gestão
-            print("DEBUG: [GESTÃO_PACOTES] Voltando ao dashboard normal...")
+            # CORREÇÃO CRÍTICA: Reconstruir dashboard MANTENDO Final Phase ativo
+            print("DEBUG: [GESTÃO_PACOTES] Voltando ao dashboard com Final Phase ativo e End Turn enabled...")
+            print(f"DEBUG: [GESTÃO_PACOTES] Estado final: _final_phase_active={self._final_phase_active}, _show_end_turn_button={self._show_end_turn_button}")
             self.playerdashboard_interface(self.player_name, self.saldo, self.other_players)
+            
+            # CORREÇÃO CRÍTICA: Ativar o botão End Turn APÓS reconstruir a interface
+            self.after(100, self._ativar_botao_end_turn)
             return
         
         # CORREÇÃO 4: Mostrar gestão da próxima carta ou finalizar
@@ -7844,6 +8198,108 @@ class PlayerDashboard(tk.Toplevel):
         
         print(f"DEBUG: [QUIT_CHALLENGE] Overlay de quit challenge criado")
     
+    def _mostrar_overlay_confirmacao_troca(self, carta_path, tipos, page=0):
+        """
+        Mostra overlay de confirmação para troca de carta com warning sobre perda de progresso
+        """
+        print(f"DEBUG: [SWITCH_CONFIRM] Criando overlay de confirmação de troca para: {os.path.basename(carta_path)}")
+        
+        # Criar overlay
+        if hasattr(self, '_overlay_switch_confirm') and self._overlay_switch_confirm:
+            self._overlay_switch_confirm.destroy()
+        
+        self._overlay_switch_confirm = tk.Toplevel(self)
+        self._overlay_switch_confirm.title("")
+        self._overlay_switch_confirm.configure(bg="black")
+        self._overlay_switch_confirm.overrideredirect(True)
+        self._overlay_switch_confirm.attributes("-topmost", True)
+        
+        # Centralizar na tela 
+        overlay_width, overlay_height = 400, 200
+        screen_width = self.winfo_screenwidth()
+        screen_height = self.winfo_screenheight()
+        x = (screen_width - overlay_width) // 2
+        y = (screen_height - overlay_height) // 2
+        self._overlay_switch_confirm.geometry(f"{overlay_width}x{overlay_height}+{x}+{y}")
+        
+        # Frame principal com borda
+        main_frame = tk.Frame(self._overlay_switch_confirm, bg="black", bd=2, relief="solid")
+        main_frame.pack(fill="both", expand=True, padx=10, pady=10)
+        
+        # Título "Are you sure you want to switch?" em roxo (centralizado)
+        title_lbl = tk.Label(
+            main_frame,
+            text="Are you sure you want to switch?",
+            font=("Helvetica", 16, "bold"),
+            fg="#8000FF",  # Roxo
+            bg="black"
+        )
+        title_lbl.pack(pady=(20, 10))
+        
+        # Subtítulo "All progress will be lost" em branco
+        subtitle_lbl = tk.Label(
+            main_frame,
+            text="All progress will be lost",
+            font=("Helvetica", 12),
+            fg="white",
+            bg="black"
+        )
+        subtitle_lbl.pack(pady=(0, 20))
+        
+        # Frame para botões
+        buttons_frame = tk.Frame(main_frame, bg="black")
+        buttons_frame.pack(pady=(10, 0))
+        
+        # Função para fechar overlay sem confirmar troca
+        def fechar_sem_trocar():
+            print(f"DEBUG: [SWITCH_CONFIRM] Jogador cancelou a troca")
+            if hasattr(self, '_overlay_switch_confirm') and self._overlay_switch_confirm:
+                self._overlay_switch_confirm.destroy()
+                self._overlay_switch_confirm = None
+        
+        # Função para confirmar troca (executar troca e voltar ao dashboard)
+        def confirmar_troca():
+            print(f"DEBUG: [SWITCH_CONFIRM] Jogador confirmou a troca")
+            
+            # Fechar overlay
+            if hasattr(self, '_overlay_switch_confirm') and self._overlay_switch_confirm:
+                self._overlay_switch_confirm.destroy()
+                self._overlay_switch_confirm = None
+            
+            # CORREÇÃO CRÍTICA: Executar a troca diretamente
+            print(f"DEBUG: [SWITCH_CONFIRM] Executando troca da carta: {os.path.basename(carta_path)}")
+            
+            # Chama diretamente aceitar_carta_carrossel que faz a troca completa
+            self.aceitar_carta_carrossel(carta_path, tipos, page)
+        
+        # Botão "No" vermelho (lado esquerdo)
+        no_btn = tk.Button(
+            buttons_frame,
+            text="No",
+            font=("Helvetica", 12, "bold"),
+            bg="#DC143C",  # Vermelho
+            fg="white",
+            width=8,
+            height=1,
+            command=fechar_sem_trocar
+        )
+        no_btn.pack(side="left", padx=(0, 20))
+        
+        # Botão "Yes" verde (lado direito)  
+        yes_btn = tk.Button(
+            buttons_frame,
+            text="Yes",
+            font=("Helvetica", 12, "bold"),
+            bg="#228B22",  # Verde
+            fg="white",
+            width=8,
+            height=1,
+            command=confirmar_troca
+        )
+        yes_btn.pack(side="right", padx=(20, 0))
+        
+        print(f"DEBUG: [SWITCH_CONFIRM] Overlay de confirmação de troca criado")
+    
     def _ativar_botao_end_turn(self):
         """Ativa o botão End Turn e muda sua aparência"""
         try:
@@ -8033,6 +8489,667 @@ class PlayerDashboard(tk.Toplevel):
         # Exemplo: pode-se limpar a interface ou chamar uma função para o próximo jogador
         print("DEBUG: [END_TURN] ✅ Método end_turn() terminado com sucesso - retornando controle para _criar_botao_end_turn()")
 
+    def _aplicar_router_upgrade(self, router_id):
+        """
+        Aplica o efeito ROUTER UPGRADE baseado no router_id.
+        Troca Small Router por Medium Router correspondente.
+        """
+        print(f"DEBUG: [ROUTER_UPGRADE] Aplicando Router Upgrade para Router ID: {router_id}")
+        
+        if router_id is None:
+            print(f"DEBUG: [ROUTER_UPGRADE] Router ID é None - não aplicando upgrade")
+            return
+        
+        # Mapeamento: Small Router -> Medium Router
+        equipment_mapping = {
+            1: ("Equipment_1.png", "Equipment_4.png"),  # Small Router 1 -> Medium Router 1
+            2: ("Equipment_2.png", "Equipment_5.png"),  # Small Router 2 -> Medium Router 2
+            3: ("Equipment_3.png", "Equipment_6.png"),  # Small Router 3 -> Medium Router 3
+        }
+        
+        if router_id not in equipment_mapping:
+            print(f"DEBUG: [ROUTER_UPGRADE] Router ID {router_id} não suportado")
+            return
+        
+        small_router, medium_router = equipment_mapping[router_id]
+        
+        # Verificar se o jogador tem o Small Router correspondente no inventário
+        equipments_inventory = self.inventario.get("equipments", [])
+        small_router_found = None
+        
+        for equipment_path in equipments_inventory:
+            if os.path.basename(equipment_path) == small_router:
+                small_router_found = equipment_path
+                break
+        
+        if small_router_found:
+            print(f"DEBUG: [ROUTER_UPGRADE] Encontrado {small_router} no inventário")
+            
+            # Remover Small Router do inventário
+            self.inventario["equipments"].remove(small_router_found)
+            print(f"DEBUG: [ROUTER_UPGRADE] {small_router} removido do inventário")
+            
+            # Construir caminho para Medium Router (usar mesma estrutura de diretório)
+            base_dir = os.path.dirname(small_router_found)
+            medium_router_path = os.path.join(base_dir, medium_router)
+            
+            # Adicionar Medium Router ao inventário
+            self.inventario["equipments"].append(medium_router_path)
+            print(f"DEBUG: [ROUTER_UPGRADE] {medium_router} adicionado ao inventário")
+            print(f"DEBUG: [ROUTER_UPGRADE] ✅ Router Upgrade aplicado com sucesso!")
+        else:
+            print(f"DEBUG: [ROUTER_UPGRADE] {small_router} não encontrado no inventário")
+            print(f"DEBUG: [ROUTER_UPGRADE] Equipamentos disponíveis:")
+            for equipment_path in equipments_inventory:
+                print(f"DEBUG: [ROUTER_UPGRADE]   - {os.path.basename(equipment_path)}")
+
+    def _aplicar_router_downgrade(self, router_id):
+        """
+        Aplica o efeito ROUTER DOWNGRADE baseado no router_id.
+        Troca Medium Router por Small Router correspondente.
+        """
+        print(f"DEBUG: [ROUTER_DOWNGRADE] Aplicando Router Downgrade para Router ID: {router_id}")
+        
+        if router_id is None:
+            print(f"DEBUG: [ROUTER_DOWNGRADE] Router ID é None - não aplicando downgrade")
+            return
+        
+        # Mapeamento: Medium Router -> Small Router
+        equipment_mapping = {
+            1: ("Equipment_4.png", "Equipment_1.png"),  # Medium Router 1 -> Small Router 1
+            2: ("Equipment_5.png", "Equipment_2.png"),  # Medium Router 2 -> Small Router 2
+            3: ("Equipment_6.png", "Equipment_3.png"),  # Medium Router 3 -> Small Router 3
+        }
+        
+        if router_id not in equipment_mapping:
+            print(f"DEBUG: [ROUTER_DOWNGRADE] Router ID {router_id} não suportado")
+            return
+        
+        medium_router, small_router = equipment_mapping[router_id]
+        
+        # Verificar se o jogador tem o Medium Router correspondente no inventário
+        equipments_inventory = self.inventario.get("equipments", [])
+        medium_router_found = None
+        
+        for equipment_path in equipments_inventory:
+            if os.path.basename(equipment_path) == medium_router:
+                medium_router_found = equipment_path
+                break
+        
+        if medium_router_found:
+            print(f"DEBUG: [ROUTER_DOWNGRADE] Encontrado {medium_router} no inventário")
+            
+            # Remover Medium Router do inventário
+            self.inventario["equipments"].remove(medium_router_found)
+            print(f"DEBUG: [ROUTER_DOWNGRADE] {medium_router} removido do inventário")
+            
+            # Construir caminho para Small Router (usar mesma estrutura de diretório)
+            base_dir = os.path.dirname(medium_router_found)
+            small_router_path = os.path.join(base_dir, small_router)
+            
+            # Adicionar Small Router ao inventário
+            self.inventario["equipments"].append(small_router_path)
+            print(f"DEBUG: [ROUTER_DOWNGRADE] {small_router} adicionado ao inventário")
+            print(f"DEBUG: [ROUTER_DOWNGRADE] ✅ Router Downgrade aplicado com sucesso!")
+        else:
+            print(f"DEBUG: [ROUTER_DOWNGRADE] {medium_router} não encontrado no inventário")
+            print(f"DEBUG: [ROUTER_DOWNGRADE] Equipamentos disponíveis:")
+            for equipment_path in equipments_inventory:
+                print(f"DEBUG: [ROUTER_DOWNGRADE]   - {os.path.basename(equipment_path)}")
+
+    def _aplicar_link_upgrade(self, router_id):
+        """
+        Aplica o efeito LINK UPGRADE baseado no router_id.
+        Troca Long Link por Short Link correspondente.
+        """
+        print(f"DEBUG: [LINK_UPGRADE] Aplicando Link Upgrade para Router ID: {router_id}")
+        
+        if router_id is None:
+            print(f"DEBUG: [LINK_UPGRADE] Router ID é None - não aplicando upgrade")
+            return
+        
+        # Mapeamento: Long Link -> Short Link
+        equipment_mapping = {
+            1: ("Equipment_10.png", "Equipment_7.png"),  # Long Link 1 -> Short Link 1
+            2: ("Equipment_11.png", "Equipment_8.png"),  # Long Link 2 -> Short Link 2
+            3: ("Equipment_12.png", "Equipment_9.png"),  # Long Link 3 -> Short Link 3
+        }
+        
+        if router_id not in equipment_mapping:
+            print(f"DEBUG: [LINK_UPGRADE] Router ID {router_id} não suportado")
+            return
+        
+        long_link, short_link = equipment_mapping[router_id]
+        
+        # Verificar se o jogador tem o Long Link correspondente no inventário
+        equipments_inventory = self.inventario.get("equipments", [])
+        long_link_found = None
+        
+        for equipment_path in equipments_inventory:
+            if os.path.basename(equipment_path) == long_link:
+                long_link_found = equipment_path
+                break
+        
+        if long_link_found:
+            print(f"DEBUG: [LINK_UPGRADE] Encontrado {long_link} no inventário")
+            
+            # Remover Long Link do inventário
+            self.inventario["equipments"].remove(long_link_found)
+            print(f"DEBUG: [LINK_UPGRADE] {long_link} removido do inventário")
+            
+            # Construir caminho para Short Link (usar mesma estrutura de diretório)
+            base_dir = os.path.dirname(long_link_found)
+            short_link_path = os.path.join(base_dir, short_link)
+            
+            # Adicionar Short Link ao inventário
+            self.inventario["equipments"].append(short_link_path)
+            print(f"DEBUG: [LINK_UPGRADE] {short_link} adicionado ao inventário")
+            print(f"DEBUG: [LINK_UPGRADE] ✅ Link Upgrade aplicado com sucesso!")
+        else:
+            print(f"DEBUG: [LINK_UPGRADE] {long_link} não encontrado no inventário")
+            print(f"DEBUG: [LINK_UPGRADE] Equipamentos disponíveis:")
+            for equipment_path in equipments_inventory:
+                print(f"DEBUG: [LINK_UPGRADE]   - {os.path.basename(equipment_path)}")
+
+    def _aplicar_link_downgrade(self, router_id):
+        """
+        Aplica o efeito LINK DOWNGRADE baseado no router_id.
+        Troca Short Link por Long Link correspondente.
+        """
+        print(f"DEBUG: [LINK_DOWNGRADE] Aplicando Link Downgrade para Router ID: {router_id}")
+        
+        if router_id is None:
+            print(f"DEBUG: [LINK_DOWNGRADE] Router ID é None - não aplicando downgrade")
+            return
+        
+        # Mapeamento: Short Link -> Long Link
+        equipment_mapping = {
+            1: ("Equipment_7.png", "Equipment_10.png"),  # Short Link 1 -> Long Link 1
+            2: ("Equipment_8.png", "Equipment_11.png"),  # Short Link 2 -> Long Link 2
+            3: ("Equipment_9.png", "Equipment_12.png"),  # Short Link 3 -> Long Link 3
+        }
+        
+        if router_id not in equipment_mapping:
+            print(f"DEBUG: [LINK_DOWNGRADE] Router ID {router_id} não suportado")
+            return
+        
+        short_link, long_link = equipment_mapping[router_id]
+        
+        # Verificar se o jogador tem o Short Link correspondente no inventário
+        equipments_inventory = self.inventario.get("equipments", [])
+        short_link_found = None
+        
+        for equipment_path in equipments_inventory:
+            if os.path.basename(equipment_path) == short_link:
+                short_link_found = equipment_path
+                break
+        
+        if short_link_found:
+            print(f"DEBUG: [LINK_DOWNGRADE] Encontrado {short_link} no inventário")
+            
+            # Remover Short Link do inventário
+            self.inventario["equipments"].remove(short_link_found)
+            print(f"DEBUG: [LINK_DOWNGRADE] {short_link} removido do inventário")
+            
+            # Construir caminho para Long Link (usar mesma estrutura de diretório)
+            base_dir = os.path.dirname(short_link_found)
+            long_link_path = os.path.join(base_dir, long_link)
+            
+            # Adicionar Long Link ao inventário
+            self.inventario["equipments"].append(long_link_path)
+            print(f"DEBUG: [LINK_DOWNGRADE] {long_link} adicionado ao inventário")
+            print(f"DEBUG: [LINK_DOWNGRADE] ✅ Link Downgrade aplicado com sucesso!")
+        else:
+            print(f"DEBUG: [LINK_DOWNGRADE] {short_link} não encontrado no inventário")
+            print(f"DEBUG: [LINK_DOWNGRADE] Equipamentos disponíveis:")
+            for equipment_path in equipments_inventory:
+                print(f"DEBUG: [LINK_DOWNGRADE]   - {os.path.basename(equipment_path)}")
+
+    def _aplicar_add_router(self):
+        """Abre página para escolher router gratuito (Equipment_1, Equipment_2, ou Equipment_3) da Store"""
+        print("DEBUG: [ADD_ROUTER] Iniciando página de seleção de router")
+        try:
+            self._criar_router_selection_page()
+            print("DEBUG: [ADD_ROUTER] ✅ Página de seleção criada com sucesso")
+        except Exception as e:
+            print(f"DEBUG: [ADD_ROUTER] ❌ Erro ao criar página de seleção: {e}")
+            import traceback
+            print(f"DEBUG: [ADD_ROUTER] Traceback completo: {traceback.format_exc()}")
+            # Fallback - retornar ao dashboard principal se houve erro
+            self.playerdashboard_interface(self.player_name, self.saldo, self.other_players)
+    
+    def _criar_router_selection_page(self):
+        """Cria página completa para seleção de router da Store (padrão igual Store_v2.py)"""
+        print("DEBUG: [ADD_ROUTER] ======= INICIANDO CRIAÇÃO DA PÁGINA =======")
+        print("DEBUG: [ADD_ROUTER] Criando página de seleção de router")
+        
+        # PROTEÇÃO: Marcar que estamos numa página especial (impede callbacks automáticos)
+        self._in_router_selection_page = True
+        print("DEBUG: [ADD_ROUTER] Flag _in_router_selection_page = True")
+        
+        # VERIFICAÇÃO DE SEGURANÇA: Garantir que esta função só é chamada em contexto válido
+        if not hasattr(self, 'cards') or not self.cards:
+            print("DEBUG: [ADD_ROUTER] ERRO - Cards não disponíveis, abortando")
+            return
+        
+        # FORÇA ATUALIZAÇÃO DA INTERFACE (crítico para Raspberry Pi)
+        self.update_idletasks()
+        self.update()
+        
+        # Limpar interface atual (IGUAL STORE_V2.PY)
+        for widget in self.winfo_children():
+            widget.destroy()
+        self.configure(bg="black")
+        print("DEBUG: [ADD_ROUTER] Interface limpa e fundo preto definido")
+        
+        # FORÇA SEGUNDA ATUALIZAÇÃO APÓS LIMPEZA
+        self.update_idletasks()
+        self.update()
+        
+        # Barra superior (com fallback se imagem não existir) - IGUAL STORE_V2.PY
+        try:
+            # Usar a mesma imagem do topo que Store_v2.py usa
+            awning_path = os.path.join(os.path.dirname(__file__), "img", "TopBar_green.png")
+            if os.path.exists(awning_path):
+                awning_img = ImageTk.PhotoImage(Image.open(awning_path).resize((self.winfo_screenwidth(), 50)))
+                awning_label = tk.Label(self, image=awning_img, bg="black")
+                awning_label.image = awning_img
+                awning_label.pack(pady=(0, 10), fill="x")
+                print("DEBUG: [ADD_ROUTER] Header com imagem TopBar_green criado")
+            else:
+                raise FileNotFoundError("TopBar_green.png não encontrado")
+        except Exception as e:
+            print(f"DEBUG: [ADD_ROUTER] Erro ao carregar header: {e} - usando header simples")
+            # Fallback simples igual Store_v2.py
+            header_frame = tk.Frame(self, bg="#4CAF50", height=50)
+            header_frame.pack(fill="x", pady=(0, 10))
+            header_label = tk.Label(header_frame, text="NetMaster", font=("Helvetica", 18, "bold"), 
+                                  fg="white", bg="#4CAF50")
+            header_label.pack(expand=True)
+        
+        # Labels no header igual Store_v2.py
+        left_store_label = tk.Label(self, text="•", font=("Helvetica", 12, "bold"), 
+                                   bg="#4CAF50", fg="#4CAF50")
+        left_store_label.place(relx=0.4, y=30, anchor="center")
+        
+        store_label = tk.Label(self, text="ADD ROUTER", font=("Helvetica", 16, "bold"), 
+                              fg="white", bg="#4CAF50")
+        store_label.place(relx=0.5, y=30, anchor="center")
+        
+        right_store_label = tk.Label(self, text="•", font=("Helvetica", 12, "bold"), 
+                                    bg="#4CAF50", fg="#4CAF50")
+        right_store_label.place(relx=0.6, y=30, anchor="center")
+        
+        # Título (movido mais para cima) - IGUAL STORE_V2.PY
+        title_lbl = tk.Label(self, text="Choose router you want", 
+                           font=("Helvetica", 17, "bold"), fg="white", bg="black")
+        title_lbl.pack(pady=(5, 5))
+        
+        # === SISTEMA GRID IGUAL À STORE_V2.PY ===
+        # Obter inventário de equipamentos da Store
+        store_equipments = self._obter_equipments_da_store()
+        
+        # Filtrar apenas Equipment_1, Equipment_2, Equipment_3
+        routers_disponiveis = []
+        for equipment_path in store_equipments:
+            filename = os.path.basename(equipment_path)
+            if filename in ["Equipment_1.png", "Equipment_2.png", "Equipment_3.png"]:
+                routers_disponiveis.append(equipment_path)
+        
+        print(f"DEBUG: [ADD_ROUTER] Routers disponíveis: {len(routers_disponiveis)}")
+        
+        # Paginação (igual Store_v2.py, mesmo que só tenhamos 3 routers)
+        cards_per_page = 4  # Igual à Store_v2.py
+        total_pages = max(1, (len(routers_disponiveis) + cards_per_page - 1) // cards_per_page)
+        page = 0  # Sempre página 0 para routers
+        start_idx = page * cards_per_page
+        end_idx = start_idx + cards_per_page
+        routers_page = routers_disponiveis[start_idx:end_idx]
+        
+        # Frame para os routers (centralizado, movido mais para cima) - IGUAL STORE_V2.PY
+        self.matriz_frame = tk.Frame(self, bg="black")
+        self.matriz_frame.place(relx=0.5, rely=0.55, anchor="center")  # Igual Store_v2.py
+        
+        n_col = 3  # 3 colunas para 3 routers
+        card_w, card_h = 120, 150  # Tamanho um pouco maior que Store_v2.py
+        
+        # Variáveis para seleção
+        self.router_selection = None
+        self.router_buttons = []
+        
+        # Callback para seleção de router
+        def make_router_selection_callback(router_path, router_idx):
+            def callback(event=None):
+                print(f"DEBUG: [ADD_ROUTER] Router selecionado: {os.path.basename(router_path)}")
+                self._selecionar_router_page(router_path, router_idx)
+            return callback
+        
+        # Criar grid de routers igual à Store_v2.py
+        for i, router_path in enumerate(routers_page):
+            row = i // n_col
+            col = i % n_col
+            
+            # Frame para router + label
+            router_frame = tk.Frame(self.matriz_frame, bg="black")
+            router_frame.grid(row=row, column=col, padx=15, pady=15)
+            
+            # Carregar imagem do router
+            try:
+                # Verificar se é placeholder ou arquivo real
+                if router_path.startswith("PLACEHOLDER_"):
+                    # Criar imagem placeholder
+                    placeholder_img = Image.new('RGB', (card_w, card_h), color='#4A4A4A')
+                    router_img = ImageTk.PhotoImage(placeholder_img)
+                    print(f"DEBUG: [ADD_ROUTER] Placeholder criado para {router_path}")
+                else:
+                    # Carregar imagem real
+                    img = ImageTk.PhotoImage(Image.open(router_path).resize((card_w, card_h)))
+                    router_img = img
+                    print(f"DEBUG: [ADD_ROUTER] Imagem carregada: {os.path.basename(router_path)}")
+            except Exception as e:
+                print(f"DEBUG: [ADD_ROUTER] Erro ao carregar {router_path}: {e}")
+                # Fallback: criar imagem simples
+                placeholder_img = Image.new('RGB', (card_w, card_h), color='#666666')
+                router_img = ImageTk.PhotoImage(placeholder_img)
+            
+            # Criar botão do router igual à Store_v2.py
+            router_btn = tk.Button(router_frame, image=router_img, bg="black", cursor="hand2",
+                                  borderwidth=3, relief="raised")
+            router_btn.image = router_img  # Manter referência
+            router_btn.pack()
+            router_btn.bind("<Button-1>", make_router_selection_callback(router_path, i))
+            
+            # Label com nome do router por baixo
+            filename = os.path.basename(router_path)
+            router_id = filename.replace("Equipment_", "").replace(".png", "")
+            
+            router_name_lbl = tk.Label(router_frame, text=f"Router {router_id}", 
+                                     font=("Helvetica", 12, "bold"), fg="white", bg="black")
+            router_name_lbl.pack(pady=(5, 0))
+            
+            # Status label (disponível)
+            status_lbl = tk.Label(router_frame, text="Available", 
+                                font=("Helvetica", 10), fg="#00FF00", bg="black")
+            status_lbl.pack()
+            
+            self.router_buttons.append(router_btn)
+        
+        # Botões de ação na parte inferior (igual Store_v2.py com BelowBar)
+        # Barra inferior com imagem (com fallback)
+        try:
+            belowbar_path = os.path.join(os.path.dirname(__file__), "img", "BelowBar_green.png")
+            if os.path.exists(belowbar_path):
+                belowbar_img = ImageTk.PhotoImage(Image.open(belowbar_path).resize((self.winfo_screenwidth(), 50)))
+                belowbar_label = tk.Label(self, image=belowbar_img, bg="black")
+                belowbar_label.image = belowbar_img
+                belowbar_label.pack(side="bottom", fill="x")
+                print("DEBUG: [ADD_ROUTER] Footer com BelowBar_green criado")
+            else:
+                raise FileNotFoundError("BelowBar_green.png não encontrado")
+        except Exception as e:
+            print(f"DEBUG: [ADD_ROUTER] Erro ao carregar footer: {e} - usando footer simples")
+            footer_frame = tk.Frame(self, bg="#4CAF50", height=50)
+            footer_frame.pack(side="bottom", fill="x")
+        
+        # Botões de ação sobrepostos ao footer (igual Store_v2.py)
+        buttons_frame = tk.Frame(self, bg="black")
+        buttons_frame.place(relx=0.5, rely=0.95, anchor="center")
+        
+        # Botão Cancel
+        cancel_btn = tk.Button(buttons_frame, text="Cancel", font=("Helvetica", 14, "bold"),
+                              fg="white", bg="#666666", relief="flat", width=10, height=1,
+                              cursor="hand2", command=self._cancelar_router_selection)
+        cancel_btn.pack(side="left", padx=(0, 20))
+        
+        # Botão Confirm (inicialmente desabilitado)
+        self.confirm_button = tk.Button(buttons_frame, text="Confirm", 
+                                       font=("Helvetica", 14, "bold"), fg="white", 
+                                       bg="#555555", relief="flat", width=10, height=1,
+                                       state="disabled", command=self._confirmar_router_selection_page)
+        self.confirm_button.pack(side="left")
+        
+        print("DEBUG: [ADD_ROUTER] ✅ Página de seleção de router criada (padrão Store_v2.py)")
+        
+        # FORÇA ATUALIZAÇÃO FINAL DA INTERFACE
+        self.update_idletasks()
+        self.update()
+        
+        # VERIFICAÇÃO FINAL: Confirmar que a página foi criada E está visível
+        def verificar_pagina_final():
+            if hasattr(self, '_in_router_selection_page') and self._in_router_selection_page:
+                widgets_count = len(self.winfo_children())
+                print(f"DEBUG: [ADD_ROUTER] ✅ Página ativa com {widgets_count} widgets após verificação final")
+                
+                # FORÇAR REFRESH VISUAL ADICIONAL
+                self.lift()  # Traz a janela para frente
+                self.focus_force()  # Força foco
+                self.update_idletasks()
+                print("DEBUG: [ADD_ROUTER] ✅ Interface forçada para frente e atualizada")
+            else:
+                print("DEBUG: [ADD_ROUTER] ⚠️ Flag de página perdida após verificação final")
+        
+        # Verificação imediata + verificação com delay
+        verificar_pagina_final()
+        self.after(100, verificar_pagina_final)
+        
+        print("DEBUG: [ADD_ROUTER] ======= PÁGINA CRIADA COM SUCESSO =======")
+    
+    def _obter_equipments_da_store(self):
+        """Obtém lista de equipamentos disponíveis na Store"""
+        print("DEBUG: [ADD_ROUTER] Obtendo equipamentos disponíveis...")
+        
+        # Lista dos 3 routers sempre disponíveis para ADD ROUTER
+        routers_add_router = ["Equipment_1.png", "Equipment_2.png", "Equipment_3.png"]
+        equipments_encontrados = []
+        
+        # DETECÇÃO INTELIGENTE DE CAMINHOS
+        possivel_bases = []
+        
+        # Detectar se estamos no Raspberry Pi
+        is_raspberry = os.path.exists("/home/joao_rebolo")
+        print(f"DEBUG: [ADD_ROUTER] Ambiente Raspberry Pi detectado: {is_raspberry}")
+        
+        if is_raspberry:
+            # Raspberry Pi - testar múltiplos locais possíveis
+            possivel_bases = [
+                "/home/joao_rebolo/netmaster_menu/img/cartas",  # Caminho correto mostrado pelo usuário
+                "/home/joao_rebolo/netmaster_menu",
+                "/home/joao_rebolo/NetMaster", 
+                "/home/joao_rebolo/Desktop/NetMaster"
+            ]
+        else:
+            # Desenvolvimento local
+            possivel_bases = [
+                os.getcwd(),  # Diretório atual
+                os.path.dirname(__file__)  # Diretório do script
+            ]
+        
+        print(f"DEBUG: [ADD_ROUTER] Bases a testar: {possivel_bases}")
+        
+        # Para cada base possível, testar se tem estrutura Equipments
+        for base_path in possivel_bases:
+            if not os.path.exists(base_path):
+                print(f"DEBUG: [ADD_ROUTER] ❌ Base não existe: {base_path}")
+                continue
+                
+            print(f"DEBUG: [ADD_ROUTER] ✅ Testando base: {base_path}")
+            
+            # Verificar se tem diretório Equipments (teste múltiplas variações)
+            # CORREÇÃO: Testar tanto "Equipments" quanto "equipments" para Raspberry Pi
+            equipments_variations = [
+                os.path.join(base_path, "equipments", "Residential-level"),  # Raspberry Pi (minúscula)
+                os.path.join(base_path, "Equipments", "Residential-level"),  # Desenvolvimento (maiúscula)
+                os.path.join(base_path, "img", "cartas", "equipments", "Residential-level")  # Fallback
+            ]
+            
+            equipments_base = None
+            for variation in equipments_variations:
+                if os.path.exists(variation):
+                    equipments_base = variation
+                    print(f"DEBUG: [ADD_ROUTER] ✅ Encontrou Equipments: {equipments_base}")
+                    break
+                else:
+                    print(f"DEBUG: [ADD_ROUTER] ❌ Sem Equipments: {variation}")
+            
+            if not equipments_base:
+                print(f"DEBUG: [ADD_ROUTER] ❌ Nenhuma variação de Equipments encontrada")
+                continue
+                
+            print(f"DEBUG: [ADD_ROUTER] ✅ Encontrou Equipments: {equipments_base}")
+            
+            # Testar cada cor para encontrar os routers
+            for cor in ["Red", "Blue", "Green", "Yellow"]:
+                cor_dir = os.path.join(equipments_base, cor)
+                if not os.path.exists(cor_dir):
+                    print(f"DEBUG: [ADD_ROUTER] ❌ Cor {cor} não existe: {cor_dir}")
+                    continue
+                    
+                print(f"DEBUG: [ADD_ROUTER] ✅ Testando cor {cor}: {cor_dir}")
+                
+                # Verificar se tem todos os 3 routers nesta cor
+                routers_nesta_cor = []
+                for router_filename in routers_add_router:
+                    router_path = os.path.join(cor_dir, router_filename)
+                    if os.path.exists(router_path):
+                        routers_nesta_cor.append(router_path)
+                        print(f"DEBUG: [ADD_ROUTER] ✅ Router encontrado: {router_path}")
+                    else:
+                        print(f"DEBUG: [ADD_ROUTER] ❌ Router missing: {router_path}")
+                
+                # Se encontramos todos os 3, usar esta cor
+                if len(routers_nesta_cor) == 3:
+                    equipments_encontrados = routers_nesta_cor
+                    print(f"DEBUG: [ADD_ROUTER] 🎉 SUCESSO! Todos os 3 routers encontrados em {cor_dir}")
+                    break
+            
+            # Se encontramos, parar de procurar outras bases
+            if equipments_encontrados:
+                break
+        
+        # FALLBACK: Se ainda não encontramos, criar placeholders visuais
+        if not equipments_encontrados:
+            print("DEBUG: [ADD_ROUTER] ⚠️ NENHUM ROUTER ENCONTRADO - Usando placeholders")
+            
+            # Usar imagens de placeholder ou criar caminhos virtuais
+            placeholder_base = "/tmp" if is_raspberry else os.getcwd()
+            for i, router_filename in enumerate(routers_add_router, 1):
+                placeholder_path = f"PLACEHOLDER_ROUTER_{i}"
+                equipments_encontrados.append(placeholder_path)
+                print(f"DEBUG: [ADD_ROUTER] 📝 Placeholder criado: {placeholder_path}")
+        
+        print(f"DEBUG: [ADD_ROUTER] 🏁 RESULTADO FINAL:")
+        print(f"DEBUG: [ADD_ROUTER]   Routers para ADD ROUTER: {len(equipments_encontrados)}")
+        for i, router in enumerate(equipments_encontrados, 1):
+            print(f"DEBUG: [ADD_ROUTER]   {i}. {router}")
+        
+        return equipments_encontrados
+    
+    def _selecionar_router_page(self, router_path, button_index):
+        """Seleciona router na página e atualiza visual dos botões"""
+        print(f"DEBUG: [ADD_ROUTER] Router selecionado: {router_path}")
+        
+        self.router_selection = router_path
+        
+        # Resetar todos os botões para cor normal
+        for btn in self.router_buttons:
+            btn.configure(bg="#4A4A4A", relief="raised", borderwidth=3)
+        
+        # Destacar botão selecionado em roxo
+        if button_index < len(self.router_buttons):
+            self.router_buttons[button_index].configure(bg="#8A2BE2", relief="sunken", borderwidth=4)
+        
+        # Ativar botão Confirm e deixar roxo
+        self.confirm_button.configure(state="normal", bg="#8A2BE2", cursor="hand2")
+    
+    def _cancelar_router_selection(self):
+        """Cancela seleção e volta ao PlayerDashboard"""
+        print("DEBUG: [ADD_ROUTER] Cancelando seleção de router")
+        
+        # RESETAR FLAG DE PROTEÇÃO
+        self._in_router_selection_page = False
+        
+        # Limpar seleção
+        self.router_selection = None
+        
+        # Restaurar interface do PlayerDashboard
+        self._voltar_playerdashboard_apos_router_selection()
+    
+    def _confirmar_router_selection_page(self):
+        """Confirma seleção na página e adiciona router gratuito ao inventário do jogador"""
+        if not self.router_selection:
+            return
+            
+        print(f"DEBUG: [ADD_ROUTER] Confirmando seleção: {self.router_selection}")
+        
+        # RESETAR FLAG DE PROTEÇÃO
+        self._in_router_selection_page = False
+        
+        # Preparar caminho do router para adicionar ao inventário
+        router_para_inventario = self.router_selection
+        
+        # Se é placeholder, criar um caminho de equipamento válido baseado no ID
+        if router_para_inventario.startswith("PLACEHOLDER_"):
+            # Extrair ID do placeholder (ex: PLACEHOLDER_ROUTER_1 -> Equipment_1.png)
+            placeholder_id = router_para_inventario.split("_")[-1]  # Pega último número
+            router_filename = f"Equipment_{placeholder_id}.png"
+            
+            # Criar caminho final baseado na cor do jogador
+            base_equipments = detect_player_inventory_base_dir()
+            color_mapping = {
+                "red": "Red",
+                "blue": "Blue", 
+                "green": "Green",
+                "yellow": "Yellow"
+            }
+            player_color_title = color_mapping.get(self.player_color.lower(), "Red")
+            
+            router_para_inventario = os.path.join(
+                base_equipments, 
+                "Equipments", 
+                "Residential-level", 
+                player_color_title, 
+                router_filename
+            )
+            
+            print(f"DEBUG: [ADD_ROUTER] Placeholder convertido para: {router_para_inventario}")
+        
+        # Adicionar router ao inventário do jogador
+        if "equipments" not in self.inventario:
+            self.inventario["equipments"] = []
+            
+        self.inventario["equipments"].append(router_para_inventario)
+        print(f"DEBUG: [ADD_ROUTER] ✅ Router adicionado gratuitamente ao inventário!")
+        print(f"DEBUG: [ADD_ROUTER] Inventário equipments agora tem: {len(self.inventario['equipments'])} itens")
+        
+        # Voltar ao PlayerDashboard
+        self._voltar_playerdashboard_apos_router_selection()
+    
+    def _voltar_playerdashboard_apos_router_selection(self):
+        """Volta ao PlayerDashboard após seleção/cancelamento de router"""
+        print("DEBUG: [ADD_ROUTER] Voltando ao PlayerDashboard")
+        
+        # RESETAR FLAG DE PROTEÇÃO (garantia adicional)
+        self._in_router_selection_page = False
+        
+        # Limpar a página atual
+        for widget in self.winfo_children():
+            widget.destroy()
+        
+        # Restaurar o PlayerDashboard completo
+        # Preservar estado atual
+        current_saldo = getattr(self, 'saldo', 1000)
+        current_color = getattr(self, 'player_color', 'red')
+        current_others = getattr(self, 'other_players', ['green', 'blue', 'yellow'])
+        current_name = getattr(self, 'player_name', 'Player')
+        current_card_idx = getattr(self, 'selected_card_idx', 0)
+        
+        # Recriar interface do PlayerDashboard
+        self.playerdashboard_interface(
+            current_name, 
+            current_saldo, 
+            current_others,
+            show_store_button=True
+        )
 
 
     def show_inventory_matrix(self, tipos, page=0, back_callback=None):
@@ -8058,11 +9175,43 @@ class PlayerDashboard(tk.Toplevel):
         
         # Limpa widgets (menos barra superior)
         for widget in self.winfo_children():
-            if widget == self.topbar_label:
+            if hasattr(self, 'topbar_label') and widget == self.topbar_label:
                 continue
             widget.destroy()
         screen_width = self.winfo_screenwidth()
         screen_height = self.winfo_screenheight()
+        
+        # Criar TopBar se não existir
+        if not hasattr(self, 'topbar_label') or not self.topbar_label.winfo_exists():
+            try:
+                topbar_img_path = os.path.join(IMG_DIR, f"TopBar_{self.player_color.lower()}.png")
+                print(f"DEBUG: [show_inventory_matrix] Criando TopBar: {topbar_img_path}")
+                
+                if os.path.exists(topbar_img_path):
+                    img = Image.open(topbar_img_path).convert("RGBA")
+                    img = img.resize((screen_width, 60), Image.Resampling.LANCZOS)
+                    topbar_img = ImageTk.PhotoImage(img)
+                    self.topbar_label = tk.Label(self, image=topbar_img, bg="black", borderwidth=0, highlightthickness=0)
+                    self.topbar_label.image = topbar_img  # type: ignore[attr-defined]
+                    self.topbar_label.pack(side="top", fill="x")
+                    print("DEBUG: [show_inventory_matrix] TopBar criada com sucesso!")
+                else:
+                    print(f"DEBUG: [show_inventory_matrix] Arquivo TopBar não encontrado, criando fallback")
+                    # Criar barra superior fallback
+                    topbar_frame = tk.Frame(self, bg=self.bar_color, height=60)
+                    topbar_frame.pack(side="top", fill="x")
+                    topbar_frame.pack_propagate(False)
+                    self.topbar_label = topbar_frame
+                    print("DEBUG: [show_inventory_matrix] TopBar fallback criada!")
+            except Exception as e:
+                print(f"DEBUG: [show_inventory_matrix] ERRO ao criar TopBar: {e}")
+                # Criar barra superior fallback em caso de erro
+                topbar_frame = tk.Frame(self, bg=self.bar_color, height=60)
+                topbar_frame.pack(side="top", fill="x")
+                topbar_frame.pack_propagate(False)
+                self.topbar_label = topbar_frame
+                print("DEBUG: [show_inventory_matrix] TopBar fallback criada após erro!")
+        
         # --- Nome do jogador ---
         name_lbl = tk.Label(self, text=self.player_name, font=("Helvetica", 18, "bold"), bg=self.bar_color, fg="black", borderwidth=0)
         name_lbl.place(relx=0.5, y=25, anchor="n")
@@ -8402,9 +9551,10 @@ class PlayerDashboard(tk.Toplevel):
                             img = ImageTk.PhotoImage(Image.open(carta_path).resize((card_w, card_h)))
                             print(f"DEBUG: [show_inventory_matrix] Carta {carta_tipo} ATIVA (virada para cima): {os.path.basename(carta_path)}")
                         else:
-                            # Carta inativa: mostrar virada para baixo
-                            img = ImageTk.PhotoImage(Image.open(CARD_IMG).resize((card_w, card_h)))
-                            print(f"DEBUG: [show_inventory_matrix] Carta {carta_tipo} INATIVA (virada para baixo): {os.path.basename(carta_path)}")
+                            # Carta inativa: mostrar virada para baixo usando imagem específica da cor do jogador
+                            back_card_colored = os.path.join(IMG_DIR, "cartas", f"back_card_{self.player_color.lower()}.png")
+                            img = ImageTk.PhotoImage(Image.open(back_card_colored).resize((card_w, card_h)))
+                            print(f"DEBUG: [show_inventory_matrix] Carta {carta_tipo} INATIVA (virada para baixo com cor {self.player_color}): {os.path.basename(carta_path)}")
                     else:
                         # Para outros tipos (activities, etc), mostrar normalmente
                         img = ImageTk.PhotoImage(Image.open(carta_path).resize((card_w, card_h)))
@@ -8642,56 +9792,246 @@ class PlayerDashboard(tk.Toplevel):
             if is_action_ativa:
                 print(f"DEBUG: [FULLSCREEN] Action ativa detectada após Next Phase: {os.path.basename(carta_path)}")
                 
-                def remover_action_do_inventario():
-                    """Remove a carta Action do inventário e retorna para o baralho da Store"""
-                    print(f"DEBUG: [REMOVE_ACTION] Removendo Action do inventário: {os.path.basename(carta_path)}")
+                def mostrar_action_info_overlay():
+                    """Mostra overlay com informações da carta Action usando estilo similar ao overlay de Event"""
+                    import re
+                    import os
                     
-                    # Remover carta do inventário
-                    if "actions" in self.inventario and carta_path in self.inventario["actions"]:
-                        self.inventario["actions"].remove(carta_path)
-                        print(f"DEBUG: [REMOVE_ACTION] Carta removida do inventário do jogador")
+                    print(f"DEBUG: [ACTION_INFO] Mostrando informações da Action: {os.path.basename(carta_path)}")
+                    
+                    # Obter dados da carta Action da base de dados
+                    action_title = "Action Information"
+                    action_description = "Description not available"
+                    action_target_router = "N/A"
+                    action_effect = "Effect description not available"
+                    
+                    try:
+                        if self.card_database:
+                            # Extrair ID da carta (ex: "Action_43" -> "action_43")
+                            filename = os.path.basename(carta_path)
+                            match = re.match(r'Action_(\d+)', filename)
+                            
+                            if match:
+                                action_id = f"action_{match.group(1)}"
+                                action_card = self.card_database.get_action(action_id)
+                                
+                                if action_card:
+                                    action_title = action_card.title
+                                    action_description = action_card.description
+                                    action_effect = action_card.effect_description
+                                    # Determinar o target baseado no router_id e tipo de ação
+                                    if action_card.router_id:
+                                        action_target_router = str(action_card.router_id)
+                                    elif ActionType and action_card.action_type in [ActionType.ADD_ROUTER, ActionType.REMOVE_ROUTER]:
+                                        # Para ADD/REMOVE ROUTER, não mostrar número específico
+                                        action_target_router = "New Router" if action_card.action_type == ActionType.ADD_ROUTER else "Any Router"
+                                    elif action_card.title in ["ADD ROUTER", "REMOVE ROUTER"]:
+                                        # Fallback usando o título quando ActionType não está disponível
+                                        action_target_router = "New Router" if action_card.title == "ADD ROUTER" else "Any Router"
+                                    else:
+                                        action_target_router = "N/A"
+                                    
+                                    print(f"DEBUG: [ACTION_INFO] Dados obtidos da base de dados:")
+                                    print(f"DEBUG: [ACTION_INFO]   Title: {action_title}")
+                                    print(f"DEBUG: [ACTION_INFO]   Description: {action_description}")
+                                    print(f"DEBUG: [ACTION_INFO]   Router ID: {action_target_router}")
+                                    print(f"DEBUG: [ACTION_INFO]   Action Type: {action_card.action_type}")
+                                    print(f"DEBUG: [ACTION_INFO]   Effect: {action_effect}")
+                                else:
+                                    print(f"DEBUG: [ACTION_INFO] Action não encontrada na base de dados: {action_id}")
+                            else:
+                                print(f"DEBUG: [ACTION_INFO] Erro ao extrair ID do filename: {filename}")
+                    except Exception as e:
+                        print(f"DEBUG: [ACTION_INFO] Erro ao obter dados da base de dados: {e}")
+                    
+                    # Limpar TODOS os widgets para fullscreen completo (igual ao overlay de Event)
+                    for widget in self.winfo_children():
+                        widget.destroy()
+                    
+                    # Definir fundo preto para a janela
+                    self.config(bg="black")
+                    
+                    # Carregar a imagem da carta como fundo
+                    try:
+                        carta_img = Image.open(carta_path)
+                        screen_width, screen_height = self.winfo_screenwidth(), self.winfo_screenheight()
                         
-                        # Marcar que uma Action foi removida para a próxima carta ficar virada para baixo
-                        self._action_recently_removed = True
-                        print(f"DEBUG: [REMOVE_ACTION] Flag _action_recently_removed definida para True")
+                        # Calcular o ratio para ocupar o máximo possível da tela
+                        ratio = min(screen_width/carta_img.width, screen_height/carta_img.height)
+                        new_w, new_h = int(carta_img.width * ratio), int(carta_img.height * ratio)
+                        carta_resized = carta_img.resize((new_w, new_h), Image.LANCZOS)
+                        carta_photo = ImageTk.PhotoImage(carta_resized)
                         
-                        # Devolver carta ao baralho da Store (se há referência)
-                        if hasattr(self, 'store_window') and self.store_window:
-                            try:
-                                self.store_window.adicionar_carta_ao_baralho(carta_path, "actions", "neutral")
-                                print(f"DEBUG: [REMOVE_ACTION] Carta devolvida ao baralho da Store")
-                            except Exception as e:
-                                print(f"DEBUG: [REMOVE_ACTION] Erro ao devolver carta à Store: {e}")
+                        # Label com a imagem da carta como fundo
+                        carta_label = tk.Label(self, image=carta_photo, bg="black", borderwidth=0, highlightthickness=0)
+                        carta_label.image = carta_photo  # Manter referência
+                        carta_label.place(relx=0.5, rely=0.5, anchor="center")
                         
-                        # Voltar para a página de inventário Actions/Events
-                        print(f"DEBUG: [REMOVE_ACTION] Voltando para inventário Actions/Events")
-                        self.show_inventory_matrix(["actions", "events"], page)
+                    except Exception as e:
+                        print(f"DEBUG: Erro ao carregar imagem da carta: {e}")
+                        self.config(bg="black")
+                    
+                    # Frame para a dialog de informação (centro da tela) - usar pack(expand=True) para dimensionamento dinâmico
+                    info_frame = tk.Frame(self, bg="black")
+                    info_frame.pack(expand=True)
+                    
+                    # Título (valor do campo title da carta Action)
+                    print(f"DEBUG: [ACTION_INFO] Criando título com texto: {repr(action_title)}")
+                    title_label = tk.Label(info_frame, text=action_title, 
+                            font=("Helvetica", 18, "bold"), fg="#9966CC", bg="black",
+                            wraplength=650, justify="center")
+                    title_label.pack(pady=(40, 20))
+                    
+                    # Descrição da Action (texto branco)
+                    print(f"DEBUG: [ACTION_INFO] Criando descrição com texto: {repr(action_description)}")
+                    desc_label = tk.Label(info_frame, text=action_description, 
+                                       font=("Helvetica", 12, "bold"), fg="white", bg="black",
+                                       wraplength=600, justify="center")
+                    desc_label.pack(pady=(0, 20))
+                    
+                    # Target: Mostrar informação apropriada dependendo do tipo de Action
+                    print(f"DEBUG: [ACTION_INFO] Criando target com router ID: {repr(action_target_router)}")
+                    target_frame = tk.Frame(info_frame, bg="black")
+                    target_frame.pack(pady=(0, 20))
+                    
+                    target_label_prefix = tk.Label(target_frame, text="Target: ", 
+                                                 font=("Helvetica", 13, "bold"), fg="#9966CC", bg="black")
+                    target_label_prefix.pack(side="left")
+                    
+                    # Determinar texto do target baseado no tipo de router_id
+                    if action_target_router in ["New Router", "Any Router"]:
+                        target_text = action_target_router
                     else:
-                        print(f"DEBUG: [REMOVE_ACTION] ERRO: Carta não encontrada no inventário Actions")
+                        target_text = f"Residential Router {action_target_router}"
+                    
+                    target_label_value = tk.Label(target_frame, text=target_text, 
+                                                font=("Helvetica", 13, "bold"), fg="white", bg="black")
+                    target_label_value.pack(side="left")
+                    
+                    # Effect description (texto roxo)
+                    print(f"DEBUG: [ACTION_INFO] Criando efeito com texto: {repr(action_effect)}")
+                    effect_label = tk.Label(info_frame, text=action_effect, 
+                                         font=("Helvetica", 12, "bold"), fg="#9966CC", bg="black",
+                                         wraplength=600, justify="center")
+                    effect_label.pack(pady=(0, 30))
+                    
+                    # Frame para o botão
+                    btn_frame = tk.Frame(info_frame, bg="black")
+                    btn_frame.pack(pady=30)
+                    
+                    def remover_action_do_inventario():
+                        """Remove a carta Action do inventário e aplica seus efeitos (ROUTER UPGRADE/DOWNGRADE)"""
+                        print(f"DEBUG: [REMOVE_ACTION] Removendo Action do inventário: {os.path.basename(carta_path)}")
+                        
+                        # NOVA FUNCIONALIDADE: Aplicar efeitos da carta Action antes de removê-la
+                        try:
+                            if self.card_database:
+                                # Extrair ID da carta Action
+                                filename = os.path.basename(carta_path)
+                                match = re.match(r'Action_(\d+)', filename)
+                                
+                                if match:
+                                    action_id = f"action_{match.group(1)}"
+                                    action_card = self.card_database.get_action(action_id)
+                                    
+                                    if action_card:
+                                        print(f"DEBUG: [ACTION_EFFECT] Aplicando efeito da Action {action_card.title}")
+                                        print(f"DEBUG: [ACTION_EFFECT] Action Type: {action_card.action_type}")
+                                        print(f"DEBUG: [ACTION_EFFECT] Router ID: {action_card.router_id}")
+                                        
+                                        # Aplicar efeitos específicos baseados no tipo de Action
+                                        if ActionType and action_card.action_type == ActionType.ROUTER_UPGRADE:
+                                            self._aplicar_router_upgrade(action_card.router_id)
+                                        elif ActionType and action_card.action_type == ActionType.ROUTER_DOWNGRADE:
+                                            self._aplicar_router_downgrade(action_card.router_id)
+                                        elif ActionType and action_card.action_type == ActionType.LINK_UPGRADE:
+                                            self._aplicar_link_upgrade(action_card.router_id)
+                                        elif ActionType and action_card.action_type == ActionType.LINK_DOWNGRADE:
+                                            self._aplicar_link_downgrade(action_card.router_id)
+                                        elif ActionType and action_card.action_type == ActionType.ADD_ROUTER:
+                                            self._aplicar_add_router()
+                                        elif action_card.title == "ROUTER UPGRADE":  # Fallback usando título
+                                            self._aplicar_router_upgrade(action_card.router_id)
+                                        elif action_card.title == "ROUTER DOWNGRADE":  # Fallback usando título
+                                            self._aplicar_router_downgrade(action_card.router_id)
+                                        elif action_card.title == "LINK UPGRADE":  # Fallback usando título
+                                            self._aplicar_link_upgrade(action_card.router_id)
+                                        elif action_card.title == "LINK DOWNGRADE":  # Fallback usando título
+                                            self._aplicar_link_downgrade(action_card.router_id)
+                                        elif action_card.title == "ADD ROUTER":  # Fallback usando título
+                                            self._aplicar_add_router()
+                                        else:
+                                            print(f"DEBUG: [ACTION_EFFECT] Action tipo {action_card.action_type} não implementado ainda")
+                                    else:
+                                        print(f"DEBUG: [ACTION_EFFECT] Action não encontrada na base de dados: {action_id}")
+                                else:
+                                    print(f"DEBUG: [ACTION_EFFECT] Erro ao extrair ID do filename: {filename}")
+                        except Exception as e:
+                            print(f"DEBUG: [ACTION_EFFECT] Erro ao aplicar efeito da Action: {e}")
+                        
+                        # Remover carta do inventário
+                        if "actions" in self.inventario and carta_path in self.inventario["actions"]:
+                            self.inventario["actions"].remove(carta_path)
+                            print(f"DEBUG: [REMOVE_ACTION] Carta removida do inventário do jogador")
+                            
+                            # Marcar que uma Action foi removida para a próxima carta ficar virada para baixo
+                            self._action_recently_removed = True
+                            print(f"DEBUG: [REMOVE_ACTION] Flag _action_recently_removed definida para True")
+                            
+                            # Devolver carta ao baralho da Store (se há referência)
+                            if hasattr(self, 'store_window') and self.store_window:
+                                try:
+                                    self.store_window.adicionar_carta_ao_baralho(carta_path, "actions", "neutral")
+                                    print(f"DEBUG: [REMOVE_ACTION] Carta devolvida ao baralho da Store")
+                                except Exception as e:
+                                    print(f"DEBUG: [REMOVE_ACTION] Erro ao devolver carta à Store: {e}")
+                            
+                            # CORREÇÃO CRÍTICA: NÃO voltar ao inventário se ADD ROUTER abriu página de seleção
+                            if getattr(self, '_in_router_selection_page', False):
+                                print(f"DEBUG: [REMOVE_ACTION] ADD ROUTER ativo - mantendo página de seleção de routers")
+                                return  # Interrompe aqui, não volta ao inventário
+                            
+                            # Voltar para a página de inventário Actions/Events
+                            print(f"DEBUG: [REMOVE_ACTION] Voltando para inventário Actions/Events")
+                            # Limpa tudo menos a barra superior
+                            for widget in self.winfo_children():
+                                if hasattr(self, 'topbar_label') and widget == self.topbar_label:
+                                    continue
+                                widget.destroy()
+                            # Abrir página de inventário Actions/Events
+                            self.show_inventory_matrix(['actions', 'events'], page)
+                        else:
+                            print(f"DEBUG: [REMOVE_ACTION] ERRO: Carta não encontrada no inventário Actions")
+                    
+                    # Botão Go! (roxo para remover a action)
+                    ok_button = tk.Button(btn_frame, text="Go!", font=("Helvetica", 14, "bold"), 
+                                       bg="#9966CC", fg="white", width=8, command=remover_action_do_inventario)
+                    ok_button.pack(pady=10)
+                    
+                    print(f"DEBUG: [ACTION_INFO] Overlay de informações da Action criado e exibido")
                 
-                # Botão vermelho ✓ no canto superior direito
+                # Botão verde ✓ no canto superior direito
                 btn_remove = tk.Button(
                     self, 
                     text="✓", 
                     font=("Helvetica", 24, "bold"), 
-                    bg="#FF4444", 
+                    bg="#4CAF50", 
                     fg="white", 
                     width=2, 
                     height=1, 
                     borderwidth=0, 
                     highlightthickness=0, 
-                    command=remover_action_do_inventario, 
+                    command=mostrar_action_info_overlay, 
                     cursor="hand2", 
-                    activebackground="#CC3333"
+                    activebackground="#43d17a"
                 )
                 btn_remove.place(relx=0.98, rely=0, anchor="ne")
-                print(f"DEBUG: [FULLSCREEN] Botão ✓ vermelho configurado para remoção de Action ativa")
+                print(f"DEBUG: [FULLSCREEN] Botão ✓ verde configurado para mostrar overlay de informações da Action")
         
-        # NOVA FUNCIONALIDADE: Botão vermelho ✓ para remover Events expirados após Next Phase
-        # Condições: Next Phase ativo, antes de Final Phase, carta Event expirada, página Actions/Events
+        # NOVA FUNCIONALIDADE: Botão vermelho ✓ para remover Events expirados
+        # Condições: carta Event expirada, página Actions/Events (INDEPENDENTE de Next Phase)
         elif (carta_tipo == "events" and 
               set(tipos) == set(["actions", "events"]) and
-              getattr(self, '_next_phase_active', False) and 
               not final_phase_normal and  # CORREÇÃO: Permite durante gestão de pacotes
               not is_carta_virada_para_baixo):  # CORREÇÃO: NÃO mostrar botão se carta está virada para baixo
             
@@ -8704,25 +10044,73 @@ class PlayerDashboard(tk.Toplevel):
                 current_turn = getattr(self, '_current_turn', 0)
                 is_event_expirado = False
                 
+                # GARANTIR que o Event do topo está ativo
+                self._ensure_active_event_tracking()
+                
+                # CORREÇÃO: Verificar expiração apenas se Event está ativo
                 if (hasattr(self, '_event_duration_tracking') and 
                     carta_path in self._event_duration_tracking):
                     
                     event_data = self._event_duration_tracking[carta_path]
-                    start_turn = event_data['start_turn']
-                    duration_turns = event_data['duration_turns']
-                    turns_elapsed = current_turn - start_turn
+                    is_active = event_data.get('is_active', False)
+                    start_turn = event_data.get('start_turn')
+                    duration_turns = event_data.get('duration_turns')
                     
                     print(f"DEBUG: [FULLSCREEN] Verificando expiração Event {os.path.basename(carta_path)}:")
+                    print(f"DEBUG: [FULLSCREEN]   É ativo? {is_active}")
                     print(f"DEBUG: [FULLSCREEN]   Turno atual: {current_turn}")
                     print(f"DEBUG: [FULLSCREEN]   Turno início: {start_turn}")
                     print(f"DEBUG: [FULLSCREEN]   Duration: {duration_turns}")
-                    print(f"DEBUG: [FULLSCREEN]   Turnos decorridos: {turns_elapsed}")
-                    print(f"DEBUG: [FULLSCREEN]   Expirado? {turns_elapsed >= duration_turns}")
                     
-                    is_event_expirado = (turns_elapsed >= duration_turns)
+                    # Só verificar expiração se Event está ativo e tem start_turn válido
+                    if is_active and start_turn is not None and duration_turns is not None:
+                        # CORREÇÃO: Verificar se é duração variável
+                        if duration_turns == "variable":
+                            print(f"DEBUG: [FULLSCREEN]   Event com duração variável - ainda não expirou")
+                            print(f"DEBUG: [FULLSCREEN]   Aguardando lançamento do dado para determinar duração")
+                            is_event_expirado = False
+                        else:
+                            turns_elapsed = current_turn - start_turn
+                            print(f"DEBUG: [FULLSCREEN]   Turnos decorridos: {turns_elapsed}")
+                            print(f"DEBUG: [FULLSCREEN]   Expira neste turno? {turns_elapsed >= duration_turns}")
+                            
+                            # CORREÇÃO: No turno de expiração, mostrar botão ✓ para remoção
+                            is_event_expirado = (turns_elapsed >= duration_turns)
+                    else:
+                        print(f"DEBUG: [FULLSCREEN]   Event não está ativo - não calcular expiração")
+                        is_event_expirado = False
+                else:
+                    # CORREÇÃO: Se não há tracking, tentar obter dados da base de dados
+                    print(f"DEBUG: [FULLSCREEN] Event sem tracking - verificando base de dados: {os.path.basename(carta_path)}")
+                    
+                    # Tentar obter duration da base de dados
+                    if hasattr(self, 'card_database') and self.card_database:
+                        try:
+                            event_id = self._extract_event_id_from_path(carta_path)
+                            if event_id:
+                                event_data = self.card_database.get_event(event_id)
+                                if event_data:
+                                    duration_turns = event_data.duration_turns
+                                    
+                                    # CORREÇÃO: Verificar se é duração variável
+                                    if duration_turns == "variable":
+                                        print(f"DEBUG: [FULLSCREEN] Event com duração variável da BD - ainda não expirou")
+                                        is_event_expirado = False
+                                    else:
+                                        # Assumir que começou no turno 1 se não há tracking
+                                        start_turn = 1
+                                        turns_elapsed = current_turn - start_turn
+                                        is_event_expirado = (turns_elapsed >= duration_turns)
+                                        
+                                        print(f"DEBUG: [FULLSCREEN] Event sem tracking - dados obtidos da BD:")
+                                        print(f"DEBUG: [FULLSCREEN]   Duration: {duration_turns}")
+                                        print(f"DEBUG: [FULLSCREEN]   Turnos decorridos estimados: {turns_elapsed}")
+                                        print(f"DEBUG: [FULLSCREEN]   Expira neste turno? {is_event_expirado}")
+                        except Exception as e:
+                            print(f"DEBUG: [FULLSCREEN] Erro ao obter dados do Event da BD: {e}")
                 
                 if is_event_expirado:
-                    print(f"DEBUG: [FULLSCREEN] Event expirado detectado após Next Phase: {os.path.basename(carta_path)}")
+                    print(f"DEBUG: [FULLSCREEN] Event no turno de expiração detectado: {os.path.basename(carta_path)}")
                     
                     def remover_event_do_inventario():
                         """Remove a carta Event expirada do inventário e retorna para o baralho da Store"""
@@ -8738,6 +10126,9 @@ class PlayerDashboard(tk.Toplevel):
                                 del self._event_duration_tracking[carta_path]
                                 print(f"DEBUG: [REMOVE_EVENT] Event removido do tracking de duração")
                             
+                            # CORREÇÃO: Ativar o próximo Event na fila
+                            self._ensure_active_event_tracking()
+                            
                             # Devolver carta ao baralho da Store (se há referência)
                             if hasattr(self, 'store_window') and self.store_window:
                                 try:
@@ -8752,7 +10143,7 @@ class PlayerDashboard(tk.Toplevel):
                         else:
                             print(f"DEBUG: [REMOVE_EVENT] ERRO: Carta não encontrada no inventário Events")
                     
-                    # Botão vermelho ✓ no canto superior direito
+                    # Botão vermelho ✓ no canto superior direito (aparece no turno de expiração)
                     btn_remove_event = tk.Button(
                         self, 
                         text="✓", 
@@ -8768,11 +10159,671 @@ class PlayerDashboard(tk.Toplevel):
                         activebackground="#CC3333"
                     )
                     btn_remove_event.place(relx=0.98, rely=0, anchor="ne")
-                    print(f"DEBUG: [FULLSCREEN] Botão ✓ vermelho configurado para remoção de Event expirado")
+                    print(f"DEBUG: [FULLSCREEN] Botão ✓ vermelho configurado para remoção de Event que expira neste turno")
                 else:
                     print(f"DEBUG: [FULLSCREEN] Event do topo ainda não expirou: {os.path.basename(carta_path)}")
+                    
+                    # FUNCIONALIDADE: Botão ⓘ para mostrar informações do Event não expirado
+                    def mostrar_info_event():
+                        """Mostra overlay com informações do Event ativo usando o estilo do overlay de ativação"""
+                        import re
+                        import os
+                        
+                        print(f"DEBUG: [EVENT_INFO] Mostrando informações do Event: {os.path.basename(carta_path)}")
+                        
+                        # Obter dados da carta Event da base de dados
+                        event_title = "Event Information"
+                        event_effect = "Effect description not available"
+                        event_target = "Target not available"
+                        
+                        try:
+                            if self.card_database:
+                                # Extrair ID da carta (ex: "Event_367" -> "event_367")
+                                filename = os.path.basename(carta_path)
+                                match = re.match(r'Event_(\d+)', filename)
+                                
+                                if match:
+                                    event_id = f"event_{match.group(1)}"
+                                    event_card = self.card_database.get_event(event_id)
+                                    
+                                    if event_card:
+                                        event_title = event_card.title
+                                        event_effect = event_card.effect_description
+                                        # Determinar o target baseado nos campos target_link e target_queue
+                                        if event_card.target_link:
+                                            event_target = event_card.target_link
+                                        elif event_card.target_queue:
+                                            event_target = event_card.target_queue
+                                        else:
+                                            event_target = "Target not specified"
+                                        
+                                        print(f"DEBUG: [EVENT_INFO] Dados obtidos da base de dados:")
+                                        print(f"DEBUG: [EVENT_INFO]   Title: {event_title}")
+                                        print(f"DEBUG: [EVENT_INFO]   Effect: {event_effect}")
+                                        print(f"DEBUG: [EVENT_INFO]   Target: {event_target}")
+                                    else:
+                                        print(f"DEBUG: [EVENT_INFO] Event não encontrado na base de dados: {event_id}")
+                                else:
+                                    print(f"DEBUG: [EVENT_INFO] Erro ao extrair ID do filename: {filename}")
+                        except Exception as e:
+                            print(f"DEBUG: [EVENT_INFO] Erro ao obter dados da base de dados: {e}")
+                        
+                        # Limpar TODOS os widgets para fullscreen completo (igual ao overlay de ativação)
+                        for widget in self.winfo_children():
+                            widget.destroy()
+                        
+                        # Definir fundo preto para a janela
+                        self.config(bg="black")
+                        
+                        # Carregar a imagem da carta como fundo
+                        try:
+                            carta_img = Image.open(carta_path)
+                            screen_width, screen_height = self.winfo_screenwidth(), self.winfo_screenheight()
+                            
+                            # Calcular o ratio para ocupar o máximo possível da tela
+                            ratio = min(screen_width/carta_img.width, screen_height/carta_img.height)
+                            new_w, new_h = int(carta_img.width * ratio), int(carta_img.height * ratio)
+                            carta_resized = carta_img.resize((new_w, new_h), Image.LANCZOS)
+                            carta_photo = ImageTk.PhotoImage(carta_resized)
+                            
+                            # Label com a imagem da carta como fundo
+                            carta_label = tk.Label(self, image=carta_photo, bg="black", borderwidth=0, highlightthickness=0)
+                            carta_label.image = carta_photo  # Manter referência
+                            carta_label.place(relx=0.5, rely=0.5, anchor="center")
+                            
+                        except Exception as e:
+                            print(f"DEBUG: Erro ao carregar imagem da carta: {e}")
+                            self.config(bg="black")
+                        
+                        # Frame para a dialog de informação (centro da tela) - usar pack(expand=True) para dimensionamento dinâmico
+                        info_frame = tk.Frame(self, bg="black")
+                        info_frame.pack(expand=True)
+                        
+                        # Título (roxo)
+                        print(f"DEBUG: [EVENT_INFO] Criando título com texto: {repr(event_title)}")
+                        title_label = tk.Label(info_frame, text=event_title, 
+                                font=("Helvetica", 18, "bold"), fg="#9966CC", bg="black",
+                                wraplength=650, justify="center")
+                        title_label.pack(pady=(40, 20))
+                        
+                        # Descrição do Event
+                        print(f"DEBUG: [EVENT_INFO] Criando descrição com texto: {repr(event_effect)}")
+                        desc_label = tk.Label(info_frame, text=event_effect, 
+                                           font=("Helvetica", 12, "bold"), fg="white", bg="black",
+                                           wraplength=600, justify="center")
+                        desc_label.pack(pady=(0, 20))
+                        
+                        # Target do Event
+                        print(f"DEBUG: [EVENT_INFO] Criando target com texto: {repr(event_target)}")
+                        target_frame = tk.Frame(info_frame, bg="black")
+                        target_frame.pack(pady=(0, 20))
+                        
+                        target_label_prefix = tk.Label(target_frame, text="Target: ", 
+                                                     font=("Helvetica", 13, "bold"), fg="#9966CC", bg="black")
+                        target_label_prefix.pack(side="left")
+                        
+                        target_label_value = tk.Label(target_frame, text=event_target, 
+                                                    font=("Helvetica", 13, "bold"), fg="white", bg="black")
+                        target_label_value.pack(side="left")
+                        
+                        # Frame para o botão
+                        btn_frame = tk.Frame(info_frame, bg="black")
+                        btn_frame.pack(pady=30)
+                        
+                        def fechar_overlay():
+                            print(f"DEBUG: [EVENT_INFO] Fechando overlay de informações")
+                            # Ir para a página de inventário Actions/Events
+                            # Limpa tudo menos a barra superior
+                            for widget in self.winfo_children():
+                                if hasattr(self, 'topbar_label') and widget == self.topbar_label:
+                                    continue
+                                widget.destroy()
+                            # Abrir página de inventário Actions/Events
+                            self.show_inventory_matrix(['actions', 'events'])
+                        
+                        # Botão OK (roxo para combinar com o tema do Event)
+                        ok_button = tk.Button(btn_frame, text="OK", font=("Helvetica", 14, "bold"), 
+                                           bg="#9966CC", fg="white", width=8, command=fechar_overlay)
+                        ok_button.pack(pady=10)
+                        
+                        print(f"DEBUG: [EVENT_INFO] Overlay de informações criado e exibido")
+                    
+                    # Botão i laranja no canto superior direito (apenas quando Event ainda não expirou)
+                    btn_info_event = tk.Button(
+                        self, 
+                        text="i", 
+                        font=("Helvetica", 24, "bold"), 
+                        bg="#FF9800", 
+                        fg="black", 
+                        width=2, 
+                        height=1, 
+                        borderwidth=0, 
+                        highlightthickness=0, 
+                        command=mostrar_info_event, 
+                        cursor="hand2", 
+                        activebackground="#E68900"
+                    )
+                    btn_info_event.place(relx=0.98, rely=0, anchor="ne")
+                    print(f"DEBUG: [FULLSCREEN] Botão i roxo configurado para informações do Event ativo")
+                    
+                    # NOVA FUNCIONALIDADE: Verificar se Event do topo tem duration_turns variável
+                    # Se sim, mostrar botão "?" para determinar duração com dado
+                    if hasattr(self, 'card_database') and self.card_database:
+                        try:
+                            import re
+                            # Extrair ID da carta Event
+                            filename = os.path.basename(carta_path)
+                            match = re.match(r'Event_(\d+)', filename)
+                            
+                            if match:
+                                event_id = f"event_{match.group(1)}"
+                                event_card = self.card_database.get_event(event_id)
+                                
+                                if event_card and event_card.duration_turns == "variable":
+                                    print(f"DEBUG: [VARIABLE_DURATION] Event do topo com duração variável detectado: {os.path.basename(carta_path)}")
+                                    
+                                    def mostrar_overlay_dado_duration():
+                                        """Mostra overlay para rolar dado e definir duration_turns do Event"""
+                                        print(f"DEBUG: [VARIABLE_DURATION] Iniciando overlay de dado para determinar duração")
+                                        
+                                        # Limpar TODOS os widgets para fullscreen completo (igual ao overlay de informação)
+                                        for widget in self.winfo_children():
+                                            widget.destroy()
+                                        
+                                        # Definir fundo preto para a janela
+                                        self.config(bg="black")
+                                        
+                                        # Carregar a imagem da carta como fundo (igual ao overlay do botão "i")
+                                        try:
+                                            carta_img = Image.open(carta_path)
+                                            screen_width, screen_height = self.winfo_screenwidth(), self.winfo_screenheight()
+                                            
+                                            # Calcular o ratio para ocupar o máximo possível da tela
+                                            ratio = min(screen_width/carta_img.width, screen_height/carta_img.height)
+                                            new_w, new_h = int(carta_img.width * ratio), int(carta_img.height * ratio)
+                                            carta_resized = carta_img.resize((new_w, new_h), Image.LANCZOS)
+                                            carta_photo = ImageTk.PhotoImage(carta_resized)
+                                            
+                                            # Label com a imagem da carta como fundo
+                                            carta_label = tk.Label(self, image=carta_photo, bg="black", borderwidth=0, highlightthickness=0)
+                                            carta_label.image = carta_photo  # Manter referência
+                                            carta_label.place(relx=0.5, rely=0.5, anchor="center")
+                                            
+                                        except Exception as e:
+                                            print(f"DEBUG: Erro ao carregar imagem da carta: {e}")
+                                            self.config(bg="black")
+                                        
+                                        # Frame central para o overlay (usar pack(expand=True) para dimensionamento dinâmico)
+                                        overlay_frame = tk.Frame(self, bg="black")
+                                        overlay_frame.pack(expand=True)
+                                        
+                                        # Título roxo
+                                        title_label = tk.Label(overlay_frame, text="   Roll for duration \nof the Event   ", 
+                                                             font=("Helvetica", 22, "bold"), fg="#9966CC", bg="black")
+                                        title_label.pack(pady=(40, 30))
+                                        
+                                        # Dado (inicialmente em branco)
+                                        blank_dice_path = os.path.join(IMG_DIR, "dice", "Dice_blank.png")
+                                        dice_img = ImageTk.PhotoImage(Image.open(blank_dice_path).resize((100, 100)))
+                                        dice_label = tk.Label(overlay_frame, image=dice_img, bg="black")
+                                        dice_label.image = dice_img
+                                        dice_label.pack(pady=20)
+                                        
+                                        # Botão Go!
+                                        go_button = tk.Button(overlay_frame, text="Go!", font=("Helvetica", 16, "bold"), 
+                                                            bg="#005c75", fg="white", width=8)
+                                        go_button.pack(pady=20)
+                                        
+                                        def iniciar_animacao_dado():
+                                            """Inicia a animação do dado e define a duração"""
+                                            print(f"DEBUG: [VARIABLE_DURATION] Iniciando animação do dado")
+                                            
+                                            # Esconder botão Go!
+                                            go_button.pack_forget()
+                                            
+                                            # Animação do dado (25 frames + resultado final)
+                                            frames = 25
+                                            results = [random.randint(1, 6) for _ in range(frames)]
+                                            final_result = random.randint(1, 6)
+                                            results.append(final_result)
+                                            
+                                            def animar_frame(frame_index=0):
+                                                if frame_index < len(results):
+                                                    n = results[frame_index]
+                                                    dice_path = os.path.join(IMG_DIR, "dice", f"Dice_{n}.png")
+                                                    
+                                                    try:
+                                                        new_dice_img = ImageTk.PhotoImage(Image.open(dice_path).resize((100, 100)))
+                                                        dice_label.config(image=new_dice_img)
+                                                        dice_label.image = new_dice_img
+                                                    except Exception as e:
+                                                        print(f"DEBUG: [VARIABLE_DURATION] Erro ao carregar imagem do dado: {e}")
+                                                    
+                                                    # Próximo frame após 100ms
+                                                    overlay_frame.after(100, animar_frame, frame_index + 1)
+                                                else:
+                                                    # Animação terminou - aplicar resultado
+                                                    print(f"DEBUG: [VARIABLE_DURATION] Dado rolado: {final_result}")
+                                                    
+                                                    # Atualizar duration_turns na base de dados (temporariamente na instância)
+                                                    if event_card:
+                                                        event_card.duration_turns = final_result
+                                                        print(f"DEBUG: [VARIABLE_DURATION] Duration_turns atualizado para: {final_result}")
+                                                    
+                                                    # Atualizar tracking de duração se Event já está ativo
+                                                    if (hasattr(self, '_event_duration_tracking') and 
+                                                        carta_path in self._event_duration_tracking):
+                                                        self._event_duration_tracking[carta_path]['duration_turns'] = final_result
+                                                        print(f"DEBUG: [VARIABLE_DURATION] Tracking de duração atualizado")
+                                                    
+                                                    # Aguardar 2 segundos antes de fechar
+                                                    def fechar_overlay():
+                                                        print(f"DEBUG: [VARIABLE_DURATION] Fechando overlay após definir duração")
+                                                        # Voltar para inventário Actions/Events
+                                                        for widget in self.winfo_children():
+                                                            if hasattr(self, 'topbar_label') and widget == self.topbar_label:
+                                                                continue
+                                                            widget.destroy()
+                                                        self.show_inventory_matrix(['actions', 'events'], page)
+                                                    
+                                                    overlay_frame.after(2000, fechar_overlay)
+                                            
+                                            animar_frame()
+                                        
+                                        go_button.config(command=iniciar_animacao_dado)
+                                    
+                                    # Botão "?" na mesma posição do botão Player dos Challenges
+                                    # (canto inferior direito)
+                                    btn_variable_duration = tk.Button(
+                                        self, 
+                                        text="?", 
+                                        font=("Helvetica", 24, "bold"), 
+                                        bg="#9966CC", 
+                                        fg="white", 
+                                        width=2, 
+                                        height=1, 
+                                        borderwidth=0, 
+                                        highlightthickness=0, 
+                                        command=mostrar_overlay_dado_duration, 
+                                        cursor="hand2", 
+                                        activebackground="#7744AA"
+                                    )
+                                    btn_variable_duration.place(relx=0.5, rely=0, anchor="n")
+                                    print(f"DEBUG: [VARIABLE_DURATION] Botão ? roxo criado para Event do topo com duração variável")
+                                else:
+                                    print(f"DEBUG: [VARIABLE_DURATION] Event do topo com duração fixa: {event_card.duration_turns if event_card else 'N/A'}")
+                        except Exception as e:
+                            print(f"DEBUG: [VARIABLE_DURATION] Erro ao verificar duração variável do Event do topo: {e}")
             else:
                 print(f"DEBUG: [FULLSCREEN] Event não é do topo da lista - botão não mostrado")
+        
+        # NOVA FUNCIONALIDADE: Para Events não expirados em qualquer posição (não só do topo)
+        # Botão ⓘ para mostrar informações do Event
+        elif (carta_tipo == "events" and 
+              set(tipos) == set(["actions", "events"]) and
+              not is_carta_virada_para_baixo):
+            
+            print(f"DEBUG: [FULLSCREEN] Verificando Event não-do-topo para botão ⓘ: {os.path.basename(carta_path)}")
+            
+            # Verificar se o Event ainda está ativo (não expirado)
+            current_turn = getattr(self, '_current_turn', 0)
+            is_event_ativo = True  # Por padrão, assume que está ativo
+            
+            if (hasattr(self, '_event_duration_tracking') and 
+                carta_path in self._event_duration_tracking):
+                
+                event_data = self._event_duration_tracking[carta_path]
+                start_turn = event_data['start_turn']
+                duration_turns = event_data['duration_turns']
+                turns_elapsed = current_turn - start_turn
+                is_event_ativo = (turns_elapsed < duration_turns)
+                
+                print(f"DEBUG: [FULLSCREEN] Event tracking - Ativo? {is_event_ativo} (turnos: {turns_elapsed}/{duration_turns})")
+            
+            if is_event_ativo:
+                print(f"DEBUG: [FULLSCREEN] Event ativo detectado - criando botão ?")
+                
+                def mostrar_info_event_geral():
+                    """Mostra overlay com informações do Event ativo usando o estilo do overlay de ativação"""
+                    import re
+                    import os
+                    
+                    print(f"DEBUG: [EVENT_INFO] Mostrando informações do Event: {os.path.basename(carta_path)}")
+                    
+                    # Obter dados da carta Event da base de dados
+                    event_title = "Event Information"
+                    event_effect = "Effect description not available"
+                    event_target = "Target not available"
+                    
+                    try:
+                        if self.card_database:
+                            # Extrair ID da carta (ex: "Event_367" -> "event_367")
+                            filename = os.path.basename(carta_path)
+                            match = re.match(r'Event_(\d+)', filename)
+                            
+                            if match:
+                                event_id = f"event_{match.group(1)}"
+                                event_card = self.card_database.get_event(event_id)
+                                
+                                if event_card:
+                                    event_title = event_card.title
+                                    event_effect = event_card.effect_description
+                                    # Determinar o target baseado nos campos target_link e target_queue
+                                    if event_card.target_link:
+                                        event_target = event_card.target_link
+                                    elif event_card.target_queue:
+                                        event_target = event_card.target_queue
+                                    else:
+                                        event_target = "Target not specified"
+                                    
+                                    print(f"DEBUG: [EVENT_INFO] Dados obtidos da base de dados:")
+                                    print(f"DEBUG: [EVENT_INFO]   Title: {event_title}")
+                                    print(f"DEBUG: [EVENT_INFO]   Effect: {event_effect}")
+                                    print(f"DEBUG: [EVENT_INFO]   Target: {event_target}")
+                                else:
+                                    print(f"DEBUG: [EVENT_INFO] Event não encontrado na base de dados: {event_id}")
+                            else:
+                                print(f"DEBUG: [EVENT_INFO] Erro ao extrair ID do filename: {filename}")
+                    except Exception as e:
+                        print(f"DEBUG: [EVENT_INFO] Erro ao obter dados da base de dados: {e}")
+                    
+                    # Limpar TODOS os widgets para fullscreen completo (igual ao overlay de ativação)
+                    for widget in self.winfo_children():
+                        widget.destroy()
+                    
+                    # Definir fundo preto para a janela
+                    self.config(bg="black")
+                    
+                    # Carregar a imagem da carta como fundo
+                    try:
+                        carta_img = Image.open(carta_path)
+                        screen_width, screen_height = self.winfo_screenwidth(), self.winfo_screenheight()
+                        
+                        # Calcular o ratio para ocupar o máximo possível da tela
+                        ratio = min(screen_width/carta_img.width, screen_height/carta_img.height)
+                        new_w, new_h = int(carta_img.width * ratio), int(carta_img.height * ratio)
+                        carta_resized = carta_img.resize((new_w, new_h), Image.LANCZOS)
+                        carta_photo = ImageTk.PhotoImage(carta_resized)
+                        
+                        # Label com a imagem da carta como fundo
+                        carta_label = tk.Label(self, image=carta_photo, bg="black", borderwidth=0, highlightthickness=0)
+                        carta_label.image = carta_photo  # Manter referência
+                        carta_label.place(relx=0.5, rely=0.5, anchor="center")
+                        
+                    except Exception as e:
+                        print(f"DEBUG: Erro ao carregar imagem da carta: {e}")
+                        self.config(bg="black")
+                    
+                    # Frame para a dialog de informação (centro da tela) - usar pack(expand=True) para dimensionamento dinâmico
+                    info_frame = tk.Frame(self, bg="black")
+                    info_frame.pack(expand=True)
+                    
+                    # Título (roxo)
+                    print(f"DEBUG: [EVENT_INFO] Criando título com texto: {repr(event_title)}")
+                    title_label = tk.Label(info_frame, text=event_title, 
+                            font=("Helvetica", 18, "bold"), fg="#9966CC", bg="black",
+                            wraplength=650, justify="center")
+                    title_label.pack(pady=(40, 20))
+                    
+                    # Descrição do Event
+                    print(f"DEBUG: [EVENT_INFO] Criando descrição com texto: {repr(event_effect)}")
+                    desc_label = tk.Label(info_frame, text=event_effect, 
+                                       font=("Helvetica", 12, "bold"), fg="white", bg="black",
+                                       wraplength=600, justify="center")
+                    desc_label.pack(pady=(0, 20))
+                    
+                    # Target do Event
+                    print(f"DEBUG: [EVENT_INFO] Criando target com texto: {repr(event_target)}")
+                    target_frame = tk.Frame(info_frame, bg="black")
+                    target_frame.pack(pady=(0, 20))
+                    
+                    target_label_prefix = tk.Label(target_frame, text="Target: ", 
+                                                 font=("Helvetica", 14, "bold"), fg="#9966CC", bg="black")
+                    target_label_prefix.pack(side="left")
+                    
+                    target_label_value = tk.Label(target_frame, text=event_target, 
+                                                font=("Helvetica", 14, "bold"), fg="white", bg="black")
+                    target_label_value.pack(side="left")
+                    
+                    # Frame para o botão
+                    btn_frame = tk.Frame(info_frame, bg="black")
+                    btn_frame.pack(pady=30)
+                    
+                    def fechar_overlay():
+                        print(f"DEBUG: [EVENT_INFO] Fechando overlay de informações")
+                        # Ir para a página de inventário Actions/Events
+                        # Limpa tudo menos a barra superior
+                        for widget in self.winfo_children():
+                            if hasattr(self, 'topbar_label') and widget == self.topbar_label:
+                                continue
+                            widget.destroy()
+                        # Abrir página de inventário Actions/Events
+                        self.show_inventory_matrix(['actions', 'events'])
+                    
+                    # Botão OK (roxo para combinar com o tema do Event)
+                    ok_button = tk.Button(btn_frame, text="OK", font=("Helvetica", 14, "bold"), 
+                                       bg="#9966CC", fg="white", width=8, command=fechar_overlay)
+                    ok_button.pack(pady=10)
+                    
+                    print(f"DEBUG: [EVENT_INFO] Overlay de informações criado e exibido")
+                
+                # Botão i laranja no canto superior direito (Events não do topo da lista)
+                btn_info_event = tk.Button(
+                    self, 
+                    text="i", 
+                    font=("Helvetica", 24, "bold"), 
+                    bg="#FF9800", 
+                    fg="black", 
+                    width=2, 
+                    height=1, 
+                    borderwidth=0, 
+                    highlightthickness=0, 
+                    command=mostrar_info_event_geral, 
+                    cursor="hand2", 
+                    activebackground="#E68900"
+                )
+                btn_info_event.place(relx=0.98, rely=0, anchor="ne")
+                print(f"DEBUG: [FULLSCREEN] Botão i roxo configurado para informações do Event ativo")
+                
+                # NOVA FUNCIONALIDADE: Verificar se Event tem duration_turns variável
+                # Se sim, mostrar botão "?" para determinar duração com dado
+                if hasattr(self, 'card_database') and self.card_database:
+                    try:
+                        import re
+                        # Extrair ID da carta Event
+                        filename = os.path.basename(carta_path)
+                        match = re.match(r'Event_(\d+)', filename)
+                        
+                        if match:
+                            event_id = f"event_{match.group(1)}"
+                            event_card = self.card_database.get_event(event_id)
+                            
+                            if event_card and event_card.duration_turns == "variable":
+                                print(f"DEBUG: [VARIABLE_DURATION] Event com duração variável detectado: {os.path.basename(carta_path)}")
+                                
+                                def mostrar_overlay_dado_duration():
+                                    """Mostra overlay para rolar dado e definir duration_turns do Event"""
+                                    print(f"DEBUG: [VARIABLE_DURATION] Iniciando overlay de dado para determinar duração")
+                                    
+                                    # Limpar TODOS os widgets para fullscreen completo (igual ao overlay de informação)
+                                    for widget in self.winfo_children():
+                                        widget.destroy()
+                                    
+                                    # Definir fundo preto para a janela
+                                    self.config(bg="black")
+                                    
+                                    # Carregar a imagem da carta como fundo (igual ao overlay do botão "i")
+                                    try:
+                                        carta_img = Image.open(carta_path)
+                                        screen_width, screen_height = self.winfo_screenwidth(), self.winfo_screenheight()
+                                        
+                                        # Calcular o ratio para ocupar o máximo possível da tela
+                                        ratio = min(screen_width/carta_img.width, screen_height/carta_img.height)
+                                        new_w, new_h = int(carta_img.width * ratio), int(carta_img.height * ratio)
+                                        carta_resized = carta_img.resize((new_w, new_h), Image.LANCZOS)
+                                        carta_photo = ImageTk.PhotoImage(carta_resized)
+                                        
+                                        # Label com a imagem da carta como fundo
+                                        carta_label = tk.Label(self, image=carta_photo, bg="black", borderwidth=0, highlightthickness=0)
+                                        carta_label.image = carta_photo  # Manter referência
+                                        carta_label.place(relx=0.5, rely=0.5, anchor="center")
+                                        
+                                    except Exception as e:
+                                        print(f"DEBUG: Erro ao carregar imagem da carta: {e}")
+                                        self.config(bg="black")
+                                    
+                                    # Frame central para o overlay (usar pack(expand=True) para dimensionamento dinâmico)
+                                    overlay_frame = tk.Frame(self, bg="black")
+                                    overlay_frame.pack(expand=True)
+                                    
+                                    # Título roxo
+                                    title_label = tk.Label(overlay_frame, text="   Roll for duration \nof the Event   ", 
+                                                         font=("Helvetica", 22, "bold"), fg="#9966CC", bg="black")
+                                    title_label.pack(pady=(40, 30))
+                                    
+                                    # Dado (inicialmente em branco)
+                                    blank_dice_path = os.path.join(IMG_DIR, "dice", "Dice_blank.png")
+                                    dice_img = ImageTk.PhotoImage(Image.open(blank_dice_path).resize((100, 100)))
+                                    dice_label = tk.Label(overlay_frame, image=dice_img, bg="black")
+                                    dice_label.image = dice_img
+                                    dice_label.pack(pady=20)
+                                    
+                                    # Botão Go!
+                                    go_button = tk.Button(overlay_frame, text="Go!", font=("Helvetica", 16, "bold"), 
+                                                        bg="#005c75", fg="white", width=8)
+                                    go_button.pack(pady=20)
+                                    
+                                    def iniciar_animacao_dado():
+                                        """Inicia a animação do dado e define a duração"""
+                                        print(f"DEBUG: [VARIABLE_DURATION] Iniciando animação do dado")
+                                        
+                                        # Esconder botão Go!
+                                        go_button.pack_forget()
+                                        
+                                        # Animação do dado (25 frames + resultado final)
+                                        frames = 25
+                                        results = [random.randint(1, 6) for _ in range(frames)]
+                                        final_result = random.randint(1, 6)
+                                        results.append(final_result)
+                                        
+                                        def animar_frame(frame_index=0):
+                                            if frame_index < len(results):
+                                                n = results[frame_index]
+                                                dice_path = os.path.join(IMG_DIR, "dice", f"Dice_{n}.png")
+                                                
+                                                try:
+                                                    new_dice_img = ImageTk.PhotoImage(Image.open(dice_path).resize((100, 100)))
+                                                    dice_label.config(image=new_dice_img)
+                                                    dice_label.image = new_dice_img
+                                                except Exception as e:
+                                                    print(f"DEBUG: [VARIABLE_DURATION] Erro ao carregar imagem do dado: {e}")
+                                                
+                                                # Próximo frame após 100ms
+                                                overlay_frame.after(100, animar_frame, frame_index + 1)
+                                            else:
+                                                # Animação terminou - aplicar resultado
+                                                print(f"DEBUG: [VARIABLE_DURATION] Dado rolado: {final_result}")
+                                                
+                                                # Atualizar duration_turns na base de dados (temporariamente na instância)
+                                                if event_card:
+                                                    event_card.duration_turns = final_result
+                                                    print(f"DEBUG: [VARIABLE_DURATION] Duration_turns atualizado para: {final_result}")
+                                                
+                                                # Atualizar tracking de duração se Event já está ativo
+                                                if (hasattr(self, '_event_duration_tracking') and 
+                                                    carta_path in self._event_duration_tracking):
+                                                    self._event_duration_tracking[carta_path]['duration_turns'] = final_result
+                                                    print(f"DEBUG: [VARIABLE_DURATION] Tracking de duração atualizado")
+                                                
+                                                # Aguardar 2 segundos antes de fechar
+                                                def fechar_overlay():
+                                                    print(f"DEBUG: [VARIABLE_DURATION] Fechando overlay após definir duração")
+                                                    # Voltar para inventário Actions/Events
+                                                    for widget in self.winfo_children():
+                                                        if hasattr(self, 'topbar_label') and widget == self.topbar_label:
+                                                            continue
+                                                        widget.destroy()
+                                                    self.show_inventory_matrix(['actions', 'events'], page)
+                                                
+                                                overlay_frame.after(2000, fechar_overlay)
+                                        
+                                        animar_frame()
+                                    
+                                    go_button.config(command=iniciar_animacao_dado)
+                                
+                                # Botão "?" na mesma posição do botão Player dos Challenges
+                                # (canto inferior direito)
+                                btn_variable_duration = tk.Button(
+                                    self, 
+                                    text="?", 
+                                    font=("Helvetica", 24, "bold"), 
+                                    bg="#9966CC", 
+                                    fg="white", 
+                                    width=2, 
+                                    height=1, 
+                                    borderwidth=0, 
+                                    highlightthickness=0, 
+                                    command=mostrar_overlay_dado_duration, 
+                                    cursor="hand2", 
+                                    activebackground="#7744AA"
+                                )
+                                btn_variable_duration.place(relx=0.5, rely=0, anchor="n")
+                                print(f"DEBUG: [VARIABLE_DURATION] Botão ? roxo criado para Event com duração variável")
+                            else:
+                                print(f"DEBUG: [VARIABLE_DURATION] Event com duração fixa: {event_card.duration_turns if event_card else 'N/A'}")
+                    except Exception as e:
+                        print(f"DEBUG: [VARIABLE_DURATION] Erro ao verificar duração variável: {e}")
+            else:
+                # Event expirado - mostrar botão ✓ vermelho para remoção
+                print(f"DEBUG: [FULLSCREEN] Event expirado detectado - criando botão ✓ vermelho")
+                
+                def remover_event_expirado():
+                    """Remove a carta Event expirada do inventário e retorna para o baralho da Store"""
+                    print(f"DEBUG: [REMOVE_EVENT] Removendo Event expirado do inventário: {os.path.basename(carta_path)}")
+                    
+                    # Remover carta do inventário
+                    if "events" in self.inventario and carta_path in self.inventario["events"]:
+                        self.inventario["events"].remove(carta_path)
+                        print(f"DEBUG: [REMOVE_EVENT] Carta removida do inventário do jogador")
+                        
+                        # Remover do tracking de duração
+                        if hasattr(self, '_event_duration_tracking') and carta_path in self._event_duration_tracking:
+                            del self._event_duration_tracking[carta_path]
+                            print(f"DEBUG: [REMOVE_EVENT] Event removido do tracking de duração")
+                        
+                        # Devolver carta ao baralho da Store (se há referência)
+                        if hasattr(self, 'store_window') and self.store_window:
+                            try:
+                                self.store_window.adicionar_carta_ao_baralho(carta_path, "events", "neutral")
+                                print(f"DEBUG: [REMOVE_EVENT] Carta devolvida ao baralho da Store")
+                            except Exception as e:
+                                print(f"DEBUG: [REMOVE_EVENT] Erro ao devolver carta à Store: {e}")
+                        
+                        # Voltar para a página de inventário Actions/Events
+                        print(f"DEBUG: [REMOVE_EVENT] Voltando para inventário Actions/Events")
+                        # Obter a página atual se disponível
+                        current_page = getattr(self, '_current_inventory_page', 0)
+                        self.show_inventory_matrix(["actions", "events"], current_page)
+                    else:
+                        print(f"DEBUG: [REMOVE_EVENT] ERRO: Carta não encontrada no inventário Events")
+                
+                # Botão vermelho ✓ no canto superior direito (aparece quando Event está expirado)
+                btn_remove_event = tk.Button(
+                    self, 
+                    text="✓", 
+                    font=("Helvetica", 24, "bold"), 
+                    bg="#FF4444", 
+                    fg="white", 
+                    width=2, 
+                    height=1, 
+                    borderwidth=0, 
+                    highlightthickness=0, 
+                    command=remover_event_expirado, 
+                    cursor="hand2", 
+                    activebackground="#CC3333"
+                )
+                btn_remove_event.place(relx=0.98, rely=0, anchor="ne")
+                print(f"DEBUG: [FULLSCREEN] Botão ✓ vermelho configurado para remoção de Event expirado")
         else:
             # Debug para quando o botão vermelho não é criado
             if carta_tipo == "actions":
@@ -8905,16 +10956,48 @@ class PlayerDashboard(tk.Toplevel):
                 
                 # Configurar comando do botão Switch
                 def aceitar_carta():
-                    # CORREÇÃO: Usar aceitar_carta_carrossel para aplicar todas as verificações de restrição
-                    print("DEBUG: [FULLSCREEN] Chamando aceitar_carta_carrossel para aplicar restrições")
-                    self.aceitar_carta_carrossel(carta_path, [carta_tipo], 0)
+                    # NOVA LÓGICA: Só mostrar overlay se vai SUBSTITUIR uma carta (não quando vai colocar numa posição vazia)
+                    print("DEBUG: [FULLSCREEN] Verificando se vai substituir carta existente ou colocar em posição vazia")
+                    
+                    # Obter a posição de destino mais provável (primeira posição vazia ou acessível)
+                    posicao_destino = None
+                    carta_na_posicao_destino = None
+                    
+                    if hasattr(self, 'carrossel_idx_selecao') and self.carrossel_idx_selecao is not None:
+                        # Se há uma posição específica selecionada, usar essa
+                        posicao_destino = self.carrossel_idx_selecao
+                    else:
+                        # Encontrar a primeira posição acessível (vazia ou não)
+                        if hasattr(self, 'cards'):
+                            for i, carta_carrossel in enumerate(self.cards):
+                                if self._can_access_carousel_position(i):
+                                    posicao_destino = i
+                                    break
+                    
+                    # Verificar se há uma carta real na posição de destino
+                    vai_substituir_carta = False
+                    if posicao_destino is not None and hasattr(self, 'cards') and posicao_destino < len(self.cards):
+                        carta_na_posicao_destino = self.cards[posicao_destino]
+                        # Se não é back_card, significa que há uma carta real para substituir
+                        if not os.path.basename(carta_na_posicao_destino).startswith("back_card_"):
+                            vai_substituir_carta = True
+                            print(f"DEBUG: [FULLSCREEN] Vai SUBSTITUIR carta existente na posição {posicao_destino}: {os.path.basename(carta_na_posicao_destino)}")
+                        else:
+                            print(f"DEBUG: [FULLSCREEN] Vai COLOCAR em posição VAZIA {posicao_destino}")
+                    
+                    if vai_substituir_carta:
+                        print("DEBUG: [FULLSCREEN] Substituição detectada - mostrando overlay de confirmação")
+                        self._mostrar_overlay_confirmacao_troca(carta_path, [carta_tipo], 0)
+                    else:
+                        print("DEBUG: [FULLSCREEN] Colocação em posição vazia - indo diretamente para aceitar carta")
+                        self.aceitar_carta_carrossel(carta_path, [carta_tipo], 0)
                 
                 if btn_switch_carrossel is not None:
                     btn_switch_carrossel.config(command=aceitar_carta)
                     print(f"DEBUG: [FULLSCREEN] Botão Switch configurado para aceitar {carta_tipo} no carrossel")
                 
-                # BOTÃO QUIT CHALLENGE (apenas para Challenges)
-                if carta_tipo == "challenges" and next_phase_active:
+                # BOTÃO QUIT CHALLENGE (apenas para Challenges ANTES de Next Phase)
+                if carta_tipo == "challenges" and not next_phase_active:
                     print(f"DEBUG: [FULLSCREEN] Criando botão Quit Challenge no canto superior direito")
                     
                     # Botão vermelho com símbolo de check (✓) para quit challenge
@@ -11117,7 +13200,34 @@ class PlayerDashboard(tk.Toplevel):
                     btn_switch_carrossel = tk.Button(self, image=switch_img, bg="#FF9800", borderwidth=0, highlightthickness=0, cursor="hand2", activebackground="#E68900")
                     btn_switch_carrossel.image = switch_img  # Manter referência
                     btn_switch_carrossel.place(relx=0.98, rely=0, anchor="ne")
-                    btn_switch_carrossel.config(command=lambda: self.aceitar_carta_carrossel(carta_path, tipos, page))
+                    
+                    # CORREÇÃO: Aplicar a mesma lógica de detecção de substituição
+                    def switch_com_detecao_substituicao():
+                        print("DEBUG: [CARROSSEL_SELECAO] Verificando se vai substituir carta no carrossel")
+                        
+                        # Detectar posição de destino
+                        posicao_destino = self.carrossel_idx_selecao
+                        if posicao_destino is None:
+                            # Se não há seleção específica, usar primeira posição acessível
+                            for i in range(len(self.cards)):
+                                if self._can_access_carousel_position(i):
+                                    posicao_destino = i
+                                    break
+                        
+                        # Verificar se a posição de destino contém uma carta real (não back_card)
+                        vai_substituir_carta = False
+                        if posicao_destino is not None and posicao_destino < len(self.cards):
+                            carta_na_posicao_destino = self.cards[posicao_destino]
+                            vai_substituir_carta = not os.path.basename(carta_na_posicao_destino).startswith("back_card_")
+                        
+                        if vai_substituir_carta:
+                            print("DEBUG: [CARROSSEL_SELECAO] Vai substituir carta existente - mostrando overlay de confirmação")
+                            self._mostrar_overlay_confirmacao_troca(carta_path, tipos, page)
+                        else:
+                            print("DEBUG: [CARROSSEL_SELECAO] Vai colocar em posição vazia - indo diretamente para aceitar carta")
+                            self.aceitar_carta_carrossel(carta_path, tipos, page)
+                    
+                    btn_switch_carrossel.config(command=switch_com_detecao_substituicao)
                     print(f"DEBUG: [CARROSSEL] ✅ Botão Switch principal CRIADO - condições atendidas")
                 else:
                     btn_switch_carrossel = None
@@ -11263,8 +13373,27 @@ class PlayerDashboard(tk.Toplevel):
                         print(f"DEBUG: [CARROSSEL] ❌ Botão Switch adicional NÃO criado - SEM posições válidas no carrossel")
                 
                 def switch_action():
-                    # Aceitar carta para o carrossel (comportamento original do botão ✔)
-                    self.aceitar_carta_carrossel(carta_path, tipos, page)
+                    # CORREÇÃO: Aplicar a mesma lógica de detecção de progresso
+                    print("DEBUG: [CARROSSEL] Verificando progresso do carrossel para Switch adicional")
+                    
+                    # Verificar se temos cartas ativas no carrossel com progresso
+                    carrossel_tem_progresso = False
+                    if hasattr(self, 'cards') and hasattr(self, 'card_stats'):
+                        for i, carta_carrossel in enumerate(self.cards):
+                            if not os.path.basename(carta_carrossel).startswith("back_card_"):
+                                # Há carta ativa no carrossel - verificar se tem progresso
+                                if i < len(self.card_stats):
+                                    stats = self.card_stats[i]
+                                    if stats.get('To send', 0) > 0 or stats.get('Rxd', 0) > 0 or stats.get('Lost', 0) > 0:
+                                        carrossel_tem_progresso = True
+                                        break
+                    
+                    if carrossel_tem_progresso:
+                        print("DEBUG: [CARROSSEL] Carrossel tem progresso - mostrando overlay de confirmação")
+                        self._mostrar_overlay_confirmacao_troca(carta_path, tipos, page)
+                    else:
+                        print("DEBUG: [CARROSSEL] Carrossel sem progresso - indo diretamente para aceitar carta")
+                        self.aceitar_carta_carrossel(carta_path, tipos, page)
                 
                 if btn_switch_adicional is not None:
                     btn_switch_adicional.config(command=switch_action)
@@ -11273,6 +13402,41 @@ class PlayerDashboard(tk.Toplevel):
             # Para Challenges ou Activities que não podem ser vendidas, manter comportamento original do Switch
             elif carta_tipo == "challenges" or (carta_tipo == "activities" and not pode_vender):
                 print(f"DEBUG: [CARROSSEL] Botão Switch mantém comportamento original para {carta_tipo} (aceitar no carrossel)")
+        
+        # BOTÃO QUIT CHALLENGE (apenas para Challenges ANTES de Next Phase) - INVENTÁRIO
+        if carta_tipo == "challenges" and not getattr(self, '_next_phase_active', False):
+            print(f"DEBUG: [CARROSSEL_INVENTARIO] Criando botão Quit Challenge no canto superior direito")
+            
+            # Botão vermelho com símbolo de check (✓) para quit challenge
+            btn_quit_challenge = tk.Button(
+                self, 
+                text="✓", 
+                font=("Helvetica", 24, "bold"), 
+                bg="#DC143C", 
+                fg="white", 
+                width=2, 
+                height=1, 
+                borderwidth=0, 
+                highlightthickness=0, 
+                cursor="hand2", 
+                activebackground="#B22222"
+            )
+            
+            # Posição específica para inventário - verificar se há botão Switch no canto superior direito
+            if btn_switch_carrossel is not None:
+                # Se há botão Switch, posicionar o quit Challenge ligeiramente abaixo
+                btn_quit_challenge.place(relx=0.98, rely=0.08, anchor="ne")
+            else:
+                # Se não há botão Switch, posicionar no canto superior direito
+                btn_quit_challenge.place(relx=0.98, rely=0, anchor="ne")
+            
+            # Comando do botão quit
+            def mostrar_confirmacao_quit():
+                print(f"DEBUG: [QUIT_CHALLENGE_INVENTARIO] Iniciando confirmação de quit para carta: {os.path.basename(carta_path)}")
+                self._mostrar_overlay_quit_challenge(carta_path)
+            
+            btn_quit_challenge.config(command=mostrar_confirmacao_quit)
+            print(f"DEBUG: [CARROSSEL_INVENTARIO] ✅ Botão Quit Challenge criado no canto superior direito")
 
     def aceitar_carta_carrossel(self, carta_path, tipos, page=0):
         # NOVA RESTRIÇÃO: Verificar se é tentativa de trocar Challenge por outra carta que não seja Activity
@@ -11649,19 +13813,41 @@ class PlayerDashboard(tk.Toplevel):
         else:
             # Se não há posições vazias, verificar se há cartas para trocar
             if is_activity_card:
-                # Activity só pode trocar com outra Activity quando há outras Activities
-                if activities_no_inventario > 1:  # >1 porque a própria carta atual não conta
+                # CORREÇÃO: Activity pode trocar com outra Activity do inventário OU com Activity do carrossel
+                # Contar Activities totais (inventário + carrossel)
+                activities_no_carrossel = 0
+                if hasattr(self, 'cards'):
+                    for carta_carrossel in self.cards:
+                        if "Activity" in os.path.basename(carta_carrossel):
+                            activities_no_carrossel += 1
+                
+                total_activities = activities_no_inventario + activities_no_carrossel
+                print(f"DEBUG: [NEXT PHASE] Activities no inventário: {activities_no_inventario}, no carrossel: {activities_no_carrossel}, total: {total_activities}")
+                
+                # Activity pode trocar se há pelo menos uma outra Activity (total > 1)
+                if total_activities > 1:
                     should_show_switch = True
-                    print(f"DEBUG: [NEXT PHASE] ✅ Activity com {activities_no_inventario} Activities disponíveis - botão switch permitido (troca Activity→Activity)")
+                    print(f"DEBUG: [NEXT PHASE] ✅ Activity com {total_activities} Activities disponíveis (inventário + carrossel) - botão switch permitido (troca Activity→Activity)")
                 else:
-                    print(f"DEBUG: [NEXT PHASE] ❌ Activity sem outras Activities para trocar no inventário ({activities_no_inventario}) - botão switch NÃO criado")
+                    print(f"DEBUG: [NEXT PHASE] ❌ Activity sem outras Activities para trocar (total: {total_activities}) - botão switch NÃO criado")
             elif is_challenge_card:
-                # Challenge só pode trocar por Challenge
-                if challenges_no_inventario > 1:  # >1 porque a própria carta atual não conta
+                # CORREÇÃO: Challenge pode trocar com outro Challenge do inventário OU com Challenge do carrossel
+                # Contar Challenges totais (inventário + carrossel)
+                challenges_no_carrossel = 0
+                if hasattr(self, 'cards'):
+                    for carta_carrossel in self.cards:
+                        if "Challenge" in os.path.basename(carta_carrossel):
+                            challenges_no_carrossel += 1
+                
+                total_challenges = challenges_no_inventario + challenges_no_carrossel
+                print(f"DEBUG: [NEXT PHASE] Challenges no inventário: {challenges_no_inventario}, no carrossel: {challenges_no_carrossel}, total: {total_challenges}")
+                
+                # Challenge pode trocar se há pelo menos um outro Challenge (total > 1)
+                if total_challenges > 1:
                     should_show_switch = True
-                    print(f"DEBUG: [NEXT PHASE] ✅ Challenge com {challenges_no_inventario} Challenges disponíveis - botão switch permitido (troca)")
+                    print(f"DEBUG: [NEXT PHASE] ✅ Challenge com {total_challenges} Challenges disponíveis (inventário + carrossel) - botão switch permitido (troca)")
                 else:
-                    print(f"DEBUG: [NEXT PHASE] ❌ Challenge sem outras Challenges no inventário ({challenges_no_inventario}) - botão switch NÃO criado")
+                    print(f"DEBUG: [NEXT PHASE] ❌ Challenge sem outros Challenges para trocar (total: {total_challenges}) - botão switch NÃO criado")
             else:
                 print(f"DEBUG: [NEXT PHASE] ❌ Carta não é Activity nem Challenge - botão switch NÃO criado")
         
@@ -11673,15 +13859,30 @@ class PlayerDashboard(tk.Toplevel):
                 print(f"DEBUG: [NEXT PHASE] tipos: {tipos}")
                 print(f"DEBUG: [NEXT PHASE] page: {page}")
                 
-                # CORREÇÃO: Usar aceitar_carta_carrossel para aplicar todas as verificações de restrição
-                print("DEBUG: [NEXT PHASE] Chamando aceitar_carta_carrossel para aplicar restrições")
-                try:
+                # CORREÇÃO: Aplicar a mesma lógica de detecção de substituição
+                print("DEBUG: [NEXT PHASE] Verificando se vai substituir carta no carrossel")
+                
+                # Detectar posição de destino
+                posicao_destino = getattr(self, 'carrossel_idx_selecao', None)
+                if posicao_destino is None:
+                    # Se não há seleção específica, usar primeira posição acessível
+                    for i in range(len(self.cards)):
+                        if self._can_access_carousel_position(i):
+                            posicao_destino = i
+                            break
+                
+                # Verificar se a posição de destino contém uma carta real (não back_card)
+                vai_substituir_carta = False
+                if posicao_destino is not None and posicao_destino < len(self.cards):
+                    carta_na_posicao_destino = self.cards[posicao_destino]
+                    vai_substituir_carta = not os.path.basename(carta_na_posicao_destino).startswith("back_card_")
+                
+                if vai_substituir_carta:
+                    print("DEBUG: [NEXT PHASE] Vai substituir carta existente - mostrando overlay de confirmação")
+                    self._mostrar_overlay_confirmacao_troca(carta_path, tipos, page)
+                else:
+                    print("DEBUG: [NEXT PHASE] Vai colocar em posição vazia - indo diretamente para aceitar carta")
                     self.aceitar_carta_carrossel(carta_path, tipos, page)
-                    print("DEBUG: [NEXT PHASE] aceitar_carta_carrossel executado com sucesso")
-                except Exception as e:
-                    print(f"ERROR: [NEXT PHASE] Erro ao executar aceitar_carta_carrossel: {e}")
-                    import traceback
-                    traceback.print_exc()
             
             try:
                 switch_img_path = os.path.join(IMG_DIR, "switch_card.png")
@@ -11705,9 +13906,17 @@ class PlayerDashboard(tk.Toplevel):
                 btn_switch_next_phase.place(relx=0.98, rely=0, anchor="ne")
                 print(f"DEBUG: [NEXT PHASE] Botão Switch Activity posicionado no canto superior direito")
             else:  # is_challenge_card
-                # Challenges: Switch no canto inferior direito (máximo canto possível)
-                btn_switch_next_phase.place(relx=1.0, rely=1.0, anchor="se")
-                print(f"DEBUG: [NEXT PHASE] Botão Switch Challenge posicionado no canto inferior direito (máximo canto)")
+                # CORREÇÃO: Challenges: Switch também no canto superior direito (ao lado do quit se houver)
+                # Se quit button estiver presente, switch fica um pouco mais à esquerda
+                next_phase_active = getattr(self, '_next_phase_active', False)
+                if not final_phase_active and not next_phase_active:
+                    # Quit button vai estar presente, switch fica mais à esquerda
+                    btn_switch_next_phase.place(relx=0.90, rely=0, anchor="ne")
+                    print(f"DEBUG: [NEXT PHASE] Botão Switch Challenge posicionado no canto superior direito (à esquerda do quit)")
+                else:
+                    # Quit button não vai estar presente, switch pode ficar no canto
+                    btn_switch_next_phase.place(relx=0.98, rely=0, anchor="ne")
+                    print(f"DEBUG: [NEXT PHASE] Botão Switch Challenge posicionado no canto superior direito")
             
             print(f"DEBUG: [NEXT PHASE] Botão Switch configurado e posicionado")
         else:
@@ -11717,7 +13926,9 @@ class PlayerDashboard(tk.Toplevel):
                 print(f"DEBUG: [NEXT PHASE] Botão Switch NÃO criado - Final Phase está ativo")
         
         # BOTÃO QUIT CHALLENGE (apenas para Challenges, canto superior direito)
-        if is_challenge_card and not final_phase_active:
+        # CORREÇÃO: Não deve aparecer quando Next Phase está ativo OU Final Phase está ativo
+        next_phase_active = getattr(self, '_next_phase_active', False)
+        if is_challenge_card and not final_phase_active and not next_phase_active:
             print(f"DEBUG: [NEXT PHASE] Criando botão Quit Challenge no canto superior direito")
             
             # Botão vermelho com símbolo de check (✓) para quit challenge
@@ -11744,6 +13955,13 @@ class PlayerDashboard(tk.Toplevel):
             
             btn_quit_challenge.config(command=mostrar_confirmacao_quit)
             print(f"DEBUG: [NEXT PHASE] ✅ Botão Quit Challenge criado no canto superior direito")
+        else:
+            if next_phase_active:
+                print(f"DEBUG: [NEXT PHASE] ❌ Botão Quit Challenge NÃO criado - Next Phase está ativo")
+            elif final_phase_active:
+                print(f"DEBUG: [NEXT PHASE] ❌ Botão Quit Challenge NÃO criado - Final Phase está ativo")
+            elif not is_challenge_card:
+                print(f"DEBUG: [NEXT PHASE] ❌ Botão Quit Challenge NÃO criado - não é carta Challenge")
         
         print("DEBUG: Fullscreen Next Phase configurado - apenas X disponível durante Final Phase")
 
@@ -11810,17 +14028,13 @@ class PlayerDashboard(tk.Toplevel):
                         filename = os.path.basename(card_file)
                         match = re.search(r'Event_(\d+)\.', filename)
                         if match:
-                            card_id = f"event_{match.group(1)}"
-                            card_data = self.card_database.get_event(card_id)
-                            if card_data:
-                                target = getattr(card_data, 'target_player', None)
-                                player_choice = getattr(card_data, 'player_choice', False)
-                                # Usar mesmo critério do filtro: target=player_color OU target=None (com ou sem player_choice)
-                                if (target == player_color or 
-                                    (target is None and player_choice) or 
-                                    (target is None and not player_choice)):
-                                    if card_file not in self.inventario.get("events", []):
-                                        valid_events.append(card_file)
+                            # ESPECIAL: Incluir APENAS Event_55 e Event_14
+                            if filename == "Event_55.png" or filename == "Event_14.png":
+                                if card_file not in self.inventario.get("events", []):
+                                    valid_events.append(card_file)
+                                    print(f"DEBUG: [add_more_action_event_cards] Event PERMITIDO: {filename}")
+                            else:
+                                print(f"DEBUG: [add_more_action_event_cards] Event IGNORADO (não é Event_55 nem Event_14): {filename}")
                     
                     # Adicionar cartas até atingir o mínimo
                     needed = min_events - current_events

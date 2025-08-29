@@ -243,7 +243,7 @@ class EventCard:
     title: str                         # "TRANSMISSION DELAY"
     description: str                   # Descrição detalhada do evento
     effect_description: str            # Descrição do efeito da carta
-    duration_turns: int                # Duração em turnos (1, 2, 4, ou 0 para duração variável determinada por dado)
+    duration_turns: Union[int, str]    # Duração em turnos (1, 2, 4, ou "variable" para duração determinada por dado)
     target_link: Optional[str]         # Link alvo: "Link to Residential Router 1/2/3"
     target_queue: Optional[str]        # Queue alvo: "Queue of Residential Router 1/2/3"
     router_id: int                     # ID do router (1, 2, ou 3)
@@ -1116,130 +1116,182 @@ class UserDatabase:
 
     def _create_action_cards(self):
         """Cria as cartas de ação"""
-        # 38 cartas Action no total: 7 router upgrade, 7 router downgrade, 7 link upgrade, 7 link downgrade, 5 add router, 5 remove router
+        # 70 cartas Action no total baseadas na pasta fornecida
         action_templates = []
         
-        # ROUTER UPGRADE - 7 cartas
-        # Baseado nas imagens fornecidas: sequência específica de alvos
-        router_upgrade_targets = [
-            None,     # Carta 1: Jogadores cinzentos → Afeta o próprio jogador
-            None,     # Carta 2: Jogadores cinzentos → Afeta o próprio jogador
-            None,     # Carta 3: Jogadores cinzentos → Afeta o próprio jogador
-            "yellow", # Carta 4: Jogador amarelo
-            "green",  # Carta 5: Jogador verde
-            "blue",   # Carta 6: Jogador azul
-            "red"     # Carta 7: Jogador vermelho
+        # ROUTER UPGRADE - 15 cartas (Action_1 a Action_15)
+        # Padrão: 3 cartas para cada router (1,2,3) para próprio jogador + 1 carta de cada router para cada cor de jogador
+        router_upgrade_sequence = [
+            # Cartas 1-3: Router 1,2,3 para próprio jogador
+            {"router_id": 1, "target": None},
+            {"router_id": 2, "target": None}, 
+            {"router_id": 3, "target": None},
+            # Cartas 4-6: Router 1,2,3 para jogador amarelo
+            {"router_id": 1, "target": "yellow"},
+            {"router_id": 2, "target": "yellow"},
+            {"router_id": 3, "target": "yellow"},
+            # Cartas 7-9: Router 1,2,3 para jogador verde
+            {"router_id": 1, "target": "green"},
+            {"router_id": 2, "target": "green"},
+            {"router_id": 3, "target": "green"},
+            # Cartas 10-12: Router 1,2,3 para jogador azul
+            {"router_id": 1, "target": "blue"},
+            {"router_id": 2, "target": "blue"},
+            {"router_id": 3, "target": "blue"},
+            # Cartas 13-15: Router 1,2,3 para jogador vermelho
+            {"router_id": 1, "target": "red"},
+            {"router_id": 2, "target": "red"},
+            {"router_id": 3, "target": "red"}
         ]
         
-        for i, target in enumerate(router_upgrade_targets):
+        for config in router_upgrade_sequence:
             action_templates.append({
                 "type": ActionType.ROUTER_UPGRADE,
                 "title": "ROUTER UPGRADE",
-                "description": "A bigger queue means more space for packets. Upgrade the queue on your Small Router to reduce drops, and you'll unlock your Medium Router for free!",
-                "effect_description": "Move packets from the old queue to the new one, keeping them in the same order.",
-                "target": target,
-                "router_id": i + 1 if i < 3 else 1  # Router 1,2,3 para as primeiras 3 cartas, Router 1 para as restantes
+                "description": "A bigger queue means more space for packets. \nUpgrade the queue on your Small Router to \nreduce drops, and you'll unlock your Medium \nRouter for free!",
+                "effect_description": "Move packets from the old queue to the new one, \nkeeping them in the same order.",
+                "target": config["target"],
+                "router_id": config["router_id"]
             })
-        
-        # ROUTER DOWNGRADE - 7 cartas
-        # Baseado nas imagens fornecidas: sequência específica de alvos
-        router_downgrade_targets = [
-            None,     # Carta 1: Jogadores cinzentos → Afeta o próprio jogador
-            None,     # Carta 2: Jogadores cinzentos → Afeta o próprio jogador
-            None,     # Carta 3: Jogadores cinzentos → Afeta o próprio jogador
-            "yellow", # Carta 4: Jogador amarelo
-            "green",  # Carta 5: Jogador verde
-            "blue",   # Carta 6: Jogador azul
-            "red"     # Carta 7: Jogador vermelho
+
+        # ROUTER DOWNGRADE - 15 cartas (Action_16 a Action_30)
+        router_downgrade_sequence = [
+            # Cartas 16-18: Router 1,2,3 para próprio jogador
+            {"router_id": 1, "target": None},
+            {"router_id": 2, "target": None},
+            {"router_id": 3, "target": None},
+            # Cartas 19-21: Router 1,2,3 para jogador amarelo
+            {"router_id": 1, "target": "yellow"},
+            {"router_id": 2, "target": "yellow"},
+            {"router_id": 3, "target": "yellow"},
+            # Cartas 22-24: Router 1,2,3 para jogador verde
+            {"router_id": 1, "target": "green"},
+            {"router_id": 2, "target": "green"},
+            {"router_id": 3, "target": "green"},
+            # Cartas 25-27: Router 1,2,3 para jogador azul
+            {"router_id": 1, "target": "blue"},
+            {"router_id": 2, "target": "blue"},
+            {"router_id": 3, "target": "blue"},
+            # Cartas 28-30: Router 1,2,3 para jogador vermelho
+            {"router_id": 1, "target": "red"},
+            {"router_id": 2, "target": "red"},
+            {"router_id": 3, "target": "red"}
         ]
         
-        for i, target in enumerate(router_downgrade_targets):
+        for config in router_downgrade_sequence:
             action_templates.append({
                 "type": ActionType.ROUTER_DOWNGRADE,
                 "title": "ROUTER DOWNGRADE", 
-                "description": "Smaller queues mean less waiting. Reduce the Medium Router's queue size to speed up packet delivery and unlock your Small Router!",
-                "effect_description": "Move packets from the old queue to the new one, keeping the same order, and discard any excess packets.",
-                "target": target
+                "description": "Smaller queues mean less waiting. Reduce the \nMedium Router's queue size to speed up packet \ndelivery and unlock your Small Router!",
+                "effect_description": "Move packets from the old queue to the new one, \nkeeping the same order, and discard any excess \npackets.",
+                "target": config["target"],
+                "router_id": config["router_id"]
             })
         
-        # LINK UPGRADE - 7 cartas
-        # Baseado nas imagens fornecidas: sequência específica de alvos
-        link_upgrade_targets = [
-            None,     # Carta 1: "Link to Residential Router 1" - Jogadores cinzentos (afeta o próprio jogador)
-            None,     # Carta 2: "Link to Residential Router 2" - Jogadores cinzentos (afeta o próprio jogador)  
-            None,     # Carta 3: "Link to Residential Router 3" - Jogadores cinzentos (afeta o próprio jogador)
-            "yellow", # Carta 4: "Link to Residential Router 1" - Jogador amarelo específico
-            "green",  # Carta 5: "Link to Residential Router 1" - Jogador verde específico
-            "blue",   # Carta 6: "Link to Residential Router 1" - Jogador azul específico
-            "red"     # Carta 7: "Link to Residential Router 1" - Jogador vermelho específico
+        # LINK UPGRADE - 15 cartas (Action_31 a Action_45)
+        link_upgrade_sequence = [
+            # Cartas 31-33: Link 1,2,3 para próprio jogador
+            {"router_id": 1, "target": None},
+            {"router_id": 2, "target": None},
+            {"router_id": 3, "target": None},
+            # Cartas 34-36: Link 1,2,3 para jogador amarelo
+            {"router_id": 1, "target": "yellow"},
+            {"router_id": 2, "target": "yellow"},
+            {"router_id": 3, "target": "yellow"},
+            # Cartas 37-39: Link 1,2,3 para jogador verde
+            {"router_id": 1, "target": "green"},
+            {"router_id": 2, "target": "green"},
+            {"router_id": 3, "target": "green"},
+            # Cartas 40-42: Link 1,2,3 para jogador azul
+            {"router_id": 1, "target": "blue"},
+            {"router_id": 2, "target": "blue"},
+            {"router_id": 3, "target": "blue"},
+            # Cartas 43-45: Link 1,2,3 para jogador vermelho
+            {"router_id": 1, "target": "red"},
+            {"router_id": 2, "target": "red"},
+            {"router_id": 3, "target": "red"}
         ]
         
-        for i, target in enumerate(link_upgrade_targets):
+        for config in link_upgrade_sequence:
             action_templates.append({
                 "type": ActionType.LINK_UPGRADE,
                 "title": "LINK UPGRADE",
-                "description": "Short links have lower transmission times. Switch from a Long Link to a short one and enjoy faster communications!",
-                "effect_description": "Move packets from the old link to the new one, keeping the same order, and discard any excess packets",
-                "target": target
+                "description": "Short links have lower transmission times. \nSwitch from a Long Link to a short one and \nenjoy faster communications!",
+                "effect_description": "Move packets from the old link to the new one, \nkeeping the same order, and discard any excess \npackets.",
+                "target": config["target"],
+                "router_id": config["router_id"]
             })
         
-        # LINK DOWNGRADE - 7 cartas
-        # Baseado nas imagens fornecidas: sequência específica de alvos
-        link_downgrade_targets = [
-            None,     # Carta 1: "Link to Residential Router 1" - Jogadores cinzentos (afeta o próprio jogador)
-            None,     # Carta 2: "Link to Residential Router 2" - Jogadores cinzentos (afeta o próprio jogador)
-            None,     # Carta 3: "Link to Residential Router 3" - Jogadores cinzentos (afeta o próprio jogador)
-            "yellow", # Carta 4: "Link to Residential Router 1" - Jogador amarelo específico
-            "green",  # Carta 5: "Link to Residential Router 1" - Jogador verde específico
-            "blue",   # Carta 6: "Link to Residential Router 1" - Jogador azul específico
-            "red"     # Carta 7: "Link to Residential Router 1" - Jogador vermelho específico
+        # LINK DOWNGRADE - 15 cartas (Action_46 a Action_57)
+        link_downgrade_sequence = [
+            # Cartas 46-48: Link 1,2,3 para próprio jogador
+            {"router_id": 1, "target": None},
+            {"router_id": 2, "target": None},
+            {"router_id": 3, "target": None},
+            # Cartas 49-51: Link 1,2,3 para jogador amarelo
+            {"router_id": 1, "target": "yellow"},
+            {"router_id": 2, "target": "yellow"},
+            {"router_id": 3, "target": "yellow"},
+            # Cartas 52-54: Link 1,2,3 para jogador verde
+            {"router_id": 1, "target": "green"},
+            {"router_id": 2, "target": "green"},
+            {"router_id": 3, "target": "green"},
+            # Cartas 55-57: Link 1,2,3 para jogador azul
+            {"router_id": 1, "target": "blue"},
+            {"router_id": 2, "target": "blue"},
+            {"router_id": 3, "target": "blue"},
+            # Cartas 55-57: Link 1,2,3 para jogador vermelho
+            {"router_id": 1, "target": "red"},
+            {"router_id": 2, "target": "red"},
+            {"router_id": 3, "target": "red"}
         ]
         
-        for i, target in enumerate(link_downgrade_targets):
+        for config in link_downgrade_sequence:
             action_templates.append({
                 "type": ActionType.LINK_DOWNGRADE,
                 "title": "LINK DOWNGRADE",
-                "description": "We moved far from central node and, you'll need a long link to stay connected—but get ready for longer delays.",
-                "effect_description": "Move packets from the old queue to the new one, keeping them in the same order.",
-                "target": target
+                "description": "We moved far from central node and, you'll \nneed a long link to stay connected — but get \nready for longer delays.",
+                "effect_description": "Move packets from the old queue to the new one, \nkeeping them in the same order.",
+                "target": config["target"],
+                "router_id": config["router_id"]
             })
         
-        # ADD ROUTER - 5 cartas  
-        # Baseado nas imagens fornecidas: sequência específica de alvos
+        # ADD ROUTER - 5 cartas (Action_61 a Action_65)
         add_router_targets = [
-            None,     # Carta 1: Jogadores cinzentos (afeta o próprio jogador)
-            "yellow", # Carta 2: Jogador amarelo específico
-            "green",  # Carta 3: Jogador verde específico
-            "blue",   # Carta 4: Jogador azul específico
-            "red"     # Carta 5: Jogador vermelho específico
+            None,     # Carta 61: Próprio jogador
+            "yellow", # Carta 62: Jogador amarelo
+            "green",  # Carta 63: Jogador verde
+            "blue",   # Carta 64: Jogador azul
+            "red",    # Carta 65: Jogador vermelho
         ]
         
         for i, target in enumerate(add_router_targets):
             action_templates.append({
                 "type": ActionType.ADD_ROUTER,
                 "title": "ADD ROUTER",
-                "description": "A new Residential User requested access to NetMaster. Head to the Store to see if you can grab a Small Router for free. Good luck!",
-                "effect_description": "Add the router to the network board if there is a link to connect it. Otherwise, return it to the store.",
-                "target": target
+                "description": "A new Residential User requested access to \nNetMaster. Head to the Store to see if you can \ngrab a Small Router for free. Good luck!",
+                "effect_description": "Add the router to the network board if there is \na link to connect it. Otherwise, return it to \nthe store.",
+                "target": target,
+                "router_id": None  # ADD ROUTER não especifica router_id
             })
         
-        # REMOVE ROUTER - 5 cartas
-        # Baseado nas imagens fornecidas: sequência específica de alvos
+        # REMOVE ROUTER - 5 cartas (Action_66 a Action_70)
         remove_router_targets = [
-            None,     # Carta 1: Jogadores cinzentos (afeta o próprio jogador)
-            "yellow", # Carta 2: Jogador amarelo específico
-            "green",  # Carta 3: Jogador verde específico
-            "blue",   # Carta 4: Jogador azul específico
-            "red"     # Carta 5: Jogador vermelho específico
+            None,     # Carta 66: Próprio jogador
+            "yellow", # Carta 67: Jogador amarelo
+            "green",  # Carta 68: Jogador verde
+            "blue",   # Carta 69: Jogador azul
+            "red",    # Carta 70: Jogador vermelho
         ]
         
         for i, target in enumerate(remove_router_targets):
             action_templates.append({
                 "type": ActionType.REMOVE_ROUTER,
                 "title": "REMOVE ROUTER",
-                "description": "The Small Router is no longer needed! Return it to the store if possible!",
-                "effect_description": "If there's more than one Small Router on the network board, remove the latest one added, along with all packets in its queue and the associated link",
-                "target": target
+                "description": "The Small Router is no longer needed! Return it \nto the store if possible!",
+                "effect_description": "If there's more than one Small Router on the \nnetwork board, remove the latest one added, along \nwith all packets in its queue and the associated link.",
+                "target": target,
+                "router_id": None  # REMOVE ROUTER não especifica router_id
             })
         
         # Criar cartas de ação
@@ -5246,9 +5298,8 @@ class UserDatabase:
             router_id = template["router_id"]
             player_choice = template["player_choice"]
             
-            # Determinar o tipo de evento (padrão é TRANSMISSION_DELAY para compatibilidade)
-            event_type_str = template.get("event_type", "TRANSMISSION_DELAY")
-            event_type = EventType.TRANSMISSION_DELAY if event_type_str == "TRANSMISSION_DELAY" else EventType.LINK_FAILURE
+            # Determinar o tipo de evento
+            event_type = template.get("event_type", EventType.TRANSMISSION_DELAY)
             
             # Determinar título, descrição e efeito baseado no tipo de evento
             if event_type == EventType.LINK_FAILURE:
@@ -5256,91 +5307,91 @@ class UserDatabase:
                 description = "A network connection failed, disrupting communication. All in-transit packets are lost!"
                 if template["duration_turns"] == "variable":
                     if player_choice:
-                        effect_text = "Select a player to run the event. Roll the dice to get the number of turns N. Remove all packets from the link. No packets will be added to the link during the event."
+                        effect_text = "Remove all packets from the link. \nNo packets will be added to the link during \nthe event."
                     else:
-                        effect_text = "Roll the dice to get the number of turns N. Remove all packets from the link. No packets will be added to the link during the event."
+                        effect_text = "Remove all packets from the link. \nNo packets will be added to the link during \nthe event."
                 else:
                     if player_choice:
-                        effect_text = "Remove all packets from the link. No packets will be added to the link during the event. Select a player to run the event."
+                        effect_text = "Remove all packets from the link. \nNo packets will be added to the link during \nthe event."
                     else:
-                        effect_text = "Remove all packets from the link. No packets will be added to the link during the event."
+                        effect_text = "Remove all packets from the link. \nNo packets will be added to the link during \nthe event."
             elif event_type == EventType.TRAFFIC_BURST:
                 title = "TRAFFIC BURST"
                 description = "Some users are generating a burst of traffic, and the queue is growing fast. New transmissions are postponed!"
                 if template["duration_turns"] == "variable":
                     # Cartas com duração variável (? TURNS)
                     if player_choice:
-                        effect_text = "Select a player to run the event. Roll the dice to get the number of turns N. At each turn of the event, add 1 dummy packet to the queue and keep transmitting 1 packet per turn."
+                        effect_text = "At each turn of the event, \nadd 1 dummy packet to the queue and \nkeep transmitting 1 packet per turn."
                     else:
-                        effect_text = "Roll the dice to get the number of turns N. At each turn of the event, add 1 dummy packet to the queue and keep transmitting 1 packet per turn."
+                        effect_text = "At each turn of the event, \nadd 1 dummy packet to the queue and \nkeep transmitting 1 packet per turn."
                 else:
                     # Cartas com duração fixa
                     if player_choice:
-                        effect_text = "Select a player to run the event. At each turn of the event, add 1 dummy packet to the queue and keep transmitting 1 packet per turn."
+                        effect_text = "At each turn of the event, \nadd 1 dummy packet to the queue and \nkeep transmitting 1 packet per turn."
                     else:
-                        effect_text = "At each turn of the event, add 1 dummy packet to the queue and keep transmitting 1 packet per turn."
+                        effect_text = "At each turn of the event, \nadd 1 dummy packet to the queue and \nkeep transmitting 1 packet per turn."
             elif event_type == EventType.QUEUE_CONGESTION:
                 title = "QUEUE CONGESTION"
                 description = "Too many users are attempting to transmit video! The queue is growing too fast, becoming congested."
                 if template["duration_turns"] == "variable":
                     # Cartas com duração variável (? TURNS)
                     if player_choice:
-                        effect_text = "Select a player to run the event. Roll the dice to get the number of turns N. At each turn, add 2 dummy packets to the queue and keep transmitting 1 packet per turn."
+                        effect_text = "At each turn, \nadd 2 dummy packets to the queue and \nkeep transmitting 1 packet per turn."
                     else:
-                        effect_text = "Roll the dice to get the number of turns N. At each turn, add 2 dummy packets to the queue and keep transmitting 1 packet per turn."
+                        effect_text = "At each turn, \nadd 2 dummy packets to the queue and \nkeep transmitting 1 packet per turn."
                 else:
                     # Cartas com duração fixa
                     if player_choice:
-                        effect_text = "Select a player to run the event. At each turn, add 2 dummy packets to the queue and keep transmitting 1 packet per turn."
+                        effect_text = "At each turn, \nadd 2 dummy packets to the queue and \nkeep transmitting 1 packet per turn."
                     else:
-                        effect_text = "At each turn, add 2 dummy packets to the queue and keep transmitting 1 packet per turn."
+                        effect_text = "At each turn, \nadd 2 dummy packets to the queue and \nkeep transmitting 1 packet per turn."
             elif event_type == EventType.QUEUE_FULL:
                 title = "QUEUE FULL"
                 description = "The high volume of incoming packets has overwhelmed the network devices, and the queue is full!"
                 if template["duration_turns"] == "variable":
                     # Cartas com duração variável (? TURNS)
                     if player_choice:
-                        effect_text = "Select a player to run the event. Roll the dice to get the number of turns N. At each event turn, fill the queue with dummy packets and transmit one packet per turn."
+                        effect_text = "At each event turn, \nfill the queue with dummy packets and \ntransmit one packet per turn."
                     else:
-                        effect_text = "Roll the dice to get the number of turns N. At each event turn, fill the queue with dummy packets and transmit one packet per turn."
+                        effect_text = "At each event turn, \nfill the queue with dummy packets and \ntransmit one packet per turn."
                 else:
                     # Cartas com duração fixa
                     if player_choice:
-                        effect_text = "Select a player to run the event. At each event turn, fill the queue with dummy packets and transmit one packet per turn."
+                        effect_text = "At each event turn, \nfill the queue with dummy packets and \ntransmit one packet per turn."
                     else:
-                        effect_text = "At each event turn, fill the queue with dummy packets and transmit one packet per turn."
+                        effect_text = "At each event turn, \nfill the queue with dummy packets and \ntransmit one packet per turn."
             elif event_type == EventType.PACKET_DROP:
                 title = "PACKET DROP"
                 description = "Due to several errors, packets have been dropped in the queue, disrupting communication."
                 if template["duration_turns"] == "variable":
                     # Cartas com duração variável (? TURNS)
                     if player_choice:
-                        effect_text = "Select a player to run the event. Roll the dice to get the number of turns N. At each turn of the event, remove 1 packet from the queue and do not transmit any packet."
+                        effect_text = "At each turn of the event, \nremove 1 packet from the queue and \ndo not transmit any packet."
                     else:
-                        effect_text = "Roll the dice to get the number of turns N. At each turn of the event, remove 1 packet from the queue and do not transmit any packet."
+                        effect_text = "At each turn of the event, \nremove 1 packet from the queue and \ndo not transmit any packet."
                 else:
                     # Cartas com duração fixa
                     if player_choice:
-                        effect_text = "Select a player to run the event. At each turn of the event, remove 1 packet from the queue and do not transmit any packet."
+                        effect_text = "At each turn of the event, \nremove 1 packet from the queue and \ndo not transmit any packet."
                     else:
-                        effect_text = "At each turn of the event, remove 1 packet from the queue and do not transmit any packet."
+                        effect_text = "At each turn of the event, \nremove 1 packet from the queue and \ndo not transmit any packet."
             elif event_type == EventType.EMPTY_QUEUE:
                 title = "EMPTY QUEUE"
                 description = "Due to severe errors, packets have been dropped in the queue, severely disrupting the communication."
                 if template["duration_turns"] == "variable":
                     # Cartas com duração variável (? TURNS)
                     if player_choice:
-                        effect_text = "Select a player to run the event. Roll the dice to get the number of turns N. At each turn, remove all packets from the queue."
+                        effect_text = "At each turn, \nremove all packets from the queue."
                     else:
-                        effect_text = "Roll the dice to get the number of turns N. At each turn, remove all packets from the queue."
+                        effect_text = "At each turn, \nremove all packets from the queue."
                 else:
                     # Cartas com duração fixa
                     if player_choice:
-                        effect_text = "Select a player to run the event. At each turn, remove all packets from the queue."
+                        effect_text = "At each turn, \nremove all packets from the queue."
                     else:
-                        effect_text = "At each turn, remove all packets from the queue."
-                
-                
+                        effect_text = "At each turn, \nremove all packets from the queue."
+
+
             else:  # TRANSMISSION DELAY
                 title = "TRANSMISSION DELAY"
                 description = "Currently, the traffic is being transmitted through a low-capacity link, which is causing a significant delay in the delivery of the traffic."
@@ -5348,24 +5399,22 @@ class UserDatabase:
                 if template["duration_turns"] == "variable":
                     # Cartas com duração variável (? TURNS)
                     if player_choice:
-                        effect_text = "Select a player to run the event. Roll the dice to get the number of turns N. At each turn, do not add packets or move the packets in the link."
+                        effect_text = "At each turn, \ndo not add packets or \nmove the packets in the link."
                     else:
-                        effect_text = "Roll the dice to get the number of turns N. At each turn, do not add packets or move the packets in the link."
+                        effect_text = "At each turn, \ndo not add packets or \nmove the packets in the link."
                 else:
                     # Cartas com duração fixa
                     if player_choice:
-                        effect_text = "Select a player to run the event. At each turn, do not add packets or move the packets in the link."
+                        effect_text = "At each turn, \ndo not add packets or \nmove the packets in the link."
                     else:
-                        effect_text = "At each turn, do not add packets or move the packets in the link."
-                        
-                        
-                        
+                        effect_text = "At each turn, \ndo not add packets or \nmove the packets in the link."
+
+
                          
             
-            # Tratar duração variável
+            # Tratar duração - preservar "variable" como string
             duration = template["duration_turns"]
-            if duration == "variable":
-                duration = 0  # Será determinado por dado no jogo
+            # Não converter "variable" para 0 - manter como string para o sistema de tracking
             
             # Determinar se deve usar target_link ou target_queue baseado no número do evento
             event_number = int(event_id.split('_')[1])
@@ -5553,7 +5602,7 @@ class UserDatabase:
             "total_cards": len(self.users) + len(self.equipments) + len(self.services) + len(self.activities) + len(self.challenges) + len(self.actions) + len(self.events)
         }
 
-def get_event_duration(carta_path: str) -> Optional[int]:
+def get_event_duration(carta_path: str) -> Optional[Union[int, str]]:
     """
     Obtém a duração em turnos de uma carta Event baseada no seu caminho.
     
@@ -5561,7 +5610,7 @@ def get_event_duration(carta_path: str) -> Optional[int]:
         carta_path: Caminho para a carta Event (ex: "/path/Event_1.png")
         
     Returns:
-        Duração em turnos da carta ou None se não encontrada
+        Duração em turnos da carta (int para duração fixa, "variable" para duração variável) ou None se não encontrada
     """
     import os
     import re
