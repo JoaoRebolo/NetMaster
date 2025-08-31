@@ -130,7 +130,8 @@ class ServiceCard:
     title: str                  # "BANDWIDTH", "DATA VOLUME", "TEMPORARY"
     description: str            # Descrição do serviço
     valid_for: str             # "1 Residential User" (sempre o mesmo)
-    service_conditions: str     # Condições específicas: "up to 1 packet per turn", "5 packets", "4 turns"
+    service_conditions: str    #Condições específicas: "up to 1 packet per turn", "5 packets", "4 turns"
+    service_turns: Optional[int]          # Número de turnos que o serviço é válido
     buy_cost: int              # Preço de compra em picoins
     sell_cost: int             # Preço de venda em picoins (sempre 0 nas cartas físicas)
     # Campos de metadados fixos
@@ -571,6 +572,14 @@ class UserDatabase:
                     "sell_price": 0  # Services sempre têm sell_price = 0
                 })
                 
+                # Extrair service_turns das condições para serviços TEMPORARY
+                service_turns_value = None
+                if template["type"] == ServiceType.TEMPORARY:
+                    import re
+                    match = re.search(r'(\d+) turns', costs["service_conditions"])
+                    if match:
+                        service_turns_value = int(match.group(1))
+                
                 service_card = ServiceCard(
                     service_id=service_id,
                     service_type=template["type"],
@@ -579,6 +588,7 @@ class UserDatabase:
                     description=template["description"],
                     valid_for="1 Residential User",
                     service_conditions=costs["service_conditions"],
+                    service_turns=service_turns_value,  # CORRIGIDO: Extrair valor dos turnos para TEMPORARY
                     buy_cost=costs["buy_price"],
                     sell_cost=0  # Services sempre têm sell_cost = 0
                 )
@@ -601,7 +611,7 @@ class UserDatabase:
                 "drops_allowed": True,
                 "reward_per_packet": 4,
                 "message_received": None,
-                "penalty_per_packet": None,
+                "penalty_per_packet": 0,  # ALTERADO: Activity_1 agora tem penalidade zero
                 "application_fee": 40,
                 "bonus_condition": None,
                 "penalty_condition": None
@@ -615,7 +625,7 @@ class UserDatabase:
                 "drops_allowed": True,
                 "reward_per_packet": 3,
                 "packet_bonus": 4,
-                "penalty_per_packet": None,
+                "penalty_per_packet": 0,  # ALTERADO: Activity_2 agora tem penalidade zero
                 "application_fee": 40,
                 "bonus_condition": 10,  # "After 10 packets received",
                 "penalty_condition": None
@@ -629,7 +639,7 @@ class UserDatabase:
                 "drops_allowed": True,
                 "reward_per_packet": 4,
                 "packet_bonus": 20,
-                "penalty_per_packet": None,
+                "penalty_per_packet": 0,  # ALTERADO: Activity_3 agora tem penalidade zero
                 "application_fee": 60,
                 "bonus_condition": 15,  # "After 15 packets received",
                 "penalty_condition": None
@@ -643,7 +653,7 @@ class UserDatabase:
                 "drops_allowed": True,
                 "reward_per_packet": 1,
                 "message_received": 160,
-                "penalty_per_packet": None,
+                "penalty_per_packet": 0,  # ALTERADO: Activity_4 agora tem penalidade zero
                 "application_fee": 40,
                 "bonus_condition": 0,  # "No drops",
                 "penalty_condition": None
@@ -730,7 +740,7 @@ class UserDatabase:
                 "drops_allowed": True,
                 "reward_per_packet": 3,
                 "message_received": None,
-                "penalty_per_packet": None,
+                "penalty_per_packet": 0,  # ALTERADO: Activity_10 agora tem penalidade zero
                 "application_fee": 5,
                 "bonus_condition": None,
                 "penalty_condition": None
@@ -744,7 +754,7 @@ class UserDatabase:
                 "drops_allowed": True,
                 "reward_per_packet": 2,
                 "message_received": 16,
-                "penalty_per_packet": None,
+                "penalty_per_packet": 0,  # ALTERADO: Activity_11 agora tem penalidade zero
                 "application_fee": 5,
                 "bonus_condition": "Message received",
                 "penalty_condition": None
@@ -1183,7 +1193,7 @@ class UserDatabase:
                 "type": ActionType.ROUTER_DOWNGRADE,
                 "title": "ROUTER DOWNGRADE", 
                 "description": "Smaller queues mean less waiting. Reduce the \nMedium Router's queue size to speed up packet \ndelivery and unlock your Small Router!",
-                "effect_description": "Move packets from the old queue to the new one, \nkeeping the same order, and discard any excess \npackets.",
+                "effect_description": "Move packets from the old queue to \nthe new one, keeping the \nsame order, and discard any excess \npackets.",
                 "target": config["target"],
                 "router_id": config["router_id"]
             })
@@ -1217,7 +1227,7 @@ class UserDatabase:
                 "type": ActionType.LINK_UPGRADE,
                 "title": "LINK UPGRADE",
                 "description": "Short links have lower transmission times. \nSwitch from a Long Link to a short one and \nenjoy faster communications!",
-                "effect_description": "Move packets from the old link to the new one, \nkeeping the same order, and discard any excess \npackets.",
+                "effect_description": "Move packets from the old link to \nthe new one, keeping the \nsame order, and discard any excess \npackets.",
                 "target": config["target"],
                 "router_id": config["router_id"]
             })
@@ -1251,7 +1261,7 @@ class UserDatabase:
                 "type": ActionType.LINK_DOWNGRADE,
                 "title": "LINK DOWNGRADE",
                 "description": "We moved far from central node and, you'll \nneed a long link to stay connected — but get \nready for longer delays.",
-                "effect_description": "Move packets from the old queue to the new one, \nkeeping them in the same order.",
+                "effect_description": "Move packets from the old link to \nthe new one, keeping the \nsame order.",
                 "target": config["target"],
                 "router_id": config["router_id"]
             })
@@ -1288,8 +1298,8 @@ class UserDatabase:
             action_templates.append({
                 "type": ActionType.REMOVE_ROUTER,
                 "title": "REMOVE ROUTER",
-                "description": "The Small Router is no longer needed! Return it \nto the store if possible!",
-                "effect_description": "If there's more than one Small Router on the \nnetwork board, remove the latest one added, along \nwith all packets in its queue and the associated link.",
+                "description": "The Small Router is no longer needed! \nReturn it to the store if possible!",
+                "effect_description": "If there's more than one Small Router on the \nnetwork board, remove the latest one added, \nalong with all packets in its queue \nand the associated link.",
                 "target": target,
                 "router_id": None  # REMOVE ROUTER não especifica router_id
             })
