@@ -591,7 +591,7 @@ class PlayerDashboard(tk.Toplevel):
         
         # OPCIONAL: Se quiseres dar algumas cartas iniciais ao jogador, descomenta isto:
         print("DEBUG: [PlayerDashboard] CHAMANDO add_starter_cards()...")
-        self.add_starter_cards()  # ✅ ATIVADO - adicionar cartas de exemplo
+        self.add_starter_cards()  # ATIVADO - adicionar cartas de exemplo
         print("DEBUG: [PlayerDashboard] add_starter_cards() TERMINADO")
 
         print(f"DEBUG: [PlayerDashboard] Inventário inicial:")
@@ -644,7 +644,7 @@ class PlayerDashboard(tk.Toplevel):
         print(f"DEBUG: [CAPTURA_IMEDIATA] gestao_ativa: {gestao_ativa}, final_phase_ativo: {final_phase_ativo}")
         
         if gestao_ativa and final_phase_ativo:
-            print("DEBUG: [CAPTURA_IMEDIATA] ✅ MODO GESTÃO ATIVA - Determinando estado baseado na lógica de gestão")
+            print("DEBUG: [CAPTURA_IMEDIATA] MODO GESTÃO ATIVA - Determinando estado baseado na lógica de gestão")
             
             # Durante gestão ativa, determinar que botões DEVEM estar visíveis
             # baseado no estado atual da carta e valores das barras
@@ -657,7 +657,7 @@ class PlayerDashboard(tk.Toplevel):
             
             # LIMPAR qualquer estado antigo primeiro para evitar interferência
             if hasattr(self, '_estado_botoes_imediato'):
-                print("DEBUG: [CAPTURA_IMEDIATA] ⚠️ Limpando estado antigo antes de capturar novo")
+                print("DEBUG: [CAPTURA_IMEDIATA] WARNING: Limpando estado antigo antes de capturar novo")
                 self._estado_botoes_imediato = None
             
             print("DEBUG: [CAPTURA_IMEDIATA] Capturando estado dos botões AGORA...")
@@ -689,17 +689,17 @@ class PlayerDashboard(tk.Toplevel):
                             
                             if rxd_ismapped:
                                 estado['btn_plus_rxd_visivel'] = True
-                                print("DEBUG: [CAPTURA_IMEDIATA] ✅ Botão + Rxd está VISÍVEL e MAPEADO")
+                                print("DEBUG: [CAPTURA_IMEDIATA] Botão + Rxd está VISÍVEL e MAPEADO")
                             else:
-                                print("DEBUG: [CAPTURA_IMEDIATA] ❌ Botão + Rxd existe mas não está mapeado")
+                                print("DEBUG: [CAPTURA_IMEDIATA] ERROR: Botão + Rxd existe mas não está mapeado")
                         else:
-                            print("DEBUG: [CAPTURA_IMEDIATA] ❌ Botão + Rxd foi destruído")
+                            print("DEBUG: [CAPTURA_IMEDIATA] ERROR: Botão + Rxd foi destruído")
                     except tk.TclError as e:
-                        print(f"DEBUG: [CAPTURA_IMEDIATA] ❌ Erro TclError no + Rxd: {e}")
+                        print(f"DEBUG: [CAPTURA_IMEDIATA] ERROR: Erro TclError no + Rxd: {e}")
                     except Exception as e:
-                        print(f"DEBUG: [CAPTURA_IMEDIATA] ❌ Erro geral no + Rxd: {e}")
+                        print(f"DEBUG: [CAPTURA_IMEDIATA] ERROR: Erro geral no + Rxd: {e}")
                 else:
-                    print("DEBUG: [CAPTURA_IMEDIATA] ❌ Botão + Rxd não existe")
+                    print("DEBUG: [CAPTURA_IMEDIATA] ERROR: Botão + Rxd não existe")
                     
                 # Verificar botão + Lost
                 print("DEBUG: [CAPTURA_IMEDIATA] Verificando botão + Lost...")
@@ -718,17 +718,17 @@ class PlayerDashboard(tk.Toplevel):
                             
                             if lost_ismapped:
                                 estado['btn_plus_lost_visivel'] = True
-                                print("DEBUG: [CAPTURA_IMEDIATA] ✅ Botão + Lost está VISÍVEL e MAPEADO")
+                                print("DEBUG: [CAPTURA_IMEDIATA] Botão + Lost está VISÍVEL e MAPEADO")
                             else:
-                                print("DEBUG: [CAPTURA_IMEDIATA] ❌ Botão + Lost existe mas não está mapeado")
+                                print("DEBUG: [CAPTURA_IMEDIATA] ERROR: Botão + Lost existe mas não está mapeado")
                         else:
-                            print("DEBUG: [CAPTURA_IMEDIATA] ❌ Botão + Lost foi destruído")
+                            print("DEBUG: [CAPTURA_IMEDIATA] ERROR: Botão + Lost foi destruído")
                     except tk.TclError as e:
-                        print(f"DEBUG: [CAPTURA_IMEDIATA] ❌ Erro TclError no + Lost: {e}")
+                        print(f"DEBUG: [CAPTURA_IMEDIATA] ERROR: Erro TclError no + Lost: {e}")
                     except Exception as e:
-                        print(f"DEBUG: [CAPTURA_IMEDIATA] ❌ Erro geral no + Lost: {e}")
+                        print(f"DEBUG: [CAPTURA_IMEDIATA] ERROR: Erro geral no + Lost: {e}")
                 else:
-                    print("DEBUG: [CAPTURA_IMEDIATA] ❌ Botão + Lost não existe")
+                    print("DEBUG: [CAPTURA_IMEDIATA] ERROR: Botão + Lost não existe")
                     
                 # Verificar botão seta
                 print("DEBUG: [CAPTURA_IMEDIATA] Verificando botão seta...")
@@ -747,20 +747,20 @@ class PlayerDashboard(tk.Toplevel):
                             
                             if seta_ismapped:
                                 estado['btn_seta_visivel'] = True
-                                print("DEBUG: [CAPTURA_IMEDIATA] ✅ Botão seta está VISÍVEL e MAPEADO")
+                                print("DEBUG: [CAPTURA_IMEDIATA] Botão seta está VISÍVEL e MAPEADO")
                             else:
-                                print("DEBUG: [CAPTURA_IMEDIATA] ❌ Botão seta existe mas não está mapeado")
+                                print("DEBUG: [CAPTURA_IMEDIATA] ERROR: Botão seta existe mas não está mapeado")
                         else:
-                            print("DEBUG: [CAPTURA_IMEDIATA] ❌ Botão seta foi destruído")
+                            print("DEBUG: [CAPTURA_IMEDIATA] ERROR: Botão seta foi destruído")
                     except tk.TclError as e:
-                        print(f"DEBUG: [CAPTURA_IMEDIATA] ❌ Erro TclError no seta: {e}")
+                        print(f"DEBUG: [CAPTURA_IMEDIATA] ERROR: Erro TclError no seta: {e}")
                     except Exception as e:
-                        print(f"DEBUG: [CAPTURA_IMEDIATA] ❌ Erro geral no seta: {e}")
+                        print(f"DEBUG: [CAPTURA_IMEDIATA] ERROR: Erro geral no seta: {e}")
                 else:
-                    print("DEBUG: [CAPTURA_IMEDIATA] ❌ Botão seta não existe")
+                    print("DEBUG: [CAPTURA_IMEDIATA] ERROR: Botão seta não existe")
                     
             except Exception as e:
-                print(f"DEBUG: [CAPTURA_IMEDIATA] ❌ Erro durante captura: {e}")
+                print(f"DEBUG: [CAPTURA_IMEDIATA] ERROR: Erro durante captura: {e}")
         
         # Guardar estado capturado
         self._estado_botoes_imediato = estado
@@ -775,8 +775,8 @@ class PlayerDashboard(tk.Toplevel):
         CORREÇÃO: NÃO incrementar contador aqui - contadores já vêm incrementados do end_turn anterior
         """
         print("DEBUG: [TURN_RESET] === RESETANDO CONTADORES DE PROCESSAMENTO ===")
-        print(f"DEBUG: [TURN_RESET] ✅ Turno atual preservado do end_turn anterior: {self._current_turn_id}")
-        print(f"DEBUG: [TURN_RESET] ✅ Todos os contadores estão sincronizados:")
+        print(f"DEBUG: [TURN_RESET] Turno atual preservado do end_turn anterior: {self._current_turn_id}")
+        print(f"DEBUG: [TURN_RESET] Todos os contadores estão sincronizados:")
         print(f"DEBUG: [TURN_RESET]   _current_turn_number (Challenges): {self._current_turn_number}")
         print(f"DEBUG: [TURN_RESET]   _current_turn (Events): {self._current_turn}")
         print(f"DEBUG: [TURN_RESET]   _current_turn_id (Processing): {self._current_turn_id}")
@@ -790,7 +790,7 @@ class PlayerDashboard(tk.Toplevel):
         
         print(f"DEBUG: [TURN_RESET] Contadores Rxd anteriores: {old_rxd_counters}")
         print(f"DEBUG: [TURN_RESET] Contadores Lost anteriores: {old_lost_counters}")
-        print(f"DEBUG: [TURN_RESET] ✅ Contadores resetados - botões + podem aparecer novamente")
+        print(f"DEBUG: [TURN_RESET] Contadores resetados - botões + podem aparecer novamente")
         print("DEBUG: [TURN_RESET] === FIM RESET CONTADORES ===")
 
     def _get_processed_this_turn(self, carta_path, tipo):
@@ -849,7 +849,7 @@ class PlayerDashboard(tk.Toplevel):
             # Obter carta atual da gestão
             carta_atual = self._get_current_actual_card()
             if not carta_atual:
-                print("DEBUG: [GESTAO_LOGICA] ❌ Nenhuma carta atual encontrada")
+                print("DEBUG: [GESTAO_LOGICA] ERROR: Nenhuma carta atual encontrada")
                 return estado
             
             # Obter valores atuais das barras de progresso
@@ -858,7 +858,7 @@ class PlayerDashboard(tk.Toplevel):
                 rxd_atual = stats.get('Rxd', 0)
                 lost_atual = stats.get('Lost', 0)
             else:
-                print("DEBUG: [GESTAO_LOGICA] ⚠️ Usando valores padrão para barras")
+                print("DEBUG: [GESTAO_LOGICA] WARNING: Usando valores padrão para barras")
                 rxd_atual = 0
                 lost_atual = 0
             
@@ -927,19 +927,19 @@ class PlayerDashboard(tk.Toplevel):
             
             if pode_incrementar_rxd:
                 estado['btn_plus_rxd_visivel'] = True
-                print("DEBUG: [GESTAO_LOGICA] ✅ Botão + Rxd deve estar visível")
+                print("DEBUG: [GESTAO_LOGICA] Botão + Rxd deve estar visível")
             else:
-                print("DEBUG: [GESTAO_LOGICA] ❌ Botão + Rxd NÃO deve estar visível")
+                print("DEBUG: [GESTAO_LOGICA] ERROR: Botão + Rxd NÃO deve estar visível")
                 if (hasattr(self, '_final_phase_gestao_ativa') and self._final_phase_gestao_ativa):
                     if rxd_atual >= message_size:
                         print(f"DEBUG: [GESTAO_LOGICA]   - MOTIVO: Rxd atual ({rxd_atual}) >= message_size ({message_size})")
                     if rxd_processed >= rate_max:
-                        print(f"DEBUG: [GESTAO_LOGICA]   - ⚠️ MOTIVO: Carta já processou {rxd_processed}/{rate_max} pacotes Rxd neste turno")
+                        print(f"DEBUG: [GESTAO_LOGICA]   - WARNING: MOTIVO: Carta já processou {rxd_processed}/{rate_max} pacotes Rxd neste turno")
                 else:
                     if rxd_atual >= message_size:
                         print(f"DEBUG: [GESTAO_LOGICA]   - MOTIVO: Rxd atual ({rxd_atual}) >= message_size ({message_size})")
                     if rxd_processed >= rate_max:
-                        print(f"DEBUG: [GESTAO_LOGICA]   - ⚠️ MOTIVO: Já processou {rxd_processed}/{rate_max} pacotes Rxd neste turno (GLOBALMENTE)")
+                        print(f"DEBUG: [GESTAO_LOGICA]   - WARNING: MOTIVO: Já processou {rxd_processed}/{rate_max} pacotes Rxd neste turno (GLOBALMENTE)")
             
             # Verificar se Lost pode ser incrementado
             if carta_dados:
@@ -970,23 +970,23 @@ class PlayerDashboard(tk.Toplevel):
                 
                 if pode_incrementar_lost:
                     estado['btn_plus_lost_visivel'] = True
-                    print("DEBUG: [GESTAO_LOGICA] ✅ Botão + Lost deve estar visível")
+                    print("DEBUG: [GESTAO_LOGICA] Botão + Lost deve estar visível")
                 else:
-                    print("DEBUG: [GESTAO_LOGICA] ❌ Botão + Lost NÃO deve estar visível")
+                    print("DEBUG: [GESTAO_LOGICA] ERROR: Botão + Lost NÃO deve estar visível")
                     if (hasattr(self, '_final_phase_gestao_ativa') and self._final_phase_gestao_ativa):
                         if not lost_permitido:
                             print("DEBUG: [GESTAO_LOGICA]   - MOTIVO: Lost não permitido para esta carta")
                         if lost_atual >= message_size:
                             print(f"DEBUG: [GESTAO_LOGICA]   - MOTIVO: Lost atual ({lost_atual}) >= message_size ({message_size})")
                         if lost_processed >= rate_max:
-                            print(f"DEBUG: [GESTAO_LOGICA]   - ⚠️ MOTIVO: Carta já processou {lost_processed}/{rate_max} pacotes Lost neste turno")
+                            print(f"DEBUG: [GESTAO_LOGICA]   - WARNING: MOTIVO: Carta já processou {lost_processed}/{rate_max} pacotes Lost neste turno")
                     else:
                         if not lost_permitido:
                             print("DEBUG: [GESTAO_LOGICA]   - MOTIVO: Lost não permitido para esta carta")
                         if lost_atual >= message_size:
                             print(f"DEBUG: [GESTAO_LOGICA]   - MOTIVO: Lost atual ({lost_atual}) >= message_size ({message_size})")
                         if lost_processed >= rate_max:
-                            print(f"DEBUG: [GESTAO_LOGICA]   - ⚠️ MOTIVO: Já processou {lost_processed}/{rate_max} pacotes Lost neste turno (GLOBALMENTE)")
+                            print(f"DEBUG: [GESTAO_LOGICA]   - WARNING: MOTIVO: Já processou {lost_processed}/{rate_max} pacotes Lost neste turno (GLOBALMENTE)")
             
             # Verificar se botão seta deve estar visível
             if not estado['btn_plus_rxd_visivel'] and not estado['btn_plus_lost_visivel']:
@@ -995,14 +995,14 @@ class PlayerDashboard(tk.Toplevel):
                 carta_atual_idx = getattr(self, '_carta_atual_gestao', 0)
                 if carta_atual_idx + 1 < total_cartas:
                     estado['btn_seta_visivel'] = True
-                    print("DEBUG: [GESTAO_LOGICA] ✅ Botão seta deve estar visível (há mais cartas)")
+                    print("DEBUG: [GESTAO_LOGICA] Botão seta deve estar visível (há mais cartas)")
                 else:
-                    print("DEBUG: [GESTAO_LOGICA] ❌ Não há mais cartas para gerir - sem botão seta")
+                    print("DEBUG: [GESTAO_LOGICA] ERROR: Não há mais cartas para gerir - sem botão seta")
             else:
-                print("DEBUG: [GESTAO_LOGICA] ❌ Botões + ainda disponíveis - botão seta NÃO deve estar visível")
+                print("DEBUG: [GESTAO_LOGICA] ERROR: Botões + ainda disponíveis - botão seta NÃO deve estar visível")
                     
         except Exception as e:
-            print(f"DEBUG: [GESTAO_LOGICA] ❌ Erro geral: {e}")
+            print(f"DEBUG: [GESTAO_LOGICA] ERROR: Erro geral: {e}")
             import traceback
             traceback.print_exc()
         
@@ -1039,10 +1039,10 @@ class PlayerDashboard(tk.Toplevel):
                 if selected_index < len(self.cards):
                     carta_real = self.cards[selected_index]
                     carta_nome = carta_real.split('/')[-1] if carta_real else 'None'
-                    print(f"DEBUG: [CURRENT_CARD] ✅ Gestão ativa - usando selected_carousel_index {selected_index}: {carta_nome}")
+                    print(f"DEBUG: [CURRENT_CARD] Gestão ativa - usando selected_carousel_index {selected_index}: {carta_nome}")
                     return carta_real
                 else:
-                    print(f"DEBUG: [CURRENT_CARD] ❌ selected_carousel_index {selected_index} fora dos limites ({len(self.cards)})")
+                    print(f"DEBUG: [CURRENT_CARD] ERROR: selected_carousel_index {selected_index} fora dos limites ({len(self.cards)})")
             
             # Se estamos em gestão de pacotes mas sem selected_index, usar _carta_atual_gestao
             if gestao_ativa and tem_cards and hasattr(self, '_carta_atual_gestao'):
@@ -1051,16 +1051,16 @@ class PlayerDashboard(tk.Toplevel):
                 if carta_atual_idx < len(self.cards):
                     carta_real = self.cards[carta_atual_idx]
                     carta_nome = carta_real.split('/')[-1] if carta_real else 'None'
-                    print(f"DEBUG: [CURRENT_CARD] ✅ Gestão ativa - usando _carta_atual_gestao {carta_atual_idx}: {carta_nome}")
+                    print(f"DEBUG: [CURRENT_CARD] Gestão ativa - usando _carta_atual_gestao {carta_atual_idx}: {carta_nome}")
                     return carta_real
                 else:
-                    print(f"DEBUG: [CURRENT_CARD] ❌ _carta_atual_gestao {carta_atual_idx} fora dos limites ({len(self.cards)})")
+                    print(f"DEBUG: [CURRENT_CARD] ERROR: _carta_atual_gestao {carta_atual_idx} fora dos limites ({len(self.cards)})")
             
             # Se não estamos em gestão mas há índice selecionado válido, usar esse
             if tem_cards and selected_index is not None and selected_index < len(self.cards):
                 carta_real = self.cards[selected_index]
                 carta_nome = carta_real.split('/')[-1] if carta_real else 'None'
-                print(f"DEBUG: [CURRENT_CARD] ✅ Usando selected_carousel_index normal {selected_index}: {carta_nome}")
+                print(f"DEBUG: [CURRENT_CARD] Usando selected_carousel_index normal {selected_index}: {carta_nome}")
                 return carta_real
             
             # Fallback para selected_carousel_card se ainda é válida
@@ -1068,10 +1068,10 @@ class PlayerDashboard(tk.Toplevel):
             carta_cached_nome = carta_cached.split('/')[-1] if carta_cached else 'None'
             print(f"DEBUG: [CURRENT_CARD] carta_cached: {carta_cached_nome}")
             if carta_cached:
-                print(f"DEBUG: [CURRENT_CARD] ✅ Fallback para carta cached: {carta_cached_nome}")
+                print(f"DEBUG: [CURRENT_CARD] Fallback para carta cached: {carta_cached_nome}")
                 return carta_cached
             
-            print("DEBUG: [CURRENT_CARD] ❌ Nenhuma carta atual encontrada")
+            print("DEBUG: [CURRENT_CARD] ERROR: Nenhuma carta atual encontrada")
             print(f"DEBUG: [CURRENT_CARD] ===== FIM DIAGNÓSTICO =====")
             return None
             
@@ -1085,7 +1085,7 @@ class PlayerDashboard(tk.Toplevel):
         """Salva o estado atual da interface principal do dashboard"""
         # PROTEÇÃO: Não salvar estado se estivermos numa página especial
         if getattr(self, '_in_router_selection_page', False):
-            print("DEBUG: [ESTADO] ⚠️ Salvamento de estado cancelado - estamos numa página de seleção de router")
+            print("DEBUG: [ESTADO] WARNING: Salvamento de estado cancelado - estamos numa página de seleção de router")
             return
             
         print("DEBUG: [ESTADO] Salvando estado da interface principal...")
@@ -1108,10 +1108,10 @@ class PlayerDashboard(tk.Toplevel):
                             "Rxd": rxd_atual,
                             "Lost": lost_atual
                         }
-                        print(f"DEBUG: [ESTADO] ✅ Valores preservados antes de salvar estado:")
+                        print(f"DEBUG: [ESTADO] Valores preservados antes de salvar estado:")
                         print(f"DEBUG: [ESTADO]   Carta índice {idx}: To send={to_send_atual}, Rxd={rxd_atual}, Lost={lost_atual}")
             except Exception as e:
-                print(f"DEBUG: [ESTADO] ❌ Erro ao preservar valores antes de salvar: {e}")
+                print(f"DEBUG: [ESTADO] ERROR: Erro ao preservar valores antes de salvar: {e}")
         
         # CORREÇÃO CRÍTICA: NÃO modificar _final_phase_gestao_ativa durante navegação
         # Os widgets são destruídos durante navegação, mas isso não significa que a gestão foi finalizada
@@ -1174,7 +1174,7 @@ class PlayerDashboard(tk.Toplevel):
         
         # CORREÇÃO CRÍTICA: Usar estado imediato se disponível e NÃO DELETAR ainda
         if hasattr(self, '_estado_botoes_imediato') and self._estado_botoes_imediato:
-            print("DEBUG: [ESTADO] ✅ USANDO ESTADO IMEDIATO CAPTURADO ANTES DO CLIQUE:")
+            print("DEBUG: [ESTADO] SUCCESS: USANDO ESTADO IMEDIATO CAPTURADO ANTES DO CLIQUE:")
             print(f"DEBUG: [ESTADO] Estado original capturado: {self._estado_botoes_imediato}")
             
             # USAR EXATAMENTE o que foi capturado - sem modificações
@@ -1188,9 +1188,9 @@ class PlayerDashboard(tk.Toplevel):
             print(f"DEBUG: [ESTADO]   btn_seta_visivel: {state['btn_seta_visivel']}")
             
             # CRÍTICO: NÃO deletar ainda - preservar para debug e restauração
-            print("DEBUG: [ESTADO] ✅ Estado imediato preservado - será limpo apenas após restauração completa")
+            print("DEBUG: [ESTADO] SUCCESS: Estado imediato preservado - será limpo apenas após restauração completa")
         else:
-            print("DEBUG: [ESTADO] ⚠️ Nenhum estado imediato disponível - usando detecção fallback")
+            print("DEBUG: [ESTADO] WARNING: Nenhum estado imediato disponível - usando detecção fallback")
             print(f"DEBUG: [ESTADO] === DETECÇÃO SIMPLES DOS BOTÕES ===")
             
             # MÉTODO SIMPLES: Verificar apenas os atributos de classe diretamente
@@ -1200,42 +1200,42 @@ class PlayerDashboard(tk.Toplevel):
                     try:
                         if self._btn_plus_rxd.winfo_exists() and self._btn_plus_rxd.winfo_ismapped():
                             state['btn_plus_rxd_visivel'] = True
-                            print(f"DEBUG: [ESTADO] ✅ Botão + Rxd DETECTADO (visível e mapeado)")
+                            print(f"DEBUG: [ESTADO] SUCCESS: Botão + Rxd DETECTADO (visível e mapeado)")
                         else:
-                            print(f"DEBUG: [ESTADO] ❌ Botão + Rxd existe mas não está mapeado")
+                            print(f"DEBUG: [ESTADO] ERROR: Botão + Rxd existe mas não está mapeado")
                     except tk.TclError as e:
-                        print(f"DEBUG: [ESTADO] ❌ Erro ao verificar + Rxd: {e}")
+                        print(f"DEBUG: [ESTADO] ERROR: Erro ao verificar + Rxd: {e}")
                 else:
-                    print(f"DEBUG: [ESTADO] ❌ Atributo _btn_plus_rxd não existe ou é None")
+                    print(f"DEBUG: [ESTADO] ERROR: Atributo _btn_plus_rxd não existe ou é None")
                     
                 # Verificar botão + Lost  
                 if (hasattr(self, '_btn_plus_lost') and self._btn_plus_lost is not None):
                     try:
                         if self._btn_plus_lost.winfo_exists() and self._btn_plus_lost.winfo_ismapped():
                             state['btn_plus_lost_visivel'] = True
-                            print(f"DEBUG: [ESTADO] ✅ Botão + Lost DETECTADO (visível e mapeado)")
+                            print(f"DEBUG: [ESTADO] SUCCESS: Botão + Lost DETECTADO (visível e mapeado)")
                         else:
-                            print(f"DEBUG: [ESTADO] ❌ Botão + Lost existe mas não está mapeado")
+                            print(f"DEBUG: [ESTADO] ERROR: Botão + Lost existe mas não está mapeado")
                     except tk.TclError as e:
-                        print(f"DEBUG: [ESTADO] ❌ Erro ao verificar + Lost: {e}")
+                        print(f"DEBUG: [ESTADO] ERROR: Erro ao verificar + Lost: {e}")
                 else:
-                    print(f"DEBUG: [ESTADO] ❌ Atributo _btn_plus_lost não existe ou é None")
+                    print(f"DEBUG: [ESTADO] ERROR: Atributo _btn_plus_lost não existe ou é None")
                     
                 # Verificar botão seta
                 if (hasattr(self, '_btn_seta') and self._btn_seta is not None):
                     try:
                         if self._btn_seta.winfo_exists() and self._btn_seta.winfo_ismapped():
                             state['btn_seta_visivel'] = True
-                            print(f"DEBUG: [ESTADO] ✅ Botão seta DETECTADO (visível e mapeado)")
+                            print(f"DEBUG: [ESTADO] SUCCESS: Botão seta DETECTADO (visível e mapeado)")
                         else:
-                            print(f"DEBUG: [ESTADO] ❌ Botão seta existe mas não está mapeado")
+                            print(f"DEBUG: [ESTADO] ERROR: Botão seta existe mas não está mapeado")
                     except tk.TclError as e:
-                        print(f"DEBUG: [ESTADO] ❌ Erro ao verificar seta: {e}")
+                        print(f"DEBUG: [ESTADO] ERROR: Erro ao verificar seta: {e}")
                 else:
-                    print(f"DEBUG: [ESTADO] ❌ Atributo _btn_seta não existe ou é None")
+                    print(f"DEBUG: [ESTADO] ERROR: Atributo _btn_seta não existe ou é None")
                     
             except Exception as e:
-                print(f"DEBUG: [ESTADO] ❌ Erro geral na detecção: {e}")
+                print(f"DEBUG: [ESTADO] ERROR: Erro geral na detecção: {e}")
         
         print(f"DEBUG: [ESTADO] === RESULTADO FINAL DA DETECÇÃO ===")
         
@@ -1254,7 +1254,7 @@ class PlayerDashboard(tk.Toplevel):
         print(f"DEBUG: [ESTADO] botao_seta_visivel: {state.get('botao_seta_visivel', False)}")
         
         self._saved_dashboard_state = state
-        print(f"DEBUG: [ESTADO] ✅ Estado salvo com sucesso!")
+        print(f"DEBUG: [ESTADO] SUCCESS: Estado salvo com sucesso!")
         print(f"DEBUG: [ESTADO] Carta selecionada: {state.get('selected_carousel_card')}")
         print(f"DEBUG: [ESTADO] Índice selecionado: {state.get('selected_carousel_index')}")
         print(f"DEBUG: [ESTADO] Índice destaque roxo: {state.get('destaque_roxo_index')}")
@@ -1264,16 +1264,16 @@ class PlayerDashboard(tk.Toplevel):
         
         # GARANTIA ADICIONAL: Também salvar no estado imediato para fallback
         if hasattr(self, '_estado_botoes_imediato') and self._estado_botoes_imediato:
-            print(f"DEBUG: [ESTADO] ✅ Estado imediato também disponível como backup")
+            print(f"DEBUG: [ESTADO] SUCCESS: Estado imediato também disponível como backup")
         else:
-            print(f"DEBUG: [ESTADO] ⚠️ Estado imediato não disponível")
+            print(f"DEBUG: [ESTADO] WARNING: Estado imediato não disponível")
             # Criar backup baseado no estado atual
             self._estado_botoes_imediato = {
                 'btn_plus_rxd_visivel': state.get('btn_plus_rxd_visivel', False),
                 'btn_plus_lost_visivel': state.get('btn_plus_lost_visivel', False),
                 'btn_seta_visivel': state.get('btn_seta_visivel', False)
             }
-            print(f"DEBUG: [ESTADO] ✅ Estado imediato criado como backup")
+            print(f"DEBUG: [ESTADO] SUCCESS: Estado imediato criado como backup")
     
     def _restore_gestao_buttons_specifically(self, btn_plus_rxd_visivel, btn_plus_lost_visivel, btn_seta_visivel):
         """
@@ -1294,11 +1294,11 @@ class PlayerDashboard(tk.Toplevel):
         algum_botao_para_restaurar = btn_plus_rxd_visivel or btn_plus_lost_visivel or btn_seta_visivel
         
         if not algum_botao_para_restaurar and not gestao_ativa:
-            print("DEBUG: [RESTORE_BUTTONS] ❌ Nenhum botão para restaurar e gestão não ativa")
+            print("DEBUG: [RESTORE_BUTTONS] ERROR: Nenhum botão para restaurar e gestão não ativa")
             return
         
         if not algum_botao_para_restaurar and gestao_ativa:
-            print("DEBUG: [RESTORE_BUTTONS] ⚠️ Gestão ativa mas nenhum botão específico para restaurar - determinando botões corretos")
+            print("DEBUG: [RESTORE_BUTTONS] WARNING: Gestão ativa mas nenhum botão específico para restaurar - determinando botões corretos")
             # CORREÇÃO CRÍTICA: Se gestão está ativa mas não há flags específicas,
             # redeterminar que botões devem estar visíveis baseado na carta atual
             estado_logico = self._determinar_estado_gestao_logico()
@@ -1309,7 +1309,7 @@ class PlayerDashboard(tk.Toplevel):
             
             # Se ainda não há nenhum botão para restaurar, não há nada a fazer
             if not (btn_plus_rxd_visivel or btn_plus_lost_visivel or btn_seta_visivel):
-                print("DEBUG: [RESTORE_BUTTONS] ❌ Redeterminação também não encontrou botões - cancelando restauração")
+                print("DEBUG: [RESTORE_BUTTONS] ERROR: Redeterminação também não encontrou botões - cancelando restauração")
                 return
         
         # Garantir que a gestão está ativa se há botões para restaurar
@@ -1320,7 +1320,7 @@ class PlayerDashboard(tk.Toplevel):
         # A gestão estava na carta 1 (Challenge_9.png), não na carta 0 (back_card_red.png)
         if hasattr(self, '_saved_dashboard_state') and self._saved_dashboard_state:
             carta_gestao_original = self._saved_dashboard_state.get('selected_carousel_index', 1)
-            print(f"DEBUG: [RESTORE_BUTTONS] ✅ CORREÇÃO FUNDAMENTAL:")
+            print(f"DEBUG: [RESTORE_BUTTONS] SUCCESS: CORREÇÃO FUNDAMENTAL:")
             print(f"DEBUG: [RESTORE_BUTTONS]   Carta que estava sendo gerenciada: {carta_gestao_original}")
             print(f"DEBUG: [RESTORE_BUTTONS]   Restaurando gestão para esta carta")
             self.selected_carousel_index = carta_gestao_original
@@ -1330,13 +1330,13 @@ class PlayerDashboard(tk.Toplevel):
             if (hasattr(self, 'cards') and self.cards and 
                 carta_gestao_original < len(self.cards)):
                 self.selected_carousel_card = self.cards[carta_gestao_original]
-                print(f"DEBUG: [RESTORE_BUTTONS] ✅ Carta selecionada atualizada: {os.path.basename(self.selected_carousel_card)}")
+                print(f"DEBUG: [RESTORE_BUTTONS] SUCCESS: Carta selecionada atualizada: {os.path.basename(self.selected_carousel_card)}")
         else:
             # CORREÇÃO PROBLEMA 2: Preservar a posição correta do destaque roxo
             # NÃO redefinir selected_carousel_index se já está definido corretamente
             posicao_destaque_roxo = getattr(self, '_carta_atual_gestao', 1)  # Default para 1, não 0
             
-            print(f"DEBUG: [RESTORE_BUTTONS] ⚠️ Usando fallback - posição gestão: {posicao_destaque_roxo}")
+            print(f"DEBUG: [RESTORE_BUTTONS] WARNING: Usando fallback - posição gestão: {posicao_destaque_roxo}")
             self.selected_carousel_index = posicao_destaque_roxo
             self._carta_atual_gestao = posicao_destaque_roxo
             
@@ -1344,28 +1344,28 @@ class PlayerDashboard(tk.Toplevel):
             if (hasattr(self, 'cards') and self.cards and 
                 posicao_destaque_roxo < len(self.cards)):
                 self.selected_carousel_card = self.cards[posicao_destaque_roxo]
-                print(f"DEBUG: [RESTORE_BUTTONS] ✅ Carta selecionada atualizada: {os.path.basename(self.selected_carousel_card)}")
+                print(f"DEBUG: [RESTORE_BUTTONS] SUCCESS: Carta selecionada atualizada: {os.path.basename(self.selected_carousel_card)}")
         
-        print(f"DEBUG: [RESTORE_BUTTONS] ✅ POSIÇÃO GESTÃO CORRIGIDA:")
+        print(f"DEBUG: [RESTORE_BUTTONS] SUCCESS: POSIÇÃO GESTÃO CORRIGIDA:")
         print(f"DEBUG: [RESTORE_BUTTONS]   selected_carousel_index: {self.selected_carousel_index}")
         print(f"DEBUG: [RESTORE_BUTTONS]   _carta_atual_gestao: {self._carta_atual_gestao}")
         print(f"DEBUG: [RESTORE_BUTTONS]   selected_carousel_card: {os.path.basename(self.selected_carousel_card) if self.selected_carousel_card else 'None'}")
         
         # CORREÇÃO FUNDAMENTAL: Recriar _cartas_gestao se estiver vazia ou inconsistente
         if not hasattr(self, '_cartas_gestao') or not self._cartas_gestao:
-            print("DEBUG: [RESTORE_BUTTONS] ⚠️ _cartas_gestao vazia - recriando com cartas ativas do carrossel")
+            print("DEBUG: [RESTORE_BUTTONS] WARNING: _cartas_gestao vazia - recriando com cartas ativas do carrossel")
             cartas_ativas = self._obter_cartas_ativas_carrossel()
             self._cartas_gestao = cartas_ativas
-            print(f"DEBUG: [RESTORE_BUTTONS] ✅ _cartas_gestao recriada: {[os.path.basename(c) for c in cartas_ativas]}")
+            print(f"DEBUG: [RESTORE_BUTTONS] SUCCESS: _cartas_gestao recriada: {[os.path.basename(c) for c in cartas_ativas]}")
             
             # Ajustar _carta_atual_gestao se está fora de range
             if self._carta_atual_gestao >= len(self._cartas_gestao):
                 self._carta_atual_gestao = len(self._cartas_gestao) - 1 if self._cartas_gestao else 0
-                print(f"DEBUG: [RESTORE_BUTTONS] ⚠️ _carta_atual_gestao ajustada para: {self._carta_atual_gestao}")
+                print(f"DEBUG: [RESTORE_BUTTONS] WARNING: _carta_atual_gestao ajustada para: {self._carta_atual_gestao}")
         
         # CORREÇÃO CRÍTICA: Aplicar destaque roxo na posição correta
         if self.selected_carousel_index is not None:
-            print(f"DEBUG: [RESTORE_BUTTONS] ✅ Aplicando destaque roxo na posição: {self.selected_carousel_index}")
+            print(f"DEBUG: [RESTORE_BUTTONS] SUCCESS: Aplicando destaque roxo na posição: {self.selected_carousel_index}")
             self._adicionar_destaque_roxo(self.selected_carousel_index)
             self._update_carousel_selection_highlights()
         
@@ -1378,7 +1378,7 @@ class PlayerDashboard(tk.Toplevel):
         rate_max = self._obter_rate_carta(carta_para_gestao)
         dados_carta = self._obter_dados_carta(carta_para_gestao)
         rate_options = dados_carta.get('rate_options', [0, 1])
-        print(f"DEBUG: [RESTORE_BUTTONS] ✅ Rate obtido da carta correta {os.path.basename(carta_para_gestao)}: rate_max={rate_max}, rate_options={rate_options}")
+        print(f"DEBUG: [RESTORE_BUTTONS] SUCCESS: Rate obtido da carta correta {os.path.basename(carta_para_gestao)}: rate_max={rate_max}, rate_options={rate_options}")
         
         # Restaurar botão + Rxd se estava visível
         if btn_plus_rxd_visivel:
@@ -1396,7 +1396,7 @@ class PlayerDashboard(tk.Toplevel):
             )
             self._btn_plus_rxd.place(relx=0.175, rely=0.8, anchor="center")
             self._btn_plus_rxd.lift()
-            print("DEBUG: [RESTORE_BUTTONS] ✅ Botão + Rxd roxo restaurado")
+            print("DEBUG: [RESTORE_BUTTONS] SUCCESS: Botão + Rxd roxo restaurado")
         
         # Restaurar botão + Lost se estava visível
         if btn_plus_lost_visivel:
@@ -1414,13 +1414,13 @@ class PlayerDashboard(tk.Toplevel):
             )
             self._btn_plus_lost.place(relx=0.175, rely=0.865, anchor="center")
             self._btn_plus_lost.lift()
-            print("DEBUG: [RESTORE_BUTTONS] ✅ Botão + Lost roxo restaurado")
+            print("DEBUG: [RESTORE_BUTTONS] SUCCESS: Botão + Lost roxo restaurado")
         
         # Restaurar botão seta se estava visível
         if btn_seta_visivel:
             print("DEBUG: [RESTORE_BUTTONS] Criando botão seta...")
             self._mostrar_botao_seta()
-            print("DEBUG: [RESTORE_BUTTONS] ✅ Botão seta restaurado")
+            print("DEBUG: [RESTORE_BUTTONS] SUCCESS: Botão seta restaurado")
         
         # Garantir que End Turn está disabled
         if hasattr(self, 'end_turn_btn') and self.end_turn_btn:
@@ -1432,9 +1432,9 @@ class PlayerDashboard(tk.Toplevel):
             if self.selected_carousel_index is not None:
                 self._atualizar_barras_gestao_carta_atual()
         except Exception as e:
-            print(f"DEBUG: [RESTORE_BUTTONS] ⚠️ Erro ao atualizar barras: {e}")
+            print(f"DEBUG: [RESTORE_BUTTONS] WARNING: Erro ao atualizar barras: {e}")
         
-        print("DEBUG: [RESTORE_BUTTONS] ✅ Restauração específica concluída")
+        print("DEBUG: [RESTORE_BUTTONS] SUCCESS: Restauração específica concluída")
 
     def _restore_dashboard_state(self):
         """Restaura o estado salvo da interface principal do dashboard"""
@@ -1515,35 +1515,35 @@ class PlayerDashboard(tk.Toplevel):
                 algum_botao_estava_visivel = btn_plus_rxd_estava_visivel or btn_plus_lost_estava_visivel or btn_seta_estava_visivel
                 
                 if algum_botao_estava_visivel:
-                    print("DEBUG: [ESTADO] ✅ Botões estavam visíveis - chamando restauração específica")
+                    print("DEBUG: [ESTADO] SUCCESS: Botões estavam visíveis - chamando restauração específica")
                     self._restore_gestao_buttons_specifically(
                         btn_plus_rxd_estava_visivel,
                         btn_plus_lost_estava_visivel, 
                         btn_seta_estava_visivel
                     )
                 else:
-                    print("DEBUG: [ESTADO] ⚠️ Gestão ativa mas sem botões visíveis - mantendo gestão e verificando necessidade")
+                    print("DEBUG: [ESTADO] WARNING: Gestão ativa mas sem botões visíveis - mantendo gestão e verificando necessidade")
                     # Manter gestão ativa mas verificar se precisa de botões
                     self._final_phase_gestao_ativa = True
                     self._final_phase_active = True
                     
                     # Aplicar destaque roxo se há carta selecionada
                     if hasattr(self, 'selected_carousel_index') and self.selected_carousel_index is not None:
-                        print(f"DEBUG: [ESTADO] ✅ Aplicando destaque roxo na posição {self.selected_carousel_index}")
+                        print(f"DEBUG: [ESTADO] SUCCESS: Aplicando destaque roxo na posição {self.selected_carousel_index}")
                         self._adicionar_destaque_roxo(self.selected_carousel_index)
                         self._update_carousel_selection_highlights()
                         
                         # Verificar se precisa de botões baseado no estado atual
                         self.after(300, self._verificar_e_mostrar_botao_seta_se_necessario)
                     else:
-                        print("DEBUG: [ESTADO] ❌ Nenhuma carta selecionada para destaque roxo")
+                        print("DEBUG: [ESTADO] ERROR: Nenhuma carta selecionada para destaque roxo")
             else:
                 print("DEBUG: [ESTADO] Gestão não estava ativa - verificando se End Turn deve estar enabled")
                 
                 # CORREÇÃO CRÍTICA: Se Final Phase está ativo mas gestão não está ativa,
                 # significa que a gestão foi finalizada e End Turn deve estar enabled
                 if self._final_phase_active and not gestao_ativa:
-                    print("DEBUG: [ESTADO] ✅ Final Phase ativo sem gestão - ativando End Turn")
+                    print("DEBUG: [ESTADO] SUCCESS: Final Phase ativo sem gestão - ativando End Turn")
                     self.after(150, self._ativar_botao_end_turn)
                 else:
                     print("DEBUG: [ESTADO] Final Phase não ativo - End Turn deve permanecer disabled")
@@ -1552,16 +1552,16 @@ class PlayerDashboard(tk.Toplevel):
         def restore_and_cleanup():
             # PROTEÇÃO: Não executar se estivermos numa página especial
             if getattr(self, '_in_router_selection_page', False):
-                print("DEBUG: [ESTADO] ⚠️ Restauração cancelada - estamos numa página de seleção de router")
+                print("DEBUG: [ESTADO] WARNING: Restauração cancelada - estamos numa página de seleção de router")
                 return
                 
             restore_gestao_state()
             
             # LIMPEZA FINAL: Remover estado imediato após restauração completa
-            print("DEBUG: [ESTADO] ✅ LIMPEZA FINAL: Removendo estado imediato após restauração completa")
+            print("DEBUG: [ESTADO] SUCCESS: LIMPEZA FINAL: Removendo estado imediato após restauração completa")
             if hasattr(self, '_estado_botoes_imediato'):
                 self._estado_botoes_imediato = None
-                print("DEBUG: [ESTADO] ✅ Estado imediato limpo - sistema pronto para próxima captura")
+                print("DEBUG: [ESTADO] SUCCESS: Estado imediato limpo - sistema pronto para próxima captura")
         
         self.after(100, restore_and_cleanup)
     
@@ -1720,7 +1720,7 @@ class PlayerDashboard(tk.Toplevel):
         # Adicionar algumas cartas neutras (actions, events) + CHALLENGES ADICIONADAS ESPECIFICAMENTE
         print("DEBUG: [add_starter_cards] Processando cartas neutras...")
         neutral_types = {
-            "challenges": "Challenges",  # ✅ CHALLENGES HABILITADAS - adicionar Challenge_3.png
+            "challenges": "Challenges",  # SUCCESS: CHALLENGES HABILITADAS - adicionar Challenge_3.png
             "actions": "Actions", 
             "events": "Events"
         }
@@ -1748,7 +1748,7 @@ class PlayerDashboard(tk.Toplevel):
                             print(f"DEBUG: [add_starter_cards] Verificação explícita Action_70.png em: {action_70_path}")
                             print(f"DEBUG: [add_starter_cards] Action_70.png existe? {os.path.exists(action_70_path)}")
                             if os.path.exists(action_70_path) and "Action_70.png" not in files_in_path:
-                                print(f"DEBUG: [add_starter_cards] ⚠️ PROBLEMA: Action_70.png existe no filesystem mas não retornado por listdir!")
+                                print(f"DEBUG: [add_starter_cards] WARNING: PROBLEMA: Action_70.png existe no filesystem mas não retornado por listdir!")
                                 files_in_path.append("Action_70.png")  # Força a adição
                         
                         card_files = [os.path.join(path_attempt, f) for f in files_in_path 
@@ -1834,7 +1834,7 @@ class PlayerDashboard(tk.Toplevel):
                                     if card_type == "challenges":
                                         carta_path = card_files[i]
                                         print(f"DEBUG: [add_starter_cards] Challenge adicionado ao inventário: {os.path.basename(carta_path)}")
-                                        print(f"DEBUG: [add_starter_cards] ✅ Challenge estará disponível na página Activities/Challenges")
+                                        print(f"DEBUG: [add_starter_cards] SUCCESS: Challenge estará disponível na página Activities/Challenges")
                                     
                                     # Se for uma carta Event, registrar o tracking de duração
                                     elif card_type == "events":
@@ -1890,12 +1890,12 @@ class PlayerDashboard(tk.Toplevel):
         print(f"DEBUG: [PlayerDashboard] Action_10.png presente? {action_10_present}")
         
         if action_70_present or action_10_present:
-            print(f"DEBUG: [PlayerDashboard] ✅ Actions específicas encontradas! NÃO adicionando Actions extras")
+            print(f"DEBUG: [PlayerDashboard] SUCCESS: Actions específicas encontradas! NÃO adicionando Actions extras")
             # Só garantir que há Events suficientes, mas não Actions extras
             current_actions = len(self.inventario.get("actions", []))
             self.add_more_action_event_cards(min_actions=current_actions, min_events=2)  # Manter actions atuais
         else:
-            print(f"DEBUG: [PlayerDashboard] ⚠️ Actions específicas NÃO encontradas, adicionando Actions padrão")
+            print(f"DEBUG: [PlayerDashboard] WARNING: Actions específicas NÃO encontradas, adicionando Actions padrão")
             # Garantir que há cartas suficientes de Actions/Events  
             self.add_more_action_event_cards(min_actions=6, min_events=2)
         
@@ -1914,7 +1914,7 @@ class PlayerDashboard(tk.Toplevel):
         if os.path.exists(equipment_2_path):
             if equipment_2_path not in self.inventario["equipments"]:
                 self.inventario["equipments"].append(equipment_2_path)
-                print(f"DEBUG: [PlayerDashboard] ✅ Equipment_2.png adicionada ao inventário: {equipment_2_path}")
+                print(f"DEBUG: [PlayerDashboard] SUCCESS: Equipment_2.png adicionada ao inventário: {equipment_2_path}")
                 equipment_2_final_path = equipment_2_path
             else:
                 print(f"DEBUG: [PlayerDashboard] Equipment_2.png já estava no inventário")
@@ -1934,7 +1934,7 @@ class PlayerDashboard(tk.Toplevel):
                 if os.path.exists(fallback_path):
                     if fallback_path not in self.inventario["equipments"]:
                         self.inventario["equipments"].append(fallback_path)
-                        print(f"DEBUG: [PlayerDashboard] ✅ Equipment_2.png adicionada via fallback: {fallback_path}")
+                        print(f"DEBUG: [PlayerDashboard] SUCCESS: Equipment_2.png adicionada via fallback: {fallback_path}")
                         equipment_2_final_path = fallback_path
                         break
                     else:
@@ -1945,10 +1945,10 @@ class PlayerDashboard(tk.Toplevel):
         # Equipment_2.png adicionada ao inventário mas NÃO ativada automaticamente
         # O jogador deve ativar manualmente para usar REMOVE ROUTER
         if equipment_2_final_path:
-            print(f"DEBUG: [PlayerDashboard] ✅ Equipment_2.png adicionada ao inventário: {os.path.basename(equipment_2_final_path)}")
-            print(f"DEBUG: [PlayerDashboard] ⚠️ Equipment_2.png deve ser ativada manualmente para usar REMOVE ROUTER")
+            print(f"DEBUG: [PlayerDashboard] SUCCESS: Equipment_2.png adicionada ao inventário: {os.path.basename(equipment_2_final_path)}")
+            print(f"DEBUG: [PlayerDashboard] WARNING: Equipment_2.png deve ser ativada manualmente para usar REMOVE ROUTER")
         else:
-            print(f"DEBUG: [PlayerDashboard] ⚠️ Equipment_2.png não foi encontrada - REMOVE ROUTER não funcionará")
+            print(f"DEBUG: [PlayerDashboard] WARNING: Equipment_2.png não foi encontrada - REMOVE ROUTER não funcionará")
     
     def _get_card_message_size(self, carta_path):
         """
@@ -2071,7 +2071,7 @@ class PlayerDashboard(tk.Toplevel):
         
         # CORREÇÃO CRÍTICA: Verificar bloqueio temporário após clique no botão seta
         if getattr(self, '_bloqueio_temporario_carrossel', False):
-            print("DEBUG: ❌ Clique bloqueado temporariamente após botão seta - evitando fullscreen acidental")
+            print("DEBUG: ERROR: Clique bloqueado temporariamente após botão seta - evitando fullscreen acidental")
             return
         
         # CORREÇÃO: Verificar se estamos em Final Phase com gestão de pacotes ativa
@@ -2134,7 +2134,7 @@ class PlayerDashboard(tk.Toplevel):
                 try:
                     if self._btn_plus_rxd.winfo_exists() and self._btn_plus_rxd.winfo_ismapped():
                         estado_imediato['btn_plus_rxd_visivel'] = True
-                        print("DEBUG: [ESTADO] ✅ Botão + Rxd DETECTADO como visível")
+                        print("DEBUG: [ESTADO] SUCCESS: Botão + Rxd DETECTADO como visível")
                 except:
                     pass
             
@@ -2142,7 +2142,7 @@ class PlayerDashboard(tk.Toplevel):
                 try:
                     if self._btn_plus_lost.winfo_exists() and self._btn_plus_lost.winfo_ismapped():
                         estado_imediato['btn_plus_lost_visivel'] = True
-                        print("DEBUG: [ESTADO] ✅ Botão + Lost DETECTADO como visível")
+                        print("DEBUG: [ESTADO] SUCCESS: Botão + Lost DETECTADO como visível")
                 except:
                     pass
             
@@ -2150,7 +2150,7 @@ class PlayerDashboard(tk.Toplevel):
                 try:
                     if self._btn_seta.winfo_exists() and self._btn_seta.winfo_ismapped():
                         estado_imediato['btn_seta_visivel'] = True
-                        print("DEBUG: [ESTADO] ✅ Botão seta DETECTADO como visível")
+                        print("DEBUG: [ESTADO] SUCCESS: Botão seta DETECTADO como visível")
                 except:
                     pass
             
@@ -2187,7 +2187,7 @@ class PlayerDashboard(tk.Toplevel):
             
             # CORREÇÃO PROBLEMA 1: SEMPRE atualizar barras diretamente da base de dados primeiro
             # Depois aplicar valores preservados apenas se diferentes de zero
-            print(f"DEBUG: 🔄 ATUALIZANDO BARRAS DA BASE DE DADOS - ANTES FINAL PHASE")
+            print(f"DEBUG: UPDATING: ATUALIZANDO BARRAS DA BASE DE DADOS - ANTES FINAL PHASE")
             self._update_progress_bars_from_card(carta_path)
             
             # NOVA LÓGICA: Aplicar valores preservados apenas se diferentes dos defaults
@@ -2198,13 +2198,13 @@ class PlayerDashboard(tk.Toplevel):
             
             # Se valores preservados diferem dos defaults da base de dados, aplicar
             if rxd_preservado > 0 or lost_preservado > 0 or to_send_preservado != message_size:
-                print(f"DEBUG: 📊 APLICANDO VALORES PRESERVADOS - ANTES FINAL PHASE")
+                print(f"DEBUG: STATS: APLICANDO VALORES PRESERVADOS - ANTES FINAL PHASE")
                 self._apply_preserved_stats_to_progress_bars(preserved_stats, carta_path)
             else:
-                print(f"DEBUG: ✅ VALORES PRESERVADOS SÃO DEFAULTS - MANTENDO BASE DE DADOS")
+                print(f"DEBUG: SUCCESS: VALORES PRESERVADOS SÃO DEFAULTS - MANTENDO BASE DE DADOS")
         else:
-            print(f"DEBUG: ⚠️ Índice {carta_index_in_carrossel} fora do range de card_stats")
-            print(f"DEBUG: 🔄 ATUALIZANDO BARRAS DIRETAMENTE DA BASE DE DADOS")
+            print(f"DEBUG: WARNING: Índice {carta_index_in_carrossel} fora do range de card_stats")
+            print(f"DEBUG: UPDATING: ATUALIZANDO BARRAS DIRETAMENTE DA BASE DE DADOS")
             self._update_progress_bars_from_card(carta_path)
         
         print(f"DEBUG: ===== FIM _select_carousel_card =====\n")
@@ -2214,7 +2214,7 @@ class PlayerDashboard(tk.Toplevel):
         Atualiza os destaques das cartas no carrossel baseado na seleção atual
         """
         if not hasattr(self, 'card_labels') or not self.card_labels:
-            print("DEBUG: ⚠️ card_labels não existe ou está vazio - pulando atualização de destaques")
+            print("DEBUG: WARNING: card_labels não existe ou está vazio - pulando atualização de destaques")
             return
         
         print(f"DEBUG: ===== _update_carousel_selection_highlights INICIADA =====")
@@ -2232,17 +2232,17 @@ class PlayerDashboard(tk.Toplevel):
             try:
                 # Verificar se widget ainda existe antes de configurar
                 if not lbl.winfo_exists():
-                    print(f"DEBUG: ⚠️ Widget carta {i} foi destruído, pulando configuração")
+                    print(f"DEBUG: WARNING: Widget carta {i} foi destruído, pulando configuração")
                     widgets_destruidos += 1
                     continue
             except tk.TclError:
-                print(f"DEBUG: ⚠️ Widget carta {i} não é válido (TclError), pulando configuração")
+                print(f"DEBUG: WARNING: Widget carta {i} não é válido (TclError), pulando configuração")
                 widgets_destruidos += 1
                 continue
         
         # Se muitos widgets foram destruídos, cancelar atualização
         if widgets_destruidos >= len(self.card_labels) // 2:
-            print(f"DEBUG: ⚠️ Muitos widgets destruídos ({widgets_destruidos}/{len(self.card_labels)}) - cancelando atualização")
+            print(f"DEBUG: WARNING: Muitos widgets destruídos ({widgets_destruidos}/{len(self.card_labels)}) - cancelando atualização")
             print(f"DEBUG: ===== _update_carousel_selection_highlights CANCELADA =====\n")
             return
         
@@ -2253,10 +2253,10 @@ class PlayerDashboard(tk.Toplevel):
             try:
                 # CORREÇÃO: Verificar se widget ainda existe antes de configurar
                 if not lbl.winfo_exists():
-                    print(f"DEBUG: ⚠️ Widget carta {i} foi destruído, pulando configuração")
+                    print(f"DEBUG: WARNING: Widget carta {i} foi destruído, pulando configuração")
                     continue
             except tk.TclError:
-                print(f"DEBUG: ⚠️ Widget carta {i} não é válido (TclError), pulando configuração")
+                print(f"DEBUG: WARNING: Widget carta {i} não é válido (TclError), pulando configuração")
                 continue
             
             carta_path = self.cards[i]
@@ -2362,12 +2362,12 @@ class PlayerDashboard(tk.Toplevel):
             try:
                 lbl.config(bg=highlight_color, borderwidth=border_width, relief="solid" if border_width > 0 else "flat",
                           highlightbackground=border_color, highlightcolor=border_color, highlightthickness=border_width)
-                print(f"DEBUG: ✅ Carta {i} configurada: bg={highlight_color}, border={border_width}")
+                print(f"DEBUG: SUCCESS: Carta {i} configurada: bg={highlight_color}, border={border_width}")
             except tk.TclError as e:
-                print(f"DEBUG: ❌ Widget carta {i} inválido (TclError): {e}")
+                print(f"DEBUG: ERROR: Widget carta {i} inválido (TclError): {e}")
                 continue
             except Exception as e:
-                print(f"DEBUG: ❌ Erro ao configurar carta {i}: {e}")
+                print(f"DEBUG: ERROR: Erro ao configurar carta {i}: {e}")
                 continue
         
         print(f"DEBUG: ===== _update_carousel_selection_highlights TERMINADA =====\n")
@@ -2378,9 +2378,9 @@ class PlayerDashboard(tk.Toplevel):
         CORREÇÃO: Considera valores preservados para comportamento dinâmico correto
         """
         try:
-            print(f"DEBUG: ===== 🔄 _update_progress_bars_from_card INICIADA =====")
-            print(f"DEBUG: 📋 Carta selecionada: {os.path.basename(carta_path)}")
-            print(f"DEBUG: 🎯 CONTEXTO: Atualizando barras ANTES do Final Phase (comportamento dinâmico)")
+            print(f"DEBUG: ===== UPDATING: _update_progress_bars_from_card INICIADA =====")
+            print(f"DEBUG: CLIPBOARD: Carta selecionada: {os.path.basename(carta_path)}")
+            print(f"DEBUG: TARGET: CONTEXTO: Atualizando barras ANTES do Final Phase (comportamento dinâmico)")
             
             # Verificar se as barras de progresso estão inicializadas
             print(f"DEBUG: Verificando inicialização...")
@@ -2388,17 +2388,17 @@ class PlayerDashboard(tk.Toplevel):
             print(f"DEBUG: hasattr(self, 'progress_labels'): {hasattr(self, 'progress_labels')}")
             
             if not hasattr(self, 'progress_bars') or not hasattr(self, 'progress_labels'):
-                print("DEBUG: ❌ Barras de progresso não inicializadas")
+                print("DEBUG: ERROR: Barras de progresso não inicializadas")
                 return
                 
-            print(f"DEBUG: ✅ Barras de progresso inicializadas")
+            print(f"DEBUG: SUCCESS: Barras de progresso inicializadas")
             print(f"DEBUG: progress_bars keys: {list(self.progress_bars.keys())}")
             print(f"DEBUG: progress_labels keys: {list(self.progress_labels.keys())}")
                 
             # Obter message_size da base de dados
             print(f"DEBUG: Extraindo message_size da base de dados...")
             message_size = self._get_card_message_size_from_database(carta_path)
-            print(f"DEBUG: 📊 Message size extraído da base de dados: {message_size}")
+            print(f"DEBUG: STATS: Message size extraído da base de dados: {message_size}")
             
             # CORREÇÃO CRÍTICA: Verificar se existem valores preservados para esta carta
             carta_idx = None
@@ -2416,21 +2416,21 @@ class PlayerDashboard(tk.Toplevel):
             if (carta_idx is not None and hasattr(self, 'card_stats') and 
                 isinstance(self.card_stats, list) and carta_idx < len(self.card_stats)):
                 preserved_stats = self.card_stats[carta_idx]
-                print(f"DEBUG: 📊 VALORES PRESERVADOS ENCONTRADOS para carta {carta_idx}: {preserved_stats}")
+                print(f"DEBUG: STATS: VALORES PRESERVADOS ENCONTRADOS para carta {carta_idx}: {preserved_stats}")
             else:
-                print(f"DEBUG: 📊 Nenhum valor preservado encontrado - usando valores padrão")
-                print(f"DEBUG: 📊 Debug info: carta_idx={carta_idx}, card_stats_len={len(getattr(self, 'card_stats', []))}")
+                print(f"DEBUG: STATS: Nenhum valor preservado encontrado - usando valores padrão")
+                print(f"DEBUG: STATS: Debug info: carta_idx={carta_idx}, card_stats_len={len(getattr(self, 'card_stats', []))}")
             
             # Verificar se "To send" existe nas barras
             if "To send" not in self.progress_bars:
-                print("DEBUG: ❌ 'To send' não encontrado em progress_bars")
+                print("DEBUG: ERROR: 'To send' não encontrado em progress_bars")
                 return
                 
             if "To send" not in self.progress_labels:
-                print("DEBUG: ❌ 'To send' não encontrado em progress_labels")
+                print("DEBUG: ERROR: 'To send' não encontrado em progress_labels")
                 return
             
-            print(f"DEBUG: ✅ 'To send' encontrado em ambas as estruturas")
+            print(f"DEBUG: SUCCESS: 'To send' encontrado em ambas as estruturas")
             
             # Configurar barra "To send"
             try:
@@ -2441,21 +2441,21 @@ class PlayerDashboard(tk.Toplevel):
                 for bar_name in ["To send", "Rxd", "Lost"]:
                     if bar_name in self.progress_bars:
                         self.progress_bars[bar_name]["maximum"] = message_size
-                        print(f"DEBUG: ✅ Máximo da barra '{bar_name}' definido para {message_size}")
+                        print(f"DEBUG: SUCCESS: Máximo da barra '{bar_name}' definido para {message_size}")
                 
                 # CORREÇÃO: Usar valores preservados se disponíveis, senão usar valor padrão
                 if preserved_stats and 'To send' in preserved_stats:
                     to_send_value = preserved_stats['To send']
-                    print(f"DEBUG: 📊 USANDO VALOR PRESERVADO para To send: {to_send_value}")
+                    print(f"DEBUG: STATS: USANDO VALOR PRESERVADO para To send: {to_send_value}")
                 else:
                     to_send_value = message_size  # Valor padrão (barra cheia)
-                    print(f"DEBUG: 📊 USANDO VALOR PADRÃO para To send: {to_send_value}")
+                    print(f"DEBUG: STATS: USANDO VALOR PADRÃO para To send: {to_send_value}")
                 
                 # Configurar valor da barra To send
                 self.progress_bars["To send"]["value"] = to_send_value
                 self.progress_labels["To send"]["text"] = str(to_send_value)
                 
-                print(f"DEBUG: ✅ Barra 'To send' configurada:")
+                print(f"DEBUG: SUCCESS: Barra 'To send' configurada:")
                 print(f"DEBUG:   - Máximo: {message_size}")
                 print(f"DEBUG:   - Valor: {to_send_value}")
                 print(f"DEBUG:   - Label: '{to_send_value}'")
@@ -2469,7 +2469,7 @@ class PlayerDashboard(tk.Toplevel):
                             preserved_value = preserved_stats[bar_name]
                             self.progress_bars[bar_name]["value"] = preserved_value
                             self.progress_labels[bar_name]["text"] = str(preserved_value)
-                            print(f"DEBUG: ✅ {bar_name} atualizada com valor preservado: {preserved_value} (máx: {message_size})")
+                            print(f"DEBUG: SUCCESS: {bar_name} atualizada com valor preservado: {preserved_value} (máx: {message_size})")
                         else:
                             # NOVO: Usar valor padrão (buscar no card_stats se disponível)
                             carta_idx = getattr(self, 'selected_carousel_index', None)
@@ -2480,12 +2480,12 @@ class PlayerDashboard(tk.Toplevel):
                                 current_value = self.card_stats[carta_idx][bar_name]
                                 self.progress_bars[bar_name]["value"] = current_value
                                 self.progress_labels[bar_name]["text"] = str(current_value)
-                                print(f"DEBUG: ✅ {bar_name} atualizada com valor do card_stats: {current_value} (máx: {message_size})")
+                                print(f"DEBUG: SUCCESS: {bar_name} atualizada com valor do card_stats: {current_value} (máx: {message_size})")
                             else:
                                 # Último recurso: valor padrão 0
                                 self.progress_bars[bar_name]["value"] = 0
                                 self.progress_labels[bar_name]["text"] = "0"
-                                print(f"DEBUG: ✅ {bar_name} atualizada com valor padrão: 0 (máx: {message_size})")
+                                print(f"DEBUG: SUCCESS: {bar_name} atualizada com valor padrão: 0 (máx: {message_size})")
                 
                 # Forçar atualização visual
                 try:
@@ -2508,10 +2508,10 @@ class PlayerDashboard(tk.Toplevel):
                         self.master.update()
                     
                     self.after_idle(lambda: self._force_visual_refresh())
-                    print(f"DEBUG: ✅ Atualização visual completa realizada")
+                    print(f"DEBUG: SUCCESS: Atualização visual completa realizada")
                     
                 except Exception as visual_error:
-                    print(f"DEBUG: ⚠️ Erro durante atualização visual: {visual_error}")
+                    print(f"DEBUG: WARNING: Erro durante atualização visual: {visual_error}")
                 
                 # Verificação final
                 final_value = self.progress_bars["To send"]["value"]
@@ -2522,15 +2522,15 @@ class PlayerDashboard(tk.Toplevel):
                 print(f"DEBUG: Valor final da barra: {final_value}")
                 print(f"DEBUG: Texto final do label: '{final_label}'")
                 print(f"DEBUG: Percentagem da barra: {(final_value/final_max)*100:.1f}%")
-                print(f"DEBUG: ✅ SUCESSO - Barra configurada com valores {'preservados' if preserved_stats else 'padrão'}!")
+                print(f"DEBUG: SUCCESS: SUCESSO - Barra configurada com valores {'preservados' if preserved_stats else 'padrão'}!")
                 
             except Exception as update_error:
-                print(f"DEBUG: ❌ Erro ao configurar progress bar: {update_error}")
+                print(f"DEBUG: ERROR: Erro ao configurar progress bar: {update_error}")
                 import traceback
                 traceback.print_exc()
             
         except Exception as e:
-            print(f"DEBUG: ❌ Erro geral ao atualizar barras de progresso: {e}")
+            print(f"DEBUG: ERROR: Erro geral ao atualizar barras de progresso: {e}")
             import traceback
             traceback.print_exc()
         
@@ -2541,7 +2541,7 @@ class PlayerDashboard(tk.Toplevel):
         Força um refresh visual adicional das barras de progresso
         """
         try:
-            print("DEBUG: 🔄 _force_visual_refresh executando...")
+            print("DEBUG: UPDATING: _force_visual_refresh executando...")
             for stat_name in ["To send", "Rxd", "Lost"]:
                 if (hasattr(self, 'progress_bars') and stat_name in self.progress_bars and
                     hasattr(self, 'progress_labels') and stat_name in self.progress_labels):
@@ -2551,9 +2551,9 @@ class PlayerDashboard(tk.Toplevel):
                     self.progress_labels[stat_name].update()
             
             self.update()
-            print("DEBUG: ✅ _force_visual_refresh concluído")
+            print("DEBUG: SUCCESS: _force_visual_refresh concluído")
         except Exception as e:
-            print(f"DEBUG: ⚠️ Erro em _force_visual_refresh: {e}")
+            print(f"DEBUG: WARNING: Erro em _force_visual_refresh: {e}")
 
     def _apply_preserved_stats_to_progress_bars(self, preserved_stats, carta_path=None):
         """
@@ -2566,7 +2566,7 @@ class PlayerDashboard(tk.Toplevel):
             print(f"DEBUG: Carta parametro: {os.path.basename(carta_path) if carta_path else 'N/A'}")
             
             if not hasattr(self, 'progress_bars') or not hasattr(self, 'progress_labels'):
-                print("DEBUG: ❌ Barras de progresso não inicializadas")
+                print("DEBUG: ERROR: Barras de progresso não inicializadas")
                 return
             
             # CORREÇÃO CRÍTICA: SEMPRE usar a carta que está realmente no carrossel
@@ -2580,21 +2580,21 @@ class PlayerDashboard(tk.Toplevel):
                     carta_real_para_valores = self.cards[carrossel_index]
                     carta_nome = os.path.basename(carta_real_para_valores)
                     
-                    print(f"DEBUG: ⚠️ IMPORTANTE - Carta REAL no carrossel posição {carrossel_index}: {carta_nome}")
-                    print(f"DEBUG: ⚠️ IMPORTANTE - Aplicando valores À CARTA DO CARROSSEL, não à preservada")
+                    print(f"DEBUG: WARNING: IMPORTANTE - Carta REAL no carrossel posição {carrossel_index}: {carta_nome}")
+                    print(f"DEBUG: WARNING: IMPORTANTE - Aplicando valores À CARTA DO CARROSSEL, não à preservada")
                     
                     # Obter message_size da carta que está REALMENTE no carrossel
                     correct_message_size = self._get_card_message_size_from_database(carta_real_para_valores)
                     print(f"DEBUG: Message size da carta REAL do carrossel: {correct_message_size}")
                 else:
-                    print(f"DEBUG: ⚠️ Índice carrossel inválido: {carrossel_index}")
+                    print(f"DEBUG: WARNING: Índice carrossel inválido: {carrossel_index}")
                     carta_real_para_valores = carta_path
                     correct_message_size = self._get_card_message_size_from_database(carta_path) if carta_path else 4
             else:
                 # Fallback para carta_path se não há carrossel válido
                 carta_real_para_valores = carta_path
                 correct_message_size = self._get_card_message_size_from_database(carta_path) if carta_path else 4
-                print(f"DEBUG: ⚠️ Sem seleção carrossel válida, usando carta_path fallback")
+                print(f"DEBUG: WARNING: Sem seleção carrossel válida, usando carta_path fallback")
             
             print(f"DEBUG: DEFINITIVO - Carta para aplicar valores: {os.path.basename(carta_real_para_valores) if carta_real_para_valores else 'N/A'}")
             print(f"DEBUG: DEFINITIVO - Message size: {correct_message_size}")
@@ -2614,7 +2614,7 @@ class PlayerDashboard(tk.Toplevel):
                 
                 # Se a barra já tem um valor válido da base de dados, não sobrescrever com zero
                 if current_max > 0 and current_value > 0:
-                    print(f"DEBUG: ✅ CORREÇÃO - Mantendo valor atual {current_value} em vez de aplicar 0")
+                    print(f"DEBUG: SUCCESS: CORREÇÃO - Mantendo valor atual {current_value} em vez de aplicar 0")
                     # Não aplicar o To send=0, manter o valor atual
                     preserved_stats = preserved_stats.copy()
                     preserved_stats["To send"] = current_value
@@ -2629,7 +2629,7 @@ class PlayerDashboard(tk.Toplevel):
                         if correct_message_size is not None:
                             # Primeiro definir o máximo correto para TODAS as barras
                             self.progress_bars[stat_name]["maximum"] = correct_message_size
-                            print(f"DEBUG: ✅ Máximo da barra '{stat_name}' corrigido para carta REAL: {correct_message_size}")
+                            print(f"DEBUG: SUCCESS: Máximo da barra '{stat_name}' corrigido para carta REAL: {correct_message_size}")
                             print(f"DEBUG: Aplicando {stat_name}: valor={value}, máximo={correct_message_size}")
                         else:
                             # Fallback para máximo atual
@@ -2644,11 +2644,11 @@ class PlayerDashboard(tk.Toplevel):
                         self.progress_bars[stat_name].update()
                         self.progress_labels[stat_name].update()
                         
-                        print(f"DEBUG: ✅ {stat_name} aplicado com sucesso: {value}")
+                        print(f"DEBUG: SUCCESS: {stat_name} aplicado com sucesso: {value}")
                     except Exception as e:
-                        print(f"DEBUG: ❌ Erro ao aplicar {stat_name}: {e}")
+                        print(f"DEBUG: ERROR: Erro ao aplicar {stat_name}: {e}")
                 else:
-                    print(f"DEBUG: ⚠️ {stat_name} não encontrado nas barras de progresso")
+                    print(f"DEBUG: WARNING: {stat_name} não encontrado nas barras de progresso")
             
             print(f"DEBUG: ===== _apply_preserved_stats_to_progress_bars TERMINADA =====")
             
@@ -2664,10 +2664,10 @@ class PlayerDashboard(tk.Toplevel):
             
             # Forçar atualização da janela principal
             self.update_idletasks()
-            print(f"DEBUG: ✅ Atualização visual de valores preservados realizada")
+            print(f"DEBUG: SUCCESS: Atualização visual de valores preservados realizada")
             
         except Exception as e:
-            print(f"DEBUG: ❌ Erro geral em _apply_preserved_stats_to_progress_bars: {e}")
+            print(f"DEBUG: ERROR: Erro geral em _apply_preserved_stats_to_progress_bars: {e}")
             import traceback
             traceback.print_exc()
 
@@ -2700,10 +2700,10 @@ class PlayerDashboard(tk.Toplevel):
                     
                     print(f"DEBUG: {stat_name}: {old_value} -> {current_value}")
             
-            print(f"DEBUG: ✅ card_stats[{carta_index}] sincronizado: {self.card_stats[carta_index]}")
+            print(f"DEBUG: SUCCESS: card_stats[{carta_index}] sincronizado: {self.card_stats[carta_index]}")
             
         except Exception as e:
-            print(f"DEBUG: ❌ Erro ao sincronizar card_stats: {e}")
+            print(f"DEBUG: ERROR: Erro ao sincronizar card_stats: {e}")
             import traceback
             traceback.print_exc()
 
@@ -2738,7 +2738,7 @@ class PlayerDashboard(tk.Toplevel):
             
             # Verificar se todos os pacotes foram enviados
             if new_value == 0:
-                print("DEBUG: ✅ Todos os pacotes da mensagem foram enviados! Barra vazia.")
+                print("DEBUG: SUCCESS: Todos os pacotes da mensagem foram enviados! Barra vazia.")
             else:
                 percentage = (new_value / self.progress_bars["To send"]["maximum"]) * 100
                 print(f"DEBUG: Restam {new_value} pacotes para enviar ({percentage:.1f}% da barra)")
@@ -2776,7 +2776,7 @@ class PlayerDashboard(tk.Toplevel):
             # CORREÇÃO: Sincronizar com card_stats para preservar entre turnos
             self._sync_card_stats_with_progress_bars()
             
-            print(f"DEBUG: ✅ 'Rxd' atualizado para {new_value}")
+            print(f"DEBUG: SUCCESS: 'Rxd' atualizado para {new_value}")
                 
         except Exception as e:
             print(f"DEBUG: Erro ao incrementar barra 'Rxd': {e}")
@@ -2811,7 +2811,7 @@ class PlayerDashboard(tk.Toplevel):
             # CORREÇÃO: Sincronizar com card_stats para preservar entre turnos
             self._sync_card_stats_with_progress_bars()
             
-            print(f"DEBUG: ✅ 'Lost' atualizado para {new_value}")
+            print(f"DEBUG: SUCCESS: 'Lost' atualizado para {new_value}")
                 
         except Exception as e:
             print(f"DEBUG: Erro ao incrementar barra 'Lost': {e}")
@@ -4094,7 +4094,7 @@ class PlayerDashboard(tk.Toplevel):
             except Exception as e:
                 print(f"DEBUG: Erro ao carregar Store_button_icon.png: {e}")
                 # Fallback para botão de texto se não conseguir carregar a imagem
-                self.btn_store = tk.Button(self, text="🏪", font=("Helvetica", 20), bg=self.bar_color, fg="black", 
+                self.btn_store = tk.Button(self, text="STORE", font=("Helvetica", 20), bg=self.bar_color, fg="black", 
                                      relief="flat", borderwidth=0, command=abrir_store, cursor="hand2",
                                      activebackground=self.bar_color, activeforeground="black", highlightthickness=0)
                 self.btn_store.place(x=screen_width-15, y=20, anchor="ne")
@@ -4385,9 +4385,9 @@ class PlayerDashboard(tk.Toplevel):
                     self._update_carousel_highlights()
                     print("DEBUG: Destaques do carrossel atualizados no final da criação da interface")
                 else:
-                    print("DEBUG: ⚠️ Widgets ainda não estão prontos - pulando atualização de destaques")
+                    print("DEBUG: WARNING: Widgets ainda não estão prontos - pulando atualização de destaques")
             else:
-                print("DEBUG: ⚠️ card_labels não existe - pulando atualização de destaques")
+                print("DEBUG: WARNING: card_labels não existe - pulando atualização de destaques")
         
         # Usar delay pequeno para garantir que widgets estão estabilizados
         self.after(150, atualizar_destaques_com_delay)
@@ -4409,7 +4409,7 @@ class PlayerDashboard(tk.Toplevel):
                 carta_preservada = os.path.basename(self.selected_carousel_card)
                 carta_real = os.path.basename(carta_atual)
                 if carta_preservada != carta_real:
-                    print(f"DEBUG: ⚠️ CORREÇÃO APLICADA:")
+                    print(f"DEBUG: WARNING: CORREÇÃO APLICADA:")
                     print(f"DEBUG:   Carta preservada (ERRADA): {carta_preservada}")
                     print(f"DEBUG:   Carta real (CORRETA): {carta_real}")
             
@@ -4702,9 +4702,9 @@ class PlayerDashboard(tk.Toplevel):
             try:
                 self.inventario[tipo].remove(carta_path)
                 cartas_removidas += 1
-                print(f"DEBUG: [_limpar_cartas_incorretas] ✅ Removida: {os.path.basename(carta_path)} (tipo={tipo}, target={target})")
+                print(f"DEBUG: [_limpar_cartas_incorretas] SUCCESS: Removida: {os.path.basename(carta_path)} (tipo={tipo}, target={target})")
             except ValueError:
-                print(f"DEBUG: [_limpar_cartas_incorretas] ❌ Erro: carta não encontrada no inventário: {os.path.basename(carta_path)}")
+                print(f"DEBUG: [_limpar_cartas_incorretas] ERROR: Erro: carta não encontrada no inventário: {os.path.basename(carta_path)}")
         
         if cartas_removidas > 0:
             print(f"DEBUG: [_limpar_cartas_incorretas] Total de cartas removidas: {cartas_removidas}")
@@ -5091,11 +5091,11 @@ class PlayerDashboard(tk.Toplevel):
         print("DEBUG: ===== PRESERVANDO VALORES ATUAIS DAS BARRAS =====")
         
         if not hasattr(self, 'progress_bars') or not hasattr(self, 'progress_labels'):
-            print("DEBUG: ⚠️ Barras de progresso não encontradas para preservação")
+            print("DEBUG: WARNING: Barras de progresso não encontradas para preservação")
             return
         
         if not hasattr(self, 'card_stats'):
-            print("DEBUG: ⚠️ card_stats não existe, criando...")
+            print("DEBUG: WARNING: card_stats não existe, criando...")
             self.card_stats = [
                 {"To send": 0, "Rxd": 0, "Lost": 0},
                 {"To send": 0, "Rxd": 0, "Lost": 0},
@@ -5132,10 +5132,10 @@ class PlayerDashboard(tk.Toplevel):
                             "Rxd": rxd_selecionada,
                             "Lost": lost_selecionada
                         }
-                        print(f"DEBUG: ✅ Carta selecionada {carta_selecionada_idx} preservada:")
+                        print(f"DEBUG: SUCCESS: Carta selecionada {carta_selecionada_idx} preservada:")
                         print(f"DEBUG:   To send: {to_send_selecionada}, Rxd: {rxd_selecionada}, Lost: {lost_selecionada}")
                 except Exception as e:
-                    print(f"DEBUG: ⚠️ Erro ao capturar valores da carta selecionada: {e}")
+                    print(f"DEBUG: WARNING: Erro ao capturar valores da carta selecionada: {e}")
             
             # ETAPA 2: Para cartas não selecionadas, preservar valores existentes ou calcular padrões
             print("DEBUG: Verificando outras cartas do carrossel...")
@@ -5165,10 +5165,10 @@ class PlayerDashboard(tk.Toplevel):
                                 "Rxd": 0,
                                 "Lost": 0
                             }
-                            print(f"DEBUG: ✅ Carta {i} inicializada com valores padrão da base de dados:")
+                            print(f"DEBUG: SUCCESS: Carta {i} inicializada com valores padrão da base de dados:")
                             print(f"DEBUG:   To send: {message_size}, Rxd: 0, Lost: 0")
                         else:
-                            print(f"DEBUG: ✅ Carta {i} já tem valores preservados:")
+                            print(f"DEBUG: SUCCESS: Carta {i} já tem valores preservados:")
                             print(f"DEBUG:   To send: {stats_atuais['To send']}, Rxd: {stats_atuais['Rxd']}, Lost: {stats_atuais['Lost']}")
             
             print("DEBUG: ===== PRESERVAÇÃO INDIVIDUAL CONCLUÍDA =====")
@@ -5178,7 +5178,7 @@ class PlayerDashboard(tk.Toplevel):
                 print(f"DEBUG:   Carta {i} ({carta_nome}): {stats}")
                 
         except Exception as e:
-            print(f"DEBUG: ❌ Erro ao preservar valores das barras: {e}")
+            print(f"DEBUG: ERROR: Erro ao preservar valores das barras: {e}")
             import traceback
             traceback.print_exc()
     
@@ -5378,7 +5378,7 @@ class PlayerDashboard(tk.Toplevel):
                 # Só adicionar se estiver ativa E o jogador puder acessar a posição
                 if carta_esta_ativa and self._can_access_carousel_position(i):
                     cartas_ativas.append(carta_path)
-                    print(f"DEBUG: [GESTÃO_PACOTES] ✅ Carta ATIVA posição {i}: {os.path.basename(carta_path)}")
+                    print(f"DEBUG: [GESTÃO_PACOTES] SUCCESS: Carta ATIVA posição {i}: {os.path.basename(carta_path)}")
                 elif carta_esta_ativa:
                     print(f"DEBUG: [GESTÃO_PACOTES] Carta ativa mas sem acesso à posição {i}: {os.path.basename(carta_path)}")
                 else:
@@ -5394,8 +5394,8 @@ class PlayerDashboard(tk.Toplevel):
         
         # VERIFICAÇÃO ADICIONAL: Se não há cartas em gestão, finalizar imediatamente
         if not hasattr(self, '_cartas_gestao') or not self._cartas_gestao:
-            print(f"DEBUG: [GESTÃO_PACOTES] ❌ ERRO: Lista de cartas gestão vazia ou inexistente")
-            print(f"DEBUG: [GESTÃO_PACOTES] ✅ Finalizando gestão automaticamente")
+            print(f"DEBUG: [GESTÃO_PACOTES] ERROR: ERRO: Lista de cartas gestão vazia ou inexistente")
+            print(f"DEBUG: [GESTÃO_PACOTES] SUCCESS: Finalizando gestão automaticamente")
             self._finalizar_gestao_pacotes()
             return
         
@@ -5407,11 +5407,11 @@ class PlayerDashboard(tk.Toplevel):
         # CORREÇÃO CRÍTICA: Verificar se índice atual está dentro dos limites
         if not hasattr(self, '_carta_atual_gestao'):
             self._carta_atual_gestao = 0
-            print(f"DEBUG: [GESTÃO_PACOTES] ⚠️ _carta_atual_gestao não existia, inicializado como 0")
+            print(f"DEBUG: [GESTÃO_PACOTES] WARNING: _carta_atual_gestao não existia, inicializado como 0")
             
         if self._carta_atual_gestao >= len(self._cartas_gestao):
             # NOVA FUNCIONALIDADE: Todas as cartas foram processadas - enable End Turn
-            print(f"DEBUG: [GESTÃO_PACOTES] ✅ Todas as cartas processadas - habilitando End Turn")
+            print(f"DEBUG: [GESTÃO_PACOTES] SUCCESS: Todas as cartas processadas - habilitando End Turn")
             print(f"DEBUG: [GESTÃO_PACOTES] Índice atual ({self._carta_atual_gestao}) >= tamanho da lista ({len(self._cartas_gestao)})")
             self._finalizar_gestao_pacotes()
             return
@@ -5424,31 +5424,31 @@ class PlayerDashboard(tk.Toplevel):
         
         # VERIFICAÇÃO ADICIONAL: Se a carta atual é None ou vazia
         if not carta_atual:
-            print(f"DEBUG: [GESTÃO_PACOTES] ❌ ERRO: Carta atual na gestão é None ou vazia")
-            print(f"DEBUG: [GESTÃO_PACOTES] ✅ Finalizando gestão automaticamente")
+            print(f"DEBUG: [GESTÃO_PACOTES] ERROR: ERRO: Carta atual na gestão é None ou vazia")
+            print(f"DEBUG: [GESTÃO_PACOTES] SUCCESS: Finalizando gestão automaticamente")
             self._finalizar_gestao_pacotes()
             return
         
         # VERIFICAÇÃO CRÍTICA: Se a carta atual é um back_card, todas as cartas foram processadas
         carta_basename = os.path.basename(carta_atual).lower()
         if carta_basename.startswith("back_card_"):
-            print(f"DEBUG: [GESTÃO_PACOTES] ❌ ERRO CRÍTICO: Carta atual é back_card: {carta_basename}")
-            print(f"DEBUG: [GESTÃO_PACOTES] ❌ Isto indica que todas as cartas ativas foram removidas")
-            print(f"DEBUG: [GESTÃO_PACOTES] ✅ Finalizando gestão de pacotes automaticamente")
+            print(f"DEBUG: [GESTÃO_PACOTES] ERROR: ERRO CRÍTICO: Carta atual é back_card: {carta_basename}")
+            print(f"DEBUG: [GESTÃO_PACOTES] ERROR: Isto indica que todas as cartas ativas foram removidas")
+            print(f"DEBUG: [GESTÃO_PACOTES] SUCCESS: Finalizando gestão de pacotes automaticamente")
             self._finalizar_gestao_pacotes()
             return
         
         # VERIFICAÇÃO CRÍTICA ADICIONAL: Se a carta não é Activity ou Challenge, finalizar
         if not ("activity" in carta_basename or "challenge" in carta_basename):
-            print(f"DEBUG: [GESTÃO_PACOTES] ❌ ERRO CRÍTICO: Carta atual não é Activity nem Challenge: {carta_basename}")
-            print(f"DEBUG: [GESTÃO_PACOTES] ✅ Finalizando gestão de pacotes automaticamente")
+            print(f"DEBUG: [GESTÃO_PACOTES] ERROR: ERRO CRÍTICO: Carta atual não é Activity nem Challenge: {carta_basename}")
+            print(f"DEBUG: [GESTÃO_PACOTES] SUCCESS: Finalizando gestão de pacotes automaticamente")
             self._finalizar_gestao_pacotes()
             return
         
         # VERIFICAÇÃO CRÍTICA ADICIONAL: Se carta não existe no carrossel atual, finalizar
         if hasattr(self, 'cards') and carta_atual not in self.cards:
-            print(f"DEBUG: [GESTÃO_PACOTES] ❌ ERRO CRÍTICO: Carta atual não existe no carrossel atual: {carta_basename}")
-            print(f"DEBUG: [GESTÃO_PACOTES] ✅ Finalizando gestão de pacotes automaticamente")
+            print(f"DEBUG: [GESTÃO_PACOTES] ERROR: ERRO CRÍTICO: Carta atual não existe no carrossel atual: {carta_basename}")
+            print(f"DEBUG: [GESTÃO_PACOTES] SUCCESS: Finalizando gestão de pacotes automaticamente")
             self._finalizar_gestao_pacotes()
             return
         
@@ -5469,37 +5469,37 @@ class PlayerDashboard(tk.Toplevel):
                     print(f"DEBUG: [GESTÃO_PACOTES] Carta na posição {i} virada para cima: {is_face_up}")
                     
                     if not is_face_up:
-                        print(f"DEBUG: [GESTÃO_PACOTES] ❌ ERRO CRÍTICO: Carta na posição {i} está virada para baixo")
-                        print(f"DEBUG: [GESTÃO_PACOTES] ❌ Isto indica que a carta foi completada e removida")
-                        print(f"DEBUG: [GESTÃO_PACOTES] ✅ Removendo carta inválida da gestão e continuando")
+                        print(f"DEBUG: [GESTÃO_PACOTES] ERROR: ERRO CRÍTICO: Carta na posição {i} está virada para baixo")
+                        print(f"DEBUG: [GESTÃO_PACOTES] ERROR: Isto indica que a carta foi completada e removida")
+                        print(f"DEBUG: [GESTÃO_PACOTES] SUCCESS: Removendo carta inválida da gestão e continuando")
                         
                         # Remover carta inválida da lista de gestão
                         self._cartas_gestao.remove(carta_atual)
                         
                         # Se não há mais cartas, finalizar
                         if not self._cartas_gestao:
-                            print(f"DEBUG: [GESTÃO_PACOTES] ✅ Finalizando gestão - nenhuma carta válida restante")
+                            print(f"DEBUG: [GESTÃO_PACOTES] SUCCESS: Finalizando gestão - nenhuma carta válida restante")
                             self._finalizar_gestao_pacotes()
                         else:
                             # Ajustar índice se necessário e continuar com próxima carta
                             if self._carta_atual_gestao >= len(self._cartas_gestao):
                                 self._carta_atual_gestao = 0
-                            print(f"DEBUG: [GESTÃO_PACOTES] ✅ Continuando com próxima carta válida")
+                            print(f"DEBUG: [GESTÃO_PACOTES] SUCCESS: Continuando com próxima carta válida")
                             self._mostrar_gestao_carta_atual()
                         return
                 break
         
         if posicao_carta is None:
-            print(f"DEBUG: [GESTÃO_PACOTES] ❌ ERRO CRÍTICO: Carta {os.path.basename(carta_atual)} não encontrada no carrossel")
+            print(f"DEBUG: [GESTÃO_PACOTES] ERROR: ERRO CRÍTICO: Carta {os.path.basename(carta_atual)} não encontrada no carrossel")
             print(f"DEBUG: [GESTÃO_PACOTES] Carrossel atual: {[os.path.basename(c) for c in self.cards]}")
-            print(f"DEBUG: [GESTÃO_PACOTES] ✅ Removendo carta inválida da gestão e continuando")
+            print(f"DEBUG: [GESTÃO_PACOTES] SUCCESS: Removendo carta inválida da gestão e continuando")
             
             # Remover carta inválida da lista de gestão
             self._cartas_gestao.remove(carta_atual)
             
             # Se não há mais cartas, finalizar
             if not self._cartas_gestao:
-                print(f"DEBUG: [GESTÃO_PACOTES] ✅ Finalizando gestão - nenhuma carta válida restante")
+                print(f"DEBUG: [GESTÃO_PACOTES] SUCCESS: Finalizando gestão - nenhuma carta válida restante")
                 self._finalizar_gestao_pacotes()
                 return
             
@@ -5511,9 +5511,9 @@ class PlayerDashboard(tk.Toplevel):
         if posicao_carta is not None and carta_atual:
             carta_basename = os.path.basename(carta_atual).lower()
             if carta_basename.startswith("back_card_"):
-                print(f"DEBUG: [GESTÃO_PACOTES] ❌ ERRO CRÍTICO: Tentativa de aplicar gestão à carta virada para baixo: {carta_basename}")
-                print(f"DEBUG: [GESTÃO_PACOTES] ❌ Isto indica que todas as cartas ativas foram processadas")
-                print(f"DEBUG: [GESTÃO_PACOTES] ✅ Finalizando gestão de pacotes automaticamente")
+                print(f"DEBUG: [GESTÃO_PACOTES] ERROR: ERRO CRÍTICO: Tentativa de aplicar gestão à carta virada para baixo: {carta_basename}")
+                print(f"DEBUG: [GESTÃO_PACOTES] ERROR: Isto indica que todas as cartas ativas foram processadas")
+                print(f"DEBUG: [GESTÃO_PACOTES] SUCCESS: Finalizando gestão de pacotes automaticamente")
                 self._finalizar_gestao_pacotes()
                 return
         
@@ -5547,7 +5547,7 @@ class PlayerDashboard(tk.Toplevel):
             # Mostrar controles de gestão
             self._mostrar_controles_gestao(rate_carta)
             
-            print(f"DEBUG: [GESTÃO_PACOTES] ✅ Gestão configurada para carta {os.path.basename(carta_atual)} na posição {posicao_carta}")
+            print(f"DEBUG: [GESTÃO_PACOTES] SUCCESS: Gestão configurada para carta {os.path.basename(carta_atual)} na posição {posicao_carta}")
             
             # CORREÇÃO: Botão seta só aparece quando há controles de gestão visíveis
             # (será mostrado dentro de _mostrar_controles_gestao se necessário)
@@ -5585,10 +5585,10 @@ class PlayerDashboard(tk.Toplevel):
             # CORREÇÃO: Guardar também a posição para verificação de clique
             self._carta_destacada_posicao = posicao
             
-            print(f"DEBUG: [GESTÃO_PACOTES] ✅ Destaque roxo aplicado à carta {posicao}")
+            print(f"DEBUG: [GESTÃO_PACOTES] SUCCESS: Destaque roxo aplicado à carta {posicao}")
             print(f"DEBUG: [GESTÃO_PACOTES] Widget configurado: bg='{carta_widget.cget('bg')}', highlightthickness={carta_widget.cget('highlightthickness')}")
         else:
-            print(f"DEBUG: [GESTÃO_PACOTES] ❌ Widget da carta {posicao} não disponível")
+            print(f"DEBUG: [GESTÃO_PACOTES] ERROR: Widget da carta {posicao} não disponível")
     
     def _remover_destaque_roxo(self):
         """Remove o destaque roxo atual"""
@@ -5603,14 +5603,14 @@ class PlayerDashboard(tk.Toplevel):
                     highlightcolor="black",
                     highlightthickness=0  # Remover espessura da borda
                 )
-                print("DEBUG: [GESTÃO_PACOTES] ✅ Destaque roxo removido da carta específica")
+                print("DEBUG: [GESTÃO_PACOTES] SUCCESS: Destaque roxo removido da carta específica")
                 self._carta_destacada = None
             except Exception as e:
-                print(f"DEBUG: [GESTÃO_PACOTES] ❌ Erro ao remover destaque roxo: {e}")
+                print(f"DEBUG: [GESTÃO_PACOTES] ERROR: Erro ao remover destaque roxo: {e}")
         
         # CORREÇÃO: Limpar também a posição destacada
         if hasattr(self, '_carta_destacada_posicao'):
-            print(f"DEBUG: [GESTÃO_PACOTES] ✅ Limpando posição destacada: {self._carta_destacada_posicao}")
+            print(f"DEBUG: [GESTÃO_PACOTES] SUCCESS: Limpando posição destacada: {self._carta_destacada_posicao}")
             self._carta_destacada_posicao = None
         
         # Limpar frame_destaque se ainda existir (fallback)
@@ -5618,14 +5618,14 @@ class PlayerDashboard(tk.Toplevel):
             try:
                 self._frame_destaque.destroy()
                 self._frame_destaque = None
-                print("DEBUG: [GESTÃO_PACOTES] ✅ frame_destaque removido")
+                print("DEBUG: [GESTÃO_PACOTES] SUCCESS: frame_destaque removido")
             except:
                 pass
         
         # CORREÇÃO ADICIONAL: Remover destaque roxo de TODAS as cartas do carrossel
         # para garantir que não fica nenhum destaque residual
         if hasattr(self, 'card_labels') and self.card_labels:
-            print("DEBUG: [GESTÃO_PACOTES] ✅ Limpando destaque roxo de todas as cartas do carrossel")
+            print("DEBUG: [GESTÃO_PACOTES] SUCCESS: Limpando destaque roxo de todas as cartas do carrossel")
             for i, lbl in enumerate(self.card_labels):
                 if lbl and hasattr(lbl, 'winfo_exists'):
                     try:
@@ -5641,9 +5641,9 @@ class PlayerDashboard(tk.Toplevel):
                                     highlightcolor="black", 
                                     highlightthickness=0
                                 )
-                                print(f"DEBUG: [GESTÃO_PACOTES] ✅ Destaque roxo removido da carta {i}")
+                                print(f"DEBUG: [GESTÃO_PACOTES] SUCCESS: Destaque roxo removido da carta {i}")
                     except Exception as e:
-                        print(f"DEBUG: [GESTÃO_PACOTES] ⚠️ Erro ao limpar carta {i}: {e}")
+                        print(f"DEBUG: [GESTÃO_PACOTES] WARNING: Erro ao limpar carta {i}: {e}")
         
         print("DEBUG: [GESTÃO_PACOTES] === DESTAQUE ROXO COMPLETAMENTE REMOVIDO ===")
     
@@ -6133,22 +6133,22 @@ class PlayerDashboard(tk.Toplevel):
         
         # REGRA CORRIGIDA: Só mostrar botão seta se NENHUM botão + está visível E não há botão seta visível
         if not btn_rxd_visivel and not btn_lost_visivel and not btn_seta_visivel:
-            print("DEBUG: [GESTÃO_PACOTES] ✅ Condição atendida - criando botão seta automaticamente")
+            print("DEBUG: [GESTÃO_PACOTES] SUCCESS: Condição atendida - criando botão seta automaticamente")
             self._mostrar_botao_seta()
         elif btn_seta_visivel:
-            print("DEBUG: [GESTÃO_PACOTES] ✅ Botão seta já visível - nada a fazer")
+            print("DEBUG: [GESTÃO_PACOTES] SUCCESS: Botão seta já visível - nada a fazer")
         elif btn_rxd_visivel or btn_lost_visivel:
-            print(f"DEBUG: [GESTÃO_PACOTES] ❌ BLOQUEADO - ainda há botões + visíveis na interface")
+            print(f"DEBUG: [GESTÃO_PACOTES] ERROR: BLOQUEADO - ainda há botões + visíveis na interface")
             # CORREÇÃO CRÍTICA: Se há botões + visíveis mas há botão seta, remover o botão seta
             if btn_seta_visivel:
-                print("DEBUG: [GESTÃO_PACOTES] ⚠️ Removendo botão seta incorretamente visível")
+                print("DEBUG: [GESTÃO_PACOTES] WARNING: Removendo botão seta incorretamente visível")
                 try:
                     self._btn_seta.destroy()
                     self._btn_seta = None
                 except:
                     pass
         else:
-            print(f"DEBUG: [GESTÃO_PACOTES] ⚪ Estado indeterminado - mantendo como está")
+            print(f"DEBUG: [GESTÃO_PACOTES] NEUTRAL: Estado indeterminado - mantendo como está")
         
         print("DEBUG: [GESTÃO_PACOTES] === FIM VERIFICAÇÃO AUTOMÁTICA DO BOTÃO SETA ===")
     
@@ -6242,18 +6242,18 @@ class PlayerDashboard(tk.Toplevel):
         # CORREÇÃO FUNDAMENTAL: Usar carta selecionada diretamente do carrossel
         # Evita problemas de sincronização após restauração de fullscreen
         if not hasattr(self, 'selected_carousel_index') or self.selected_carousel_index is None:
-            print(f"DEBUG: [GESTÃO_PACOTES] ❌ ERRO: Nenhuma carta selecionada no carrossel!")
-            print(f"DEBUG: [GESTÃO_PACOTES] ❌ hasattr(selected_carousel_index): {hasattr(self, 'selected_carousel_index')}")
-            print(f"DEBUG: [GESTÃO_PACOTES] ❌ selected_carousel_index value: {getattr(self, 'selected_carousel_index', 'NOT_SET')}")
+            print(f"DEBUG: [GESTÃO_PACOTES] ERROR: ERRO: Nenhuma carta selecionada no carrossel!")
+            print(f"DEBUG: [GESTÃO_PACOTES] ERROR: hasattr(selected_carousel_index): {hasattr(self, 'selected_carousel_index')}")
+            print(f"DEBUG: [GESTÃO_PACOTES] ERROR: selected_carousel_index value: {getattr(self, 'selected_carousel_index', 'NOT_SET')}")
             return
         
         posicao_carrossel = self.selected_carousel_index
         
         # CORREÇÃO CRÍTICA: Obter carta_atual diretamente da posição no carrossel, não da variável cached
         if not hasattr(self, 'cards') or posicao_carrossel >= len(self.cards):
-            print(f"DEBUG: [GESTÃO_PACOTES] ❌ ERRO: Posição inválida no carrossel!")
-            print(f"DEBUG: [GESTÃO_PACOTES] ❌ posicao_carrossel: {posicao_carrossel}")
-            print(f"DEBUG: [GESTÃO_PACOTES] ❌ len(cards): {len(self.cards) if hasattr(self, 'cards') else 'NO_CARDS'}")
+            print(f"DEBUG: [GESTÃO_PACOTES] ERROR: ERRO: Posição inválida no carrossel!")
+            print(f"DEBUG: [GESTÃO_PACOTES] ERROR: posicao_carrossel: {posicao_carrossel}")
+            print(f"DEBUG: [GESTÃO_PACOTES] ERROR: len(cards): {len(self.cards) if hasattr(self, 'cards') else 'NO_CARDS'}")
             return
         
         carta_atual = self.cards[posicao_carrossel]
@@ -6263,10 +6263,10 @@ class PlayerDashboard(tk.Toplevel):
         print(f"DEBUG: [GESTÃO_PACOTES] posicao_carrossel: {posicao_carrossel}")
         print(f"DEBUG: [GESTÃO_PACOTES] carta_atual: {os.path.basename(carta_atual) if carta_atual else 'None'}")
         print(f"DEBUG: [GESTÃO_PACOTES] len(self.cards): {len(self.cards) if hasattr(self, 'cards') else 'NO_CARDS'}")
-        print(f"DEBUG: [GESTÃO_PACOTES] ✅ Carta atual obtida do carrossel com sucesso!")
+        print(f"DEBUG: [GESTÃO_PACOTES] SUCCESS: Carta atual obtida do carrossel com sucesso!")
         
         if not carta_atual:
-            print(f"DEBUG: [GESTÃO_PACOTES] ❌ ERRO: Carta atual é None!")
+            print(f"DEBUG: [GESTÃO_PACOTES] ERROR: ERRO: Carta atual é None!")
             return
         
         print(f"DEBUG: [GESTÃO_PACOTES] Aplicando valor na posição {posicao_carrossel} do carrossel")
@@ -6295,8 +6295,8 @@ class PlayerDashboard(tk.Toplevel):
                 novo_rxd = rxd_anterior + valor  # Incrementa o valor existente
                 novo_lost = lost_anterior  # Lost mantém-se igual
                 self.card_stats[posicao_carrossel]['Rxd'] = novo_rxd
-                print(f"DEBUG: [GESTÃO_PACOTES] ✅ CORREÇÃO - Rxd incrementado: {rxd_anterior} + {valor} = {novo_rxd}")
-                print(f"DEBUG: [GESTÃO_PACOTES] ✅ card_stats[{posicao_carrossel}]['Rxd'] = {novo_rxd}")
+                print(f"DEBUG: [GESTÃO_PACOTES] SUCCESS: CORREÇÃO - Rxd incrementado: {rxd_anterior} + {valor} = {novo_rxd}")
+                print(f"DEBUG: [GESTÃO_PACOTES] SUCCESS: card_stats[{posicao_carrossel}]['Rxd'] = {novo_rxd}")
                 
                 # NOVO: Incrementar contador de processamento por turno
                 # CORREÇÃO: Sempre incrementar em 1 (independente do valor selecionado)
@@ -6308,7 +6308,7 @@ class PlayerDashboard(tk.Toplevel):
                     try:
                         self._btn_plus_rxd.destroy()
                         self._btn_plus_rxd = None
-                        print(f"DEBUG: [GESTÃO_PACOTES] ✅ Botão + Rxd removido após incrementar +{valor}")
+                        print(f"DEBUG: [GESTÃO_PACOTES] SUCCESS: Botão + Rxd removido após incrementar +{valor}")
                         
                         # CORREÇÃO: Atualizar estado preservado para refletir que botão não está mais visível
                         if hasattr(self, '_botoes_plus_estado_preservado'):
@@ -6319,15 +6319,15 @@ class PlayerDashboard(tk.Toplevel):
                         self.after(100, self._verificar_e_mostrar_botao_seta_se_necessario)
                             
                     except Exception as e:
-                        print(f"DEBUG: [GESTÃO_PACOTES] ⚠️ Erro ao remover botão + Rxd: {e}")
+                        print(f"DEBUG: [GESTÃO_PACOTES] WARNING: Erro ao remover botão + Rxd: {e}")
                     
             elif tipo == 'perdidos':
                 # CORREÇÃO: Valor selecionado é ADICIONADO ao Lost atual
                 novo_rxd = rxd_anterior  # Rxd mantém-se igual
                 novo_lost = lost_anterior + valor  # Incrementa o valor existente
                 self.card_stats[posicao_carrossel]['Lost'] = novo_lost
-                print(f"DEBUG: [GESTÃO_PACOTES] ✅ CORREÇÃO - Lost incrementado: {lost_anterior} + {valor} = {novo_lost}")
-                print(f"DEBUG: [GESTÃO_PACOTES] ✅ card_stats[{posicao_carrossel}]['Lost'] = {novo_lost}")
+                print(f"DEBUG: [GESTÃO_PACOTES] SUCCESS: CORREÇÃO - Lost incrementado: {lost_anterior} + {valor} = {novo_lost}")
+                print(f"DEBUG: [GESTÃO_PACOTES] SUCCESS: card_stats[{posicao_carrossel}]['Lost'] = {novo_lost}")
                 
                 # NOVO: Incrementar contador de processamento por turno
                 # CORREÇÃO: Sempre incrementar em 1 (independente do valor selecionado)
@@ -6339,7 +6339,7 @@ class PlayerDashboard(tk.Toplevel):
                     try:
                         self._btn_plus_lost.destroy()
                         self._btn_plus_lost = None
-                        print(f"DEBUG: [GESTÃO_PACOTES] ✅ Botão + Lost removido após incrementar +{valor}")
+                        print(f"DEBUG: [GESTÃO_PACOTES] SUCCESS: Botão + Lost removido após incrementar +{valor}")
                         
                         # CORREÇÃO: Atualizar estado preservado para refletir que botão não está mais visível
                         if hasattr(self, '_botoes_plus_estado_preservado'):
@@ -6350,7 +6350,7 @@ class PlayerDashboard(tk.Toplevel):
                         self.after(100, self._verificar_e_mostrar_botao_seta_se_necessario)
                             
                     except Exception as e:
-                        print(f"DEBUG: [GESTÃO_PACOTES] ⚠️ Erro ao remover botão + Lost: {e}")
+                        print(f"DEBUG: [GESTÃO_PACOTES] WARNING: Erro ao remover botão + Lost: {e}")
                     
             else:
                 novo_rxd = rxd_anterior
@@ -6364,13 +6364,13 @@ class PlayerDashboard(tk.Toplevel):
             # Atualizar To send nos card_stats
             self.card_stats[posicao_carrossel]['To send'] = novo_to_send
             
-            print(f"DEBUG: [GESTÃO_PACOTES] ✅ APLICAÇÃO DE VALOR COMPLETA:")
+            print(f"DEBUG: [GESTÃO_PACOTES] SUCCESS: APLICAÇÃO DE VALOR COMPLETA:")
             print(f"DEBUG: [GESTÃO_PACOTES]   Valor selecionado: {valor}")
             print(f"DEBUG: [GESTÃO_PACOTES]   Aplicado a: {tipo}")
             print(f"DEBUG: [GESTÃO_PACOTES]   NOVO Rxd total: {novo_rxd}")
             print(f"DEBUG: [GESTÃO_PACOTES]   NOVO Lost total: {novo_lost}")
             print(f"DEBUG: [GESTÃO_PACOTES]   NOVO To send: {novo_to_send} (= {message_size} - {novo_rxd})")
-            print(f"DEBUG: [GESTÃO_PACOTES]   ⚠️ Lost packets ({novo_lost}) não afetam To send")
+            print(f"DEBUG: [GESTÃO_PACOTES]   WARNING: Lost packets ({novo_lost}) não afetam To send")
             
             # CORREÇÃO: Atualizar TODAS as barras visualmente
             if hasattr(self, 'progress_bars') and hasattr(self, 'progress_labels'):
@@ -6378,26 +6378,26 @@ class PlayerDashboard(tk.Toplevel):
                 if "To send" in self.progress_bars and "To send" in self.progress_labels:
                     self.progress_bars["To send"].config(value=novo_to_send, maximum=message_size)
                     self.progress_labels["To send"].config(text=str(novo_to_send))
-                    print(f"DEBUG: [GESTÃO_PACOTES] ✅ Barra To send atualizada visualmente: {novo_to_send}/{message_size}")
+                    print(f"DEBUG: [GESTÃO_PACOTES] SUCCESS: Barra To send atualizada visualmente: {novo_to_send}/{message_size}")
                 
                 # Atualizar Rxd
                 if "Rxd" in self.progress_bars and "Rxd" in self.progress_labels:
                     self.progress_bars["Rxd"].config(value=novo_rxd, maximum=message_size)
                     self.progress_labels["Rxd"].config(text=str(novo_rxd))
-                    print(f"DEBUG: [GESTÃO_PACOTES] ✅ Barra Rxd atualizada visualmente: {novo_rxd}")
+                    print(f"DEBUG: [GESTÃO_PACOTES] SUCCESS: Barra Rxd atualizada visualmente: {novo_rxd}")
                 
                 # Atualizar Lost
                 if "Lost" in self.progress_bars and "Lost" in self.progress_labels:
                     self.progress_bars["Lost"].config(value=novo_lost, maximum=message_size)
                     self.progress_labels["Lost"].config(text=str(novo_lost))
-                    print(f"DEBUG: [GESTÃO_PACOTES] ✅ Barra Lost atualizada visualmente: {novo_lost}")
+                    print(f"DEBUG: [GESTÃO_PACOTES] SUCCESS: Barra Lost atualizada visualmente: {novo_lost}")
         
         # CORREÇÃO: Sincronizar com card_stats após aplicar valores
         try:
             self._sync_card_stats_with_progress_bars()
-            print(f"DEBUG: [GESTÃO_PACOTES] ✅ card_stats sincronizado com barras após aplicar valor")
+            print(f"DEBUG: [GESTÃO_PACOTES] SUCCESS: card_stats sincronizado com barras após aplicar valor")
         except Exception as e:
-            print(f"DEBUG: [GESTÃO_PACOTES] ⚠️ Erro ao sincronizar card_stats: {e}")
+            print(f"DEBUG: [GESTÃO_PACOTES] WARNING: Erro ao sincronizar card_stats: {e}")
         
         # NOVA CORREÇÃO: Verificar se deve mostrar botão seta após remover botões +
         self._verificar_e_mostrar_botao_seta_se_necessario()
@@ -6467,13 +6467,13 @@ class PlayerDashboard(tk.Toplevel):
                 # Atualizar barra "To send"
                 self._atualizar_barra_to_send()
                 
-                print(f"DEBUG: [INCREMENTAR] ✅ {tipo} incrementado para {novo_valor}")
+                print(f"DEBUG: [INCREMENTAR] SUCCESS: {tipo} incrementado para {novo_valor}")
                 print(f"DEBUG: [INCREMENTAR] Novo processed_this_turn: {self._get_processed_this_turn(carta_path, tipo_contador)}")
             else:
                 if valor_atual >= message_size:
-                    print(f"DEBUG: [INCREMENTAR] ❌ Limite de message_size atingido ({message_size})")
+                    print(f"DEBUG: [INCREMENTAR] ERROR: Limite de message_size atingido ({message_size})")
                 if processed_this_turn >= rate_max:
-                    print(f"DEBUG: [INCREMENTAR] ❌ Limite de rate_max por turno atingido ({rate_max})")
+                    print(f"DEBUG: [INCREMENTAR] ERROR: Limite de rate_max por turno atingido ({rate_max})")
                 
         except ValueError:
             print("DEBUG: [INCREMENTAR] Valor inválido no campo")
@@ -6890,7 +6890,7 @@ class PlayerDashboard(tk.Toplevel):
                     # ADICIONAL: Se há cartas na lista mas _carta_atual_gestao está fora de range, ajustar
                     if cartas_gestao_restantes > 0 and hasattr(self, '_carta_atual_gestao'):
                         if self._carta_atual_gestao >= len(self._cartas_gestao):
-                            print(f"DEBUG: [COMPLETION] ⚠️ _carta_atual_gestao ({self._carta_atual_gestao}) fora de range - ajustando para 0")
+                            print(f"DEBUG: [COMPLETION] WARNING: _carta_atual_gestao ({self._carta_atual_gestao}) fora de range - ajustando para 0")
                             self._carta_atual_gestao = 0
                 
                 # VERIFICAÇÃO CRÍTICA: Se gestão está ativa mas não há cartas para processar, finalizar imediatamente
@@ -6956,7 +6956,7 @@ class PlayerDashboard(tk.Toplevel):
                 # TERCEIRO: Determinar se gestão deve continuar baseado nas cartas restantes NA LISTA DE GESTÃO
                 gestao_deve_continuar = False
                 if hasattr(self, '_cartas_gestao') and self._cartas_gestao:
-                    print(f"DEBUG: [COMPLETION] ✅ Há {len(self._cartas_gestao)} cartas restantes na lista de gestão - gestão deve continuar")
+                    print(f"DEBUG: [COMPLETION] SUCCESS: Há {len(self._cartas_gestao)} cartas restantes na lista de gestão - gestão deve continuar")
                     gestao_deve_continuar = True
                     
                     # Garantir que _carta_atual_gestao está dentro dos limites
@@ -6964,9 +6964,9 @@ class PlayerDashboard(tk.Toplevel):
                         self._carta_atual_gestao = 0
                     
                     proxima_carta = self._cartas_gestao[self._carta_atual_gestao]
-                    print(f"DEBUG: [COMPLETION] ✅ Próxima carta será: {os.path.basename(proxima_carta)} (posição gestão: {self._carta_atual_gestao})")
+                    print(f"DEBUG: [COMPLETION] SUCCESS: Próxima carta será: {os.path.basename(proxima_carta)} (posição gestão: {self._carta_atual_gestao})")
                 else:
-                    print(f"DEBUG: [COMPLETION] ❌ Lista de gestão vazia - finalizando gestão")
+                    print(f"DEBUG: [COMPLETION] ERROR: Lista de gestão vazia - finalizando gestão")
                     gestao_deve_continuar = False
                 
                 # TERCEIRO: Ajustar índice se está fora de range
@@ -6987,7 +6987,7 @@ class PlayerDashboard(tk.Toplevel):
                 
                 # QUARTO: Tomar decisão final sobre continuação da gestão
                 if gestao_deve_continuar:
-                    print(f"DEBUG: [COMPLETION] ✅ Continuando gestão de pacotes")
+                    print(f"DEBUG: [COMPLETION] SUCCESS: Continuando gestão de pacotes")
                     
                     # CORREÇÃO CRÍTICA: Determinar corretamente a próxima carta válida na lista de gestão
                     if hasattr(self, '_cartas_gestao') and self._cartas_gestao and hasattr(self, '_carta_atual_gestao'):
@@ -7003,7 +7003,7 @@ class PlayerDashboard(tk.Toplevel):
                             print(f"DEBUG: [COMPLETION] Índice ajustado para início da lista: {self._carta_atual_gestao}")
                         
                         proxima_carta = self._cartas_gestao[self._carta_atual_gestao]
-                        print(f"DEBUG: [COMPLETION] ✅ Próxima carta determinada: {os.path.basename(proxima_carta)} (posição gestão: {self._carta_atual_gestao})")
+                        print(f"DEBUG: [COMPLETION] SUCCESS: Próxima carta determinada: {os.path.basename(proxima_carta)} (posição gestão: {self._carta_atual_gestao})")
                         
                         # Encontrar a posição desta carta no carrossel ATUALIZADO (após remoção)
                         proxima_posicao = None
@@ -7011,11 +7011,11 @@ class PlayerDashboard(tk.Toplevel):
                             for i, carta in enumerate(self.cards):
                                 if carta == proxima_carta:
                                     proxima_posicao = i
-                                    print(f"DEBUG: [COMPLETION] ✅ Próxima carta encontrada no carrossel posição {i}")
+                                    print(f"DEBUG: [COMPLETION] SUCCESS: Próxima carta encontrada no carrossel posição {i}")
                                     break
                         
                         if proxima_posicao is not None:
-                            print(f"DEBUG: [COMPLETION] ✅ Atualizando seleção para próxima carta válida:")
+                            print(f"DEBUG: [COMPLETION] SUCCESS: Atualizando seleção para próxima carta válida:")
                             print(f"DEBUG: [COMPLETION]   Carta: {os.path.basename(proxima_carta)}")
                             print(f"DEBUG: [COMPLETION]   Posição carrossel: {proxima_posicao}")
                             print(f"DEBUG: [COMPLETION]   Posição gestão: {self._carta_atual_gestao}")
@@ -7025,7 +7025,7 @@ class PlayerDashboard(tk.Toplevel):
                             self.selected_carousel_index = proxima_posicao
                             
                         else:
-                            print(f"DEBUG: [COMPLETION] ❌ ERRO: Próxima carta {os.path.basename(proxima_carta)} não encontrada no carrossel")
+                            print(f"DEBUG: [COMPLETION] ERROR: ERRO: Próxima carta {os.path.basename(proxima_carta)} não encontrada no carrossel")
                             print(f"DEBUG: [COMPLETION] Carrossel atual: {[os.path.basename(c) for c in self.cards]}")
                             gestao_deve_continuar = False
                     
@@ -7040,7 +7040,7 @@ class PlayerDashboard(tk.Toplevel):
                         return
                 
                 if not gestao_deve_continuar:
-                    print(f"DEBUG: [COMPLETION] ✅ Gestão de pacotes finalizada - não há mais cartas para processar")
+                    print(f"DEBUG: [COMPLETION] SUCCESS: Gestão de pacotes finalizada - não há mais cartas para processar")
                     print(f"DEBUG: [COMPLETION] Voltando ao dashboard normal com End Turn habilitado")
                     
                     # CORREÇÃO CRÍTICA: Finalizar gestão mas MANTER Final Phase ativo para End Turn
@@ -7345,7 +7345,7 @@ class PlayerDashboard(tk.Toplevel):
                     calculated_start_turn = self._current_turn_number - n_turns
                     turns_elapsed = self._current_turn_number - calculated_start_turn + 1
                     
-                    print(f"DEBUG: [TIME_TRACKING] ✅ CORREÇÃO AUTOMÁTICA APLICADA:")
+                    print(f"DEBUG: [TIME_TRACKING] SUCCESS: CORREÇÃO AUTOMÁTICA APLICADA:")
                     print(f"  Turno início calculado: {calculated_start_turn}")
                     print(f"  Turnos decorridos: {turns_elapsed}")
                     print(f"  Challenge deve estar na Final Phase: {turns_elapsed >= n_turns}")
@@ -7365,7 +7365,7 @@ class PlayerDashboard(tk.Toplevel):
                     return turns_elapsed
                     
             except Exception as e:
-                print(f"DEBUG: [TIME_TRACKING] ⚠️ Erro ao obter dados da carta: {e}")
+                print(f"DEBUG: [TIME_TRACKING] WARNING: Erro ao obter dados da carta: {e}")
                 # Fallback: assumir que foi aceite no turno atual (1 turno decorrido)
                 print(f"DEBUG: [TIME_TRACKING] Fallback: assumindo turno atual")
                 return 1
@@ -7418,7 +7418,7 @@ class PlayerDashboard(tk.Toplevel):
             
             # Se atingiu o limite, adicionar à lista para completion obrigatório
             if turns_elapsed >= n_turns:
-                print(f"DEBUG: [CHALLENGE_TIMEOUT] ⚠️  LIMITE ATINGIDO! Challenge deve ser completado obrigatoriamente")
+                print(f"DEBUG: [CHALLENGE_TIMEOUT] WARNING:  LIMITE ATINGIDO! Challenge deve ser completado obrigatoriamente")
                 cartas_para_completion_obrigatorio.append({
                     'carta_path': carta_path,
                     'carta_index': i,
@@ -7428,14 +7428,14 @@ class PlayerDashboard(tk.Toplevel):
                 })
             else:
                 turnos_restantes = n_turns - turns_elapsed
-                print(f"DEBUG: [CHALLENGE_TIMEOUT] ✅ Ainda tem {turnos_restantes} turno(s) restante(s)")
+                print(f"DEBUG: [CHALLENGE_TIMEOUT] SUCCESS: Ainda tem {turnos_restantes} turno(s) restante(s)")
         
         # Processar cartas que atingiram o limite
         if cartas_para_completion_obrigatorio:
             print(f"DEBUG: [CHALLENGE_TIMEOUT] === {len(cartas_para_completion_obrigatorio)} CHALLENGE(S) ATINGIRAM LIMITE ===")
             self._processar_challenges_tempo_limite_atingido(cartas_para_completion_obrigatorio)
         else:
-            print("DEBUG: [CHALLENGE_TIMEOUT] ✅ Nenhuma carta Challenge atingiu limite de turnos")
+            print("DEBUG: [CHALLENGE_TIMEOUT] SUCCESS: Nenhuma carta Challenge atingiu limite de turnos")
     
     def _processar_challenges_tempo_limite_atingido(self, cartas_lista):
         """
@@ -7487,7 +7487,7 @@ class PlayerDashboard(tk.Toplevel):
             self._remover_carta_do_carrossel(carta_path)
             self._cleanup_completed_challenge_tracking(carta_path)
             
-            print(f"DEBUG: [CHALLENGE_TIMEOUT] ✅ Challenge {os.path.basename(carta_path)} processado e removido")
+            print(f"DEBUG: [CHALLENGE_TIMEOUT] SUCCESS: Challenge {os.path.basename(carta_path)} processado e removido")
     
     def _mostrar_overlay_completion_tempo_limite(self, carta_path, dados_carta, carta_info, reward):
         """
@@ -7571,16 +7571,16 @@ class PlayerDashboard(tk.Toplevel):
         # mas vamos garantir que está sincronizado
         expected_turn_id = self._current_turn_number
         if self._current_turn_id != expected_turn_id:
-            print(f"DEBUG: [TIME_TRACKING] ⚠️ DESSINCRONIZAÇÃO DETECTADA!")
+            print(f"DEBUG: [TIME_TRACKING] WARNING: DESSINCRONIZAÇÃO DETECTADA!")
             print(f"DEBUG: [TIME_TRACKING] _current_turn_id: {self._current_turn_id} ≠ expected: {expected_turn_id}")
             self._current_turn_id = expected_turn_id
-            print(f"DEBUG: [TIME_TRACKING] ✅ _current_turn_id corrigido para: {self._current_turn_id}")
+            print(f"DEBUG: [TIME_TRACKING] SUCCESS: _current_turn_id corrigido para: {self._current_turn_id}")
         
-        print(f"DEBUG: [TIME_TRACKING] ✅ CONTADORES SINCRONIZADOS:")
+        print(f"DEBUG: [TIME_TRACKING] SUCCESS: CONTADORES SINCRONIZADOS:")
         print(f"DEBUG: [TIME_TRACKING]   Challenges: {old_turn_challenges} → {self._current_turn_number}")
         print(f"DEBUG: [TIME_TRACKING]   Events: {old_turn_events} → {self._current_turn}")
         print(f"DEBUG: [TIME_TRACKING]   Processing ID: {self._current_turn_id}")
-        print(f"DEBUG: [TIME_TRACKING] ✅ TODOS OS SISTEMAS AGORA NO TURNO {self._current_turn_number}")
+        print(f"DEBUG: [TIME_TRACKING] SUCCESS: TODOS OS SISTEMAS AGORA NO TURNO {self._current_turn_number}")
     
     def _cleanup_completed_challenge_tracking(self, carta_path):
         """
@@ -7668,7 +7668,7 @@ class PlayerDashboard(tk.Toplevel):
                 
                 # Verificar se expirou (turnos decorridos >= duração)
                 if turnos_decorridos >= duration_turns:
-                    print(f"DEBUG: [SERVICE_EXPIRY] ⏰ Service {os.path.basename(carta_path)} EXPIROU!")
+                    print(f"DEBUG: [SERVICE_EXPIRY] TIME: Service {os.path.basename(carta_path)} EXPIROU!")
                     services_expirados.append(carta_path)
         
         if services_expirados:
@@ -8329,14 +8329,14 @@ class PlayerDashboard(tk.Toplevel):
             
             # REGRA 1: Verificar limite por turno (rate_max)
             if total_processado_turno >= rate_max:
-                print(f"DEBUG: [PODE_PROCESSAR] ❌ Limite por turno atingido ({total_processado_turno}/{rate_max})")
+                print(f"DEBUG: [PODE_PROCESSAR] ERROR: Limite por turno atingido ({total_processado_turno}/{rate_max})")
                 return False
             
             # REGRA 2: Para Activities - verificar completion
             if "activity" in carta_basename:
                 # Activity completa quando: To send = 0 E Rxd >= message_size
                 if to_send_atual <= 0 and rxd_atual >= message_size:
-                    print(f"DEBUG: [PODE_PROCESSAR] ❌ Activity completada (To send={to_send_atual}, Rxd={rxd_atual}/{message_size})")
+                    print(f"DEBUG: [PODE_PROCESSAR] ERROR: Activity completada (To send={to_send_atual}, Rxd={rxd_atual}/{message_size})")
                     return False
                 
                 # Verificar se ainda pode incrementar Rxd ou Lost
@@ -8362,11 +8362,11 @@ class PlayerDashboard(tk.Toplevel):
                 print(f"DEBUG: [PODE_PROCESSAR] Challenge pode processar: Rxd={pode_incrementar_rxd}, Lost={pode_incrementar_lost} => {pode_processar}")
                 return pode_processar
             
-            print(f"DEBUG: [PODE_PROCESSAR] ❌ Tipo de carta não reconhecido: {carta_basename}")
+            print(f"DEBUG: [PODE_PROCESSAR] ERROR: Tipo de carta não reconhecido: {carta_basename}")
             return False
             
         except Exception as e:
-            print(f"DEBUG: [PODE_PROCESSAR] ❌ ERRO ao verificar carta {os.path.basename(carta_path)}: {e}")
+            print(f"DEBUG: [PODE_PROCESSAR] ERROR: ERRO ao verificar carta {os.path.basename(carta_path)}: {e}")
             return False
     
     def _atualizar_barras_gestao_carta_atual(self):
@@ -8389,7 +8389,7 @@ class PlayerDashboard(tk.Toplevel):
             posicao_carrossel = self.selected_carousel_index
             carta_atual = self.cards[posicao_carrossel]
             
-            print(f"DEBUG: [GESTÃO_PACOTES]   ✅ USANDO CARTA REAL DO CARROSSEL:")
+            print(f"DEBUG: [GESTÃO_PACOTES]   SUCCESS: USANDO CARTA REAL DO CARROSSEL:")
             print(f"DEBUG: [GESTÃO_PACOTES]   Posição no carrossel: {posicao_carrossel}")
             print(f"DEBUG: [GESTÃO_PACOTES]   Carta REAL: {os.path.basename(carta_atual)}")
             
@@ -8398,10 +8398,10 @@ class PlayerDashboard(tk.Toplevel):
                 carta_preservada = os.path.basename(self.selected_carousel_card)
                 carta_real = os.path.basename(carta_atual)
                 if carta_preservada != carta_real:
-                    print(f"DEBUG: [GESTÃO_PACOTES]   ⚠️ DIFERENÇA DETECTADA:")
+                    print(f"DEBUG: [GESTÃO_PACOTES]   WARNING: DIFERENÇA DETECTADA:")
                     print(f"DEBUG: [GESTÃO_PACOTES]   Carta preservada: {carta_preservada}")
                     print(f"DEBUG: [GESTÃO_PACOTES]   Carta real: {carta_real}")
-                    print(f"DEBUG: [GESTÃO_PACOTES]   ✅ USANDO A CARTA REAL!")
+                    print(f"DEBUG: [GESTÃO_PACOTES]   SUCCESS: USANDO A CARTA REAL!")
             
         else:
             # Fallback: usar sistema antigo se não há carrossel válido
@@ -8422,12 +8422,12 @@ class PlayerDashboard(tk.Toplevel):
                             break
                 
                 if posicao_carrossel is None:
-                    print(f"DEBUG: [GESTÃO_PACOTES] ❌ ERRO: Carta não encontrada no carrossel!")
+                    print(f"DEBUG: [GESTÃO_PACOTES] ERROR: ERRO: Carta não encontrada no carrossel!")
                     return
                 
                 print(f"DEBUG: [GESTÃO_PACOTES]   Posição real no carrossel: {posicao_carrossel}")
             else:
-                print(f"DEBUG: [GESTÃO_PACOTES] ❌ ERRO: Não há informação de cartas!")
+                print(f"DEBUG: [GESTÃO_PACOTES] ERROR: ERRO: Não há informação de cartas!")
                 return
         
         # CORREÇÃO: Verificar se há valores preservados para esta carta primeiro
@@ -8446,7 +8446,7 @@ class PlayerDashboard(tk.Toplevel):
             # Obter message_size da base de dados para máximo das barras
             message_size = self._get_card_message_size_from_database(carta_atual)
             
-            print(f"DEBUG: [GESTÃO_PACOTES] ✅ USANDO VALORES PRESERVADOS:")
+            print(f"DEBUG: [GESTÃO_PACOTES] SUCCESS: USANDO VALORES PRESERVADOS:")
             print(f"DEBUG: [GESTÃO_PACOTES]   To send: {to_send_atual}")
             print(f"DEBUG: [GESTÃO_PACOTES]   Rxd: {rxd_atual}")
             print(f"DEBUG: [GESTÃO_PACOTES]   Lost: {lost_atual}")
@@ -8454,7 +8454,7 @@ class PlayerDashboard(tk.Toplevel):
             
         else:
             # Fallback: usar base de dados se não há valores preservados
-            print(f"DEBUG: [GESTÃO_PACOTES] ⚠️ Sem valores preservados - usando base de dados")
+            print(f"DEBUG: [GESTÃO_PACOTES] WARNING: Sem valores preservados - usando base de dados")
             message_size = self._get_card_message_size_from_database(carta_atual)
             
             # Verificar se há valores nos _valores_pacotes (antigo sistema)
@@ -8476,19 +8476,19 @@ class PlayerDashboard(tk.Toplevel):
             if "To send" in self.progress_bars and "To send" in self.progress_labels:
                 self.progress_bars["To send"].config(value=to_send_atual, maximum=message_size)
                 self.progress_labels["To send"].config(text=str(to_send_atual))
-                print(f"DEBUG: [GESTÃO_PACOTES] ✅ To send atualizada: {to_send_atual}/{message_size}")
+                print(f"DEBUG: [GESTÃO_PACOTES] SUCCESS: To send atualizada: {to_send_atual}/{message_size}")
             
             # Atualizar Rxd
             if "Rxd" in self.progress_bars and "Rxd" in self.progress_labels:
                 self.progress_bars["Rxd"].config(value=rxd_atual, maximum=message_size)
                 self.progress_labels["Rxd"].config(text=str(rxd_atual))
-                print(f"DEBUG: [GESTÃO_PACOTES] ✅ Rxd atualizada: {rxd_atual}")
+                print(f"DEBUG: [GESTÃO_PACOTES] SUCCESS: Rxd atualizada: {rxd_atual}")
             
             # Atualizar Lost
             if "Lost" in self.progress_bars and "Lost" in self.progress_labels:
                 self.progress_bars["Lost"].config(value=lost_atual, maximum=message_size)
                 self.progress_labels["Lost"].config(text=str(lost_atual))
-                print(f"DEBUG: [GESTÃO_PACOTES] ✅ Lost atualizada: {lost_atual}")
+                print(f"DEBUG: [GESTÃO_PACOTES] SUCCESS: Lost atualizada: {lost_atual}")
                 
             # IMPORTANTE: Sincronizar os valores preservados com o que está nas barras
             if preserved_stats is None and hasattr(self, 'card_stats') and posicao_carrossel < len(self.card_stats):
@@ -8497,9 +8497,9 @@ class PlayerDashboard(tk.Toplevel):
                     'Rxd': rxd_atual,
                     'Lost': lost_atual
                 }
-                print(f"DEBUG: [GESTÃO_PACOTES] ✅ Stats sincronizadas na posição {posicao_carrossel}")
+                print(f"DEBUG: [GESTÃO_PACOTES] SUCCESS: Stats sincronizadas na posição {posicao_carrossel}")
         else:
-            print("DEBUG: [GESTÃO_PACOTES] ❌ Barras de progresso não encontradas para atualização")
+            print("DEBUG: [GESTÃO_PACOTES] ERROR: Barras de progresso não encontradas para atualização")
     
     def _mostrar_botao_seta(self):
         """Mostra botão seta (→) na mesma altura do End Turn com cor roxa"""
@@ -8535,12 +8535,12 @@ class PlayerDashboard(tk.Toplevel):
             # Atualizar a interface para garantir que o botão aparece
             self.update_idletasks()
             
-            print("DEBUG: [GESTÃO_PACOTES] ✅ Botão seta criado com sucesso!")
+            print("DEBUG: [GESTÃO_PACOTES] SUCCESS: Botão seta criado com sucesso!")
             print(f"DEBUG: [GESTÃO_PACOTES] Posição: relx=0.05, rely=0.945")
             print(f"DEBUG: [GESTÃO_PACOTES] Widget existe: {hasattr(self, '_btn_seta') and self._btn_seta}")
             
         except Exception as e:
-            print(f"DEBUG: [GESTÃO_PACOTES] ❌ ERRO ao criar botão seta: {e}")
+            print(f"DEBUG: [GESTÃO_PACOTES] ERROR: ERRO ao criar botão seta: {e}")
             self._btn_seta = None
     
     def _proxima_carta_gestao(self):
@@ -8558,7 +8558,7 @@ class PlayerDashboard(tk.Toplevel):
         # para evitar fullscreen acidental após clique no botão seta
         self._bloqueio_temporario_carrossel = True
         self.after(500, lambda: setattr(self, '_bloqueio_temporario_carrossel', False))
-        print(f"DEBUG: [SETA_COMPLETION] ✅ Bloqueio temporário do carrossel ativado por 500ms")
+        print(f"DEBUG: [SETA_COMPLETION] SUCCESS: Bloqueio temporário do carrossel ativado por 500ms")
         
         # CORREÇÃO CRÍTICA: Validar índices antes de acessar as listas
         print(f"DEBUG: [SETA_COMPLETION] Validação inicial:")
@@ -8568,14 +8568,14 @@ class PlayerDashboard(tk.Toplevel):
         
         # CORREÇÃO FUNDAMENTAL: Verificar se o índice é válido antes de acessar
         if self._carta_atual_gestao >= len(self._cartas_gestao):
-            print(f"DEBUG: [SETA_COMPLETION] ❌ ERRO: Índice gestão ({self._carta_atual_gestao}) >= tamanho lista ({len(self._cartas_gestao)})")
-            print(f"DEBUG: [SETA_COMPLETION] ✅ CORREÇÃO: Usando carta selecionada do carrossel como referência")
+            print(f"DEBUG: [SETA_COMPLETION] ERROR: ERRO: Índice gestão ({self._carta_atual_gestao}) >= tamanho lista ({len(self._cartas_gestao)})")
+            print(f"DEBUG: [SETA_COMPLETION] SUCCESS: CORREÇÃO: Usando carta selecionada do carrossel como referência")
             selected_carta = getattr(self, 'selected_carousel_card', None)
             if selected_carta:
                 carta_atual = selected_carta
-                print(f"DEBUG: [SETA_COMPLETION] ✅ Carta corrigida para: {os.path.basename(carta_atual)}")
+                print(f"DEBUG: [SETA_COMPLETION] SUCCESS: Carta corrigida para: {os.path.basename(carta_atual)}")
             else:
-                print(f"DEBUG: [SETA_COMPLETION] ❌ ERRO CRÍTICO: Sem carta selecionada no carrossel")
+                print(f"DEBUG: [SETA_COMPLETION] ERROR: ERRO CRÍTICO: Sem carta selecionada no carrossel")
                 return
         else:
             # CORREÇÃO CRÍTICA: Garantir que estamos a processar a carta CORRETA
@@ -8592,23 +8592,23 @@ class PlayerDashboard(tk.Toplevel):
             len(self._cartas_gestao) > 0 and 
             self._carta_atual_gestao < len(self._cartas_gestao) and 
             selected_carta != carta_atual):
-            print(f"DEBUG: [SETA_COMPLETION] ⚠️ DISCREPÂNCIA DETECTADA!")
+            print(f"DEBUG: [SETA_COMPLETION] WARNING: DISCREPÂNCIA DETECTADA!")
             print(f"DEBUG: [SETA_COMPLETION] Gestão: {os.path.basename(carta_atual)}")
             print(f"DEBUG: [SETA_COMPLETION] Carrossel: {os.path.basename(selected_carta)}")
-            print(f"DEBUG: [SETA_COMPLETION] ✅ CORRIGINDO - Usando carta do carrossel como referência")
+            print(f"DEBUG: [SETA_COMPLETION] SUCCESS: CORRIGINDO - Usando carta do carrossel como referência")
             carta_atual = selected_carta
             
             # Atualizar a posição da gestão para corresponder à carta correta
             try:
                 nova_posicao_gestao = self._cartas_gestao.index(carta_atual)
                 self._carta_atual_gestao = nova_posicao_gestao
-                print(f"DEBUG: [SETA_COMPLETION] ✅ Posição gestão corrigida para: {nova_posicao_gestao}")
+                print(f"DEBUG: [SETA_COMPLETION] SUCCESS: Posição gestão corrigida para: {nova_posicao_gestao}")
             except ValueError:
-                print(f"DEBUG: [SETA_COMPLETION] ❌ AVISO: Carta selecionada não está na lista de gestão")
+                print(f"DEBUG: [SETA_COMPLETION] ERROR: AVISO: Carta selecionada não está na lista de gestão")
                 print(f"DEBUG: [SETA_COMPLETION] Lista gestão: {[os.path.basename(c) for c in self._cartas_gestao]}")
-                print(f"DEBUG: [SETA_COMPLETION] ✅ Continuando com carta selecionada do carrossel")
+                print(f"DEBUG: [SETA_COMPLETION] SUCCESS: Continuando com carta selecionada do carrossel")
         elif selected_carta and len(self._cartas_gestao) == 0:
-            print(f"DEBUG: [SETA_COMPLETION] ⚠️ Lista gestão vazia - usando carta selecionada do carrossel")
+            print(f"DEBUG: [SETA_COMPLETION] WARNING: Lista gestão vazia - usando carta selecionada do carrossel")
             carta_atual = selected_carta
         
         carta_basename = os.path.basename(carta_atual).lower()
@@ -8619,7 +8619,7 @@ class PlayerDashboard(tk.Toplevel):
         is_challenge_card = "challenge" in carta_basename
         
         if is_challenge_card:
-            print(f"DEBUG: [SETA_COMPLETION] ✅ Challenge detectado - verificando Final Phase")
+            print(f"DEBUG: [SETA_COMPLETION] SUCCESS: Challenge detectado - verificando Final Phase")
             
             # Obter dados da carta
             dados_carta = self._obter_dados_carta(carta_atual)
@@ -8663,7 +8663,7 @@ class PlayerDashboard(tk.Toplevel):
                 print(f"DEBUG: [SETA_COMPLETION]   challenge_na_final_phase: {challenge_na_final_phase}")
                 
                 if challenge_na_final_phase:
-                    print(f"DEBUG: [SETA_COMPLETION] ✅ Challenge pode ser completado - mostrar overlay")
+                    print(f"DEBUG: [SETA_COMPLETION] SUCCESS: Challenge pode ser completado - mostrar overlay")
                     
                     # Preservar valores antes de mostrar completion
                     self._preservar_valores_atuais_barras()
@@ -8681,7 +8681,7 @@ class PlayerDashboard(tk.Toplevel):
                                 break
                     
                     if carta_index_carrossel is None:
-                        print(f"DEBUG: [SETA_COMPLETION] ❌ ERRO: Não foi possível encontrar carta no carrossel")
+                        print(f"DEBUG: [SETA_COMPLETION] ERROR: ERRO: Não foi possível encontrar carta no carrossel")
                         return
                     
                     print(f"DEBUG: [SETA_COMPLETION] Usando índice do carrossel: {carta_index_carrossel} (gestão: {self._carta_atual_gestao})")
@@ -8689,21 +8689,21 @@ class PlayerDashboard(tk.Toplevel):
                     # Mostrar overlay de completion diretamente
                     self._mostrar_overlay_completion(carta_atual, dados_carta, is_sequential=False, carta_index=carta_index_carrossel)
                     
-                    print(f"DEBUG: [SETA_COMPLETION] ✅ Overlay de completion mostrado para Challenge")
+                    print(f"DEBUG: [SETA_COMPLETION] SUCCESS: Overlay de completion mostrado para Challenge")
                     return
                 else:
-                    print(f"DEBUG: [SETA_COMPLETION] ❌ Challenge não pode ser completado ainda - continuar gestão normal")
+                    print(f"DEBUG: [SETA_COMPLETION] ERROR: Challenge não pode ser completado ainda - continuar gestão normal")
                     print(f"DEBUG: [SETA_COMPLETION]   Razão: tempo_limite={tempo_limite_atingido}, pacotes_completos={pacotes_completos}")
             else:
-                print(f"DEBUG: [SETA_COMPLETION] ❌ Dados da carta não encontrados")
+                print(f"DEBUG: [SETA_COMPLETION] ERROR: Dados da carta não encontrados")
         else:
-            print(f"DEBUG: [SETA_COMPLETION] ❌ Não é Challenge - verificando se é Activity...")
+            print(f"DEBUG: [SETA_COMPLETION] ERROR: Não é Challenge - verificando se é Activity...")
             
             # CORREÇÃO CRÍTICA: Adicionar verificação de completion para Activities
             is_activity_card = "activity" in carta_basename
             
             if is_activity_card:
-                print(f"DEBUG: [SETA_COMPLETION] ✅ Activity detectado - verificando completion")
+                print(f"DEBUG: [SETA_COMPLETION] SUCCESS: Activity detectado - verificando completion")
                 
                 # Obter dados da carta
                 dados_carta = self._obter_dados_carta(carta_atual)
@@ -8746,7 +8746,7 @@ class PlayerDashboard(tk.Toplevel):
                     print(f"DEBUG: [SETA_COMPLETION]   activity_completada: {activity_completada}")
                     
                     if activity_completada:
-                        print(f"DEBUG: [SETA_COMPLETION] ✅ Activity pode ser completada - mostrar overlay")
+                        print(f"DEBUG: [SETA_COMPLETION] SUCCESS: Activity pode ser completada - mostrar overlay")
                         
                         # Preservar valores antes de mostrar completion
                         self._preservar_valores_atuais_barras()
@@ -8763,7 +8763,7 @@ class PlayerDashboard(tk.Toplevel):
                                     break
                         
                         if carta_index_carrossel is None:
-                            print(f"DEBUG: [SETA_COMPLETION] ❌ ERRO: Não foi possível encontrar carta no carrossel")
+                            print(f"DEBUG: [SETA_COMPLETION] ERROR: ERRO: Não foi possível encontrar carta no carrossel")
                             return
                         
                         print(f"DEBUG: [SETA_COMPLETION] Usando índice do carrossel: {carta_index_carrossel} (gestão: {self._carta_atual_gestao})")
@@ -8771,17 +8771,17 @@ class PlayerDashboard(tk.Toplevel):
                         # Mostrar overlay de completion diretamente
                         self._mostrar_overlay_completion(carta_atual, dados_carta, is_sequential=False, carta_index=carta_index_carrossel)
                         
-                        print(f"DEBUG: [SETA_COMPLETION] ✅ Overlay de completion mostrado para Activity")
+                        print(f"DEBUG: [SETA_COMPLETION] SUCCESS: Overlay de completion mostrado para Activity")
                         return
                     else:
-                        print(f"DEBUG: [SETA_COMPLETION] ❌ Activity não pode ser completada ainda - continuar gestão normal")
+                        print(f"DEBUG: [SETA_COMPLETION] ERROR: Activity não pode ser completada ainda - continuar gestão normal")
                         print(f"DEBUG: [SETA_COMPLETION]   Razão: enviados={pacotes_todos_enviados}, recebidos={pacotes_todos_recebidos}")
                 else:
-                    print(f"DEBUG: [SETA_COMPLETION] ❌ Dados da Activity não encontrados")
+                    print(f"DEBUG: [SETA_COMPLETION] ERROR: Dados da Activity não encontrados")
             else:
-                print(f"DEBUG: [SETA_COMPLETION] ❌ Não é nem Challenge nem Activity - continuar gestão normal")
+                print(f"DEBUG: [SETA_COMPLETION] ERROR: Não é nem Challenge nem Activity - continuar gestão normal")
         
-        print(f"DEBUG: [SETA_COMPLETION] ❌ Condições para completion não atendidas - continuar gestão normal")
+        print(f"DEBUG: [SETA_COMPLETION] ERROR: Condições para completion não atendidas - continuar gestão normal")
         
         # FLUXO ORIGINAL: PRESERVAR VALORES DA CARTA ATUAL ANTES DE AVANÇAR
         
@@ -8807,7 +8807,7 @@ class PlayerDashboard(tk.Toplevel):
                             "Rxd": rxd_atual, 
                             "Lost": lost_atual
                         }
-                        print(f"DEBUG: [GESTÃO_PACOTES] ✅ VALORES PRESERVADOS antes de avançar:")
+                        print(f"DEBUG: [GESTÃO_PACOTES] SUCCESS: VALORES PRESERVADOS antes de avançar:")
                         print(f"DEBUG: [GESTÃO_PACOTES]   Posição carrossel: {posicao_carrossel_atual}")
                         print(f"DEBUG: [GESTÃO_PACOTES]   To send: {to_send_atual}")
                         print(f"DEBUG: [GESTÃO_PACOTES]   Rxd: {rxd_atual}")
@@ -8815,7 +8815,7 @@ class PlayerDashboard(tk.Toplevel):
                         print(f"DEBUG: [GESTÃO_PACOTES]   card_stats[{posicao_carrossel_atual}] = {self.card_stats[posicao_carrossel_atual]}")
                     
             except Exception as e:
-                print(f"DEBUG: [GESTÃO_PACOTES] ❌ Erro ao preservar valores: {e}")
+                print(f"DEBUG: [GESTÃO_PACOTES] ERROR: Erro ao preservar valores: {e}")
         
         # CORREÇÃO 2: Salvar também no sistema antigo (compatibilidade)
         if hasattr(self, '_entry_rxd') and hasattr(self, '_entry_lost'):
@@ -8856,14 +8856,14 @@ class PlayerDashboard(tk.Toplevel):
         
         # Se não há mais cartas válidas, finalizar gestão automaticamente
         if cartas_validas_restantes == 0 or self._carta_atual_gestao >= len(getattr(self, '_cartas_gestao', [])):
-            print("DEBUG: [GESTÃO_PACOTES] ❌ Não há mais cartas válidas para processar")
-            print("DEBUG: [GESTÃO_PACOTES] ✅ FINALIZANDO GESTÃO DE PACOTES AUTOMATICAMENTE")
+            print("DEBUG: [GESTÃO_PACOTES] ERROR: Não há mais cartas válidas para processar")
+            print("DEBUG: [GESTÃO_PACOTES] SUCCESS: FINALIZANDO GESTÃO DE PACOTES AUTOMATICAMENTE")
             
             # CORREÇÃO CRÍTICA: Finalizar gestão mas MANTER Final Phase ativo para End Turn
             # A gestão termina mas o jogador ainda está em Final Phase
             self._final_phase_gestao_ativa = False
             # NÃO limpar _final_phase_active - o jogador ainda está em Final Phase!
-            # self._final_phase_active = False  # ❌ REMOVIDO - Final Phase deve continuar ativo
+            # self._final_phase_active = False  # ERROR: REMOVIDO - Final Phase deve continuar ativo
             
             # CORREÇÃO: Ativar End Turn quando gestão termina automaticamente
             self._show_end_turn_button = True
@@ -8968,7 +8968,7 @@ class PlayerDashboard(tk.Toplevel):
         
         # CORREÇÃO CRÍTICA: Desativar gestão de pacotes PRIMEIRO
         self._final_phase_gestao_ativa = False
-        print("DEBUG: [GESTÃO_PACOTES] ✅ _final_phase_gestao_ativa = False")
+        print("DEBUG: [GESTÃO_PACOTES] SUCCESS: _final_phase_gestao_ativa = False")
         
         # Remover destaque roxo
         self._remover_destaque_roxo()
@@ -8985,30 +8985,30 @@ class PlayerDashboard(tk.Toplevel):
         # CORREÇÃO: Limpar todas as variáveis de gestão
         if hasattr(self, '_cartas_gestao'):
             self._cartas_gestao = []
-            print("DEBUG: [GESTÃO_PACOTES] ✅ _cartas_gestao limpa")
+            print("DEBUG: [GESTÃO_PACOTES] SUCCESS: _cartas_gestao limpa")
         
         if hasattr(self, '_carta_atual_gestao'):
             self._carta_atual_gestao = 0
-            print("DEBUG: [GESTÃO_PACOTES] ✅ _carta_atual_gestao resetado")
+            print("DEBUG: [GESTÃO_PACOTES] SUCCESS: _carta_atual_gestao resetado")
         
         if hasattr(self, '_carta_destacada'):
             self._carta_destacada = None
-            print("DEBUG: [GESTÃO_PACOTES] ✅ _carta_destacada limpa")
+            print("DEBUG: [GESTÃO_PACOTES] SUCCESS: _carta_destacada limpa")
         
         if hasattr(self, '_carta_destacada_posicao'):
             self._carta_destacada_posicao = None
-            print("DEBUG: [GESTÃO_PACOTES] ✅ _carta_destacada_posicao limpa")
+            print("DEBUG: [GESTÃO_PACOTES] SUCCESS: _carta_destacada_posicao limpa")
         
         # CORREÇÃO CRÍTICA: Limpar seleção do carrossel para evitar destaques residuais
         self.selected_carousel_card = None
         self.selected_carousel_index = None
-        print("DEBUG: [GESTÃO_PACOTES] ✅ Seleção do carrossel limpa")
+        print("DEBUG: [GESTÃO_PACOTES] SUCCESS: Seleção do carrossel limpa")
         
         # Aplicar valores finais a todas as cartas
         self._aplicar_valores_finais()
         
         # CORREÇÃO CRÍTICA: Forçar limpeza completa de todos os destaques
-        print("DEBUG: [GESTÃO_PACOTES] ✅ Forçando limpeza completa de destaques")
+        print("DEBUG: [GESTÃO_PACOTES] SUCCESS: Forçando limpeza completa de destaques")
         if hasattr(self, 'card_labels') and self.card_labels:
             for lbl in self.card_labels:
                 try:
@@ -9125,7 +9125,7 @@ class PlayerDashboard(tk.Toplevel):
         Mostra overlays de completion para múltiplas cartas de forma sequencial
         """
         if index >= len(cartas_completadas):
-            print("DEBUG: [COMPLETION_FINAL] ✅ Todos os overlays de completion foram mostrados")
+            print("DEBUG: [COMPLETION_FINAL] SUCCESS: Todos os overlays de completion foram mostrados")
             return
         
         carta_info = cartas_completadas[index]
@@ -9260,7 +9260,7 @@ class PlayerDashboard(tk.Toplevel):
             
             # Verificar se jogador tem saldo suficiente
             if self.saldo < challenge_quit_fee:
-                print(f"DEBUG: [QUIT_CHALLENGE] ❌ Saldo insuficiente: {self.saldo} < {challenge_quit_fee}")
+                print(f"DEBUG: [QUIT_CHALLENGE] ERROR: Saldo insuficiente: {self.saldo} < {challenge_quit_fee}")
                 # Talvez mostrar mensagem de erro aqui
                 fechar_sem_quit()
                 return
@@ -9273,9 +9273,9 @@ class PlayerDashboard(tk.Toplevel):
             # CORREÇÃO: Remover carta do inventário do jogador ANTES de devolver ao baralho
             if 'challenges' in self.inventario and carta_path in self.inventario['challenges']:
                 self.inventario['challenges'].remove(carta_path)
-                print(f"DEBUG: [QUIT_CHALLENGE] ✅ Carta {os.path.basename(carta_path)} removida do inventário challenges do jogador")
+                print(f"DEBUG: [QUIT_CHALLENGE] SUCCESS: Carta {os.path.basename(carta_path)} removida do inventário challenges do jogador")
             else:
-                print(f"DEBUG: [QUIT_CHALLENGE] ⚠️ Carta {os.path.basename(carta_path)} não encontrada no inventário challenges do jogador")
+                print(f"DEBUG: [QUIT_CHALLENGE] WARNING: Carta {os.path.basename(carta_path)} não encontrada no inventário challenges do jogador")
             
             # Remover carta do carrossel
             self._remover_carta_do_carrossel(carta_path)
@@ -9431,9 +9431,9 @@ class PlayerDashboard(tk.Toplevel):
             if hasattr(self, 'end_turn_btn') and self.end_turn_btn:
                 if hasattr(self.end_turn_btn, 'winfo_exists') and self.end_turn_btn.winfo_exists():
                     end_turn_button = self.end_turn_btn
-                    print("DEBUG: [END_TURN] ✅ Botão encontrado via referência self.end_turn_btn")
+                    print("DEBUG: [END_TURN] SUCCESS: Botão encontrado via referência self.end_turn_btn")
                 else:
-                    print("DEBUG: [END_TURN] ❌ Referência self.end_turn_btn inválida")
+                    print("DEBUG: [END_TURN] ERROR: Referência self.end_turn_btn inválida")
                     self.end_turn_btn = None
             
             # 2. Se não encontrou, procurar em toda a interface
@@ -9442,7 +9442,7 @@ class PlayerDashboard(tk.Toplevel):
                 end_turn_button = self._procurar_botao_end_turn_na_interface()
                 if end_turn_button:
                     self.end_turn_btn = end_turn_button
-                    print("DEBUG: [END_TURN] ✅ Botão End Turn encontrado na interface")
+                    print("DEBUG: [END_TURN] SUCCESS: Botão End Turn encontrado na interface")
             
             # 3. Se encontrou o botão, ativar
             if end_turn_button:
@@ -9451,19 +9451,19 @@ class PlayerDashboard(tk.Toplevel):
                     bg="#808080",
                     fg="black"
                 )
-                print("DEBUG: [END_TURN] ✅ Botão End Turn ATIVADO com sucesso")
+                print("DEBUG: [END_TURN] SUCCESS: Botão End Turn ATIVADO com sucesso")
             else:
-                print("DEBUG: [END_TURN] ❌ Botão End Turn não encontrado")
+                print("DEBUG: [END_TURN] ERROR: Botão End Turn não encontrado")
                 # CORREÇÃO: Tentar recriar o botão se não existir
                 self._tentar_recriar_end_turn_button()
                 
         except tk.TclError as e:
-            print(f"DEBUG: [END_TURN] ❌ Erro TclError ao ativar End Turn: {e}")
+            print(f"DEBUG: [END_TURN] ERROR: Erro TclError ao ativar End Turn: {e}")
             # Limpar referência inválida e tentar recriar
             self.end_turn_btn = None
             self._tentar_recriar_end_turn_button()
         except Exception as e:
-            print(f"DEBUG: [END_TURN] ❌ Erro inesperado ao ativar End Turn: {e}")
+            print(f"DEBUG: [END_TURN] ERROR: Erro inesperado ao ativar End Turn: {e}")
     
     def _procurar_botao_end_turn_na_interface(self):
         """Procura o botão End Turn em toda a interface atual"""
@@ -9479,15 +9479,15 @@ class PlayerDashboard(tk.Toplevel):
                             try:
                                 text = sub_widget.cget('text')
                                 if text and 'End Turn' in str(text):
-                                    print(f"DEBUG: [END_TURN] ✅ Botão End Turn encontrado: {text}")
+                                    print(f"DEBUG: [END_TURN] SUCCESS: Botão End Turn encontrado: {text}")
                                     return sub_widget
                             except:
                                 continue
             
-            print("DEBUG: [END_TURN] ❌ Botão End Turn não encontrado na interface")
+            print("DEBUG: [END_TURN] ERROR: Botão End Turn não encontrado na interface")
             return None
         except Exception as e:
-            print(f"DEBUG: [END_TURN] ❌ Erro ao procurar botão: {e}")
+            print(f"DEBUG: [END_TURN] ERROR: Erro ao procurar botão: {e}")
             return None
     
     def _tentar_recriar_end_turn_button(self):
@@ -9497,12 +9497,12 @@ class PlayerDashboard(tk.Toplevel):
             # Verificar se há um container válido para o botão
             if hasattr(self, 'winfo_children') and self.winfo_children():
                 # CORREÇÃO: Usar método seguro para criar End Turn
-                print("DEBUG: [END_TURN] ✅ Container válido encontrado - tentando recriar...")
+                print("DEBUG: [END_TURN] SUCCESS: Container válido encontrado - tentando recriar...")
                 self.after(100, lambda: self._criar_botao_end_turn_seguro())
             else:
-                print("DEBUG: [END_TURN] ❌ Não há container válido para recriar End Turn")
+                print("DEBUG: [END_TURN] ERROR: Não há container válido para recriar End Turn")
         except Exception as e:
-            print(f"DEBUG: [END_TURN] ❌ Erro ao tentar recriar End Turn: {e}")
+            print(f"DEBUG: [END_TURN] ERROR: Erro ao tentar recriar End Turn: {e}")
     
     def _criar_botao_end_turn_seguro(self):
         """Cria botão End Turn de forma segura"""
@@ -9512,7 +9512,7 @@ class PlayerDashboard(tk.Toplevel):
                 existing_button = self._procurar_botao_end_turn_na_interface()
                 if existing_button:
                     self.end_turn_btn = existing_button
-                    print("DEBUG: [END_TURN] ✅ Botão End Turn existente encontrado e vinculado")
+                    print("DEBUG: [END_TURN] SUCCESS: Botão End Turn existente encontrado e vinculado")
                     
                     # Ativar imediatamente
                     self.end_turn_btn.config(
@@ -9520,7 +9520,7 @@ class PlayerDashboard(tk.Toplevel):
                         bg="#808080", 
                         fg="black"
                     )
-                    print("DEBUG: [END_TURN] ✅ Botão End Turn ativado")
+                    print("DEBUG: [END_TURN] SUCCESS: Botão End Turn ativado")
                     return
                 
                 # Se não existe, tentar criar novo
@@ -9534,11 +9534,11 @@ class PlayerDashboard(tk.Toplevel):
                         bg="#808080", 
                         fg="black"
                     )
-                    print("DEBUG: [END_TURN] ✅ Botão End Turn recriado e ativado")
+                    print("DEBUG: [END_TURN] SUCCESS: Botão End Turn recriado e ativado")
                 else:
-                    print("DEBUG: [END_TURN] ❌ Falha ao criar novo botão End Turn")
+                    print("DEBUG: [END_TURN] ERROR: Falha ao criar novo botão End Turn")
         except Exception as e:
-            print(f"DEBUG: [END_TURN] ❌ Erro ao criar End Turn seguro: {e}")
+            print(f"DEBUG: [END_TURN] ERROR: Erro ao criar End Turn seguro: {e}")
     
     def _manter_end_turn_disabled(self):
         """Mantém o botão End Turn disabled enquanto há cartas para processar"""
@@ -9551,9 +9551,9 @@ class PlayerDashboard(tk.Toplevel):
                 )
                 print(f"DEBUG: [GESTÃO_PACOTES] Botão End Turn mantido DISABLED - carta {self._carta_atual_gestao + 1}/{len(self._cartas_gestao)} em processamento")
             else:
-                print("DEBUG: [GESTÃO_PACOTES] ❌ Botão End Turn não encontrado para manter disabled")
+                print("DEBUG: [GESTÃO_PACOTES] ERROR: Botão End Turn não encontrado para manter disabled")
         except tk.TclError as e:
-            print(f"DEBUG: [GESTÃO_PACOTES] ❌ Erro ao manter End Turn disabled: {e}")
+            print(f"DEBUG: [GESTÃO_PACOTES] ERROR: Erro ao manter End Turn disabled: {e}")
             # Limpar referência inválida
             self.end_turn_btn = None
     
@@ -9641,13 +9641,13 @@ class PlayerDashboard(tk.Toplevel):
         print(f"DEBUG: [END_TURN] ======= CONTADORES PRESERVADOS =======")
         print(f"DEBUG: [END_TURN] Root object: {root}")
         print(f"DEBUG: [END_TURN] Backup salvo (INCREMENTADOS): {root._backup_turn_counters}")
-        print(f"DEBUG: [END_TURN] ✅ PRÓXIMO TURNO TERÁ OS VALORES CORRETOS!")
+        print(f"DEBUG: [END_TURN] SUCCESS: PRÓXIMO TURNO TERÁ OS VALORES CORRETOS!")
         print(f"DEBUG: [END_TURN] ======= FIM PRESERVAÇÃO CONTADORES =======")
         
         # TEMPORARIAMENTE DESABILITADO: Verificar cartas Challenge que atingiram n_turns obrigatoriamente
         # FIXME: Problema com messagebox durante destruição da interface
         # self._verificar_challenges_tempo_limite()
-        print("DEBUG: [END_TURN] ✅ Verificação de tempo limite desabilitada temporariamente")
+        print("DEBUG: [END_TURN] SUCCESS: Verificação de tempo limite desabilitada temporariamente")
         
         # NOVO: Verificar serviços TEMPORARY que expiraram
         self._verificar_services_expirados()
@@ -9716,7 +9716,7 @@ class PlayerDashboard(tk.Toplevel):
         # import tkinter.messagebox
         # tkinter.messagebox.showinfo("End Turn", "Turno terminado! Próximo jogador...")
         # Exemplo: pode-se limpar a interface ou chamar uma função para o próximo jogador
-        print("DEBUG: [END_TURN] ✅ Método end_turn() terminado com sucesso - retornando controle para _criar_botao_end_turn()")
+        print("DEBUG: [END_TURN] SUCCESS: Método end_turn() terminado com sucesso - retornando controle para _criar_botao_end_turn()")
 
     def _aplicar_router_upgrade(self, router_id):
         """
@@ -9758,7 +9758,7 @@ class PlayerDashboard(tk.Toplevel):
             medium_router_exists = any(os.path.basename(eq) == medium_router for eq in equipments_inventory)
             
             if medium_router_exists:
-                print(f"DEBUG: [ROUTER_UPGRADE] ❌ {medium_router} já existe no inventário - upgrade não aplicado")
+                print(f"DEBUG: [ROUTER_UPGRADE] ERROR: {medium_router} já existe no inventário - upgrade não aplicado")
                 return
             
             # Definir contexto de ROUTER UPGRADE e router_id
@@ -9767,7 +9767,7 @@ class PlayerDashboard(tk.Toplevel):
             
             # Abrir inventário de equipamentos para seleção
             self._show_equipment_inventory_for_router_upgrade()
-            print("DEBUG: [ROUTER_UPGRADE] ✅ Inventário de equipamentos aberto para upgrade")
+            print("DEBUG: [ROUTER_UPGRADE] SUCCESS: Inventário de equipamentos aberto para upgrade")
         else:
             print(f"DEBUG: [ROUTER_UPGRADE] Nenhum Small Router {small_router} ativo encontrado - não é possível fazer upgrade")
             print(f"DEBUG: [ROUTER_UPGRADE] ROUTER UPGRADE só funciona se houver {small_router} ativo (virado para cima)")
@@ -9786,7 +9786,7 @@ class PlayerDashboard(tk.Toplevel):
         print("DEBUG: [ROUTER_UPGRADE_INVENTORY] Chamando show_inventory_matrix para equipments")
         self.show_inventory_matrix(["equipments"])
         
-        print("DEBUG: [ROUTER_UPGRADE_INVENTORY] ✅ Inventário específico para ROUTER UPGRADE criado")
+        print("DEBUG: [ROUTER_UPGRADE_INVENTORY] SUCCESS: Inventário específico para ROUTER UPGRADE criado")
 
     def _show_equipment_inventory_for_router_downgrade(self):
         """Abre inventário de equipamentos especificamente para ROUTER DOWNGRADE"""
@@ -9799,7 +9799,7 @@ class PlayerDashboard(tk.Toplevel):
         print("DEBUG: [ROUTER_DOWNGRADE_INVENTORY] Chamando show_inventory_matrix para equipments")
         self.show_inventory_matrix(["equipments"])
         
-        print("DEBUG: [ROUTER_DOWNGRADE_INVENTORY] ✅ Inventário específico para ROUTER DOWNGRADE criado")
+        print("DEBUG: [ROUTER_DOWNGRADE_INVENTORY] SUCCESS: Inventário específico para ROUTER DOWNGRADE criado")
 
     def _aplicar_router_downgrade(self, router_id):
         """
@@ -9836,12 +9836,12 @@ class PlayerDashboard(tk.Toplevel):
         print(f"DEBUG: [ROUTER_DOWNGRADE] {medium_router} ativo: {medium_router_ativo}")
         
         if not medium_router_ativo:
-            print(f"DEBUG: [ROUTER_DOWNGRADE] ❌ {medium_router} não está ativo - ROUTER DOWNGRADE não pode ser aplicado")
+            print(f"DEBUG: [ROUTER_DOWNGRADE] ERROR: {medium_router} não está ativo - ROUTER DOWNGRADE não pode ser aplicado")
             print(f"DEBUG: [ROUTER_DOWNGRADE] Action_32 foi consumida mas o efeito não se aplica")
             return
         
         # Medium router está ativo - ir DIRETAMENTE para inventário de Equipments
-        print(f"DEBUG: [ROUTER_DOWNGRADE] ✅ {medium_router} está ativo - indo para inventário Equipments")
+        print(f"DEBUG: [ROUTER_DOWNGRADE] SUCCESS: {medium_router} está ativo - indo para inventário Equipments")
         
         # Armazenar contexto para o fullscreen da carta Equipment
         self._in_router_downgrade_context = True
@@ -9899,9 +9899,9 @@ class PlayerDashboard(tk.Toplevel):
             # Adicionar Small Router ao inventário (fica inativo por padrão)
             self.inventario["equipments"].append(small_router_path)
             print(f"DEBUG: [ROUTER_DOWNGRADE] {small_router} adicionado ao inventário (inativo)")
-            print(f"DEBUG: [ROUTER_DOWNGRADE] ✅ Router Downgrade aplicado com sucesso!")
+            print(f"DEBUG: [ROUTER_DOWNGRADE] SUCCESS: Router Downgrade aplicado com sucesso!")
         else:
-            print(f"DEBUG: [ROUTER_DOWNGRADE] ❌ {medium_router} não encontrado nos equipments ativos")
+            print(f"DEBUG: [ROUTER_DOWNGRADE] ERROR: {medium_router} não encontrado nos equipments ativos")
             print(f"DEBUG: [ROUTER_DOWNGRADE] Equipments ativos:")
             for equipment_path in self.active_equipments:
                 print(f"DEBUG: [ROUTER_DOWNGRADE]   - {os.path.basename(equipment_path)}")
@@ -9947,7 +9947,7 @@ class PlayerDashboard(tk.Toplevel):
             short_link_exists = any(os.path.basename(eq) == short_link for eq in equipments_inventory)
             
             if short_link_exists:
-                print(f"DEBUG: [LINK_UPGRADE] ❌ {short_link} já existe no inventário - upgrade não aplicado")
+                print(f"DEBUG: [LINK_UPGRADE] ERROR: {short_link} já existe no inventário - upgrade não aplicado")
                 return
             
             # Definir contexto de LINK UPGRADE e router_id
@@ -9956,7 +9956,7 @@ class PlayerDashboard(tk.Toplevel):
             
             # Abrir inventário de equipamentos para seleção
             self._show_equipment_inventory_for_link_upgrade()
-            print("DEBUG: [LINK_UPGRADE] ✅ Inventário de equipamentos aberto para upgrade")
+            print("DEBUG: [LINK_UPGRADE] SUCCESS: Inventário de equipamentos aberto para upgrade")
         else:
             print(f"DEBUG: [LINK_UPGRADE] Nenhum Long Link {long_link} encontrado no inventário - não é possível fazer upgrade")
             print(f"DEBUG: [LINK_UPGRADE] LINK UPGRADE só funciona se houver {long_link} disponível no inventário")
@@ -9975,7 +9975,7 @@ class PlayerDashboard(tk.Toplevel):
         print("DEBUG: [LINK_UPGRADE_INVENTORY] Chamando show_inventory_matrix para equipments")
         self.show_inventory_matrix(["equipments"])
         
-        print("DEBUG: [LINK_UPGRADE_INVENTORY] ✅ Inventário específico para LINK UPGRADE criado")
+        print("DEBUG: [LINK_UPGRADE_INVENTORY] SUCCESS: Inventário específico para LINK UPGRADE criado")
 
     def _aplicar_link_downgrade(self, router_id):
         """
@@ -10018,7 +10018,7 @@ class PlayerDashboard(tk.Toplevel):
             long_link_exists = any(os.path.basename(eq) == long_link for eq in equipments_inventory)
             
             if long_link_exists:
-                print(f"DEBUG: [LINK_DOWNGRADE] ❌ {long_link} já existe no inventário - downgrade não aplicado")
+                print(f"DEBUG: [LINK_DOWNGRADE] ERROR: {long_link} já existe no inventário - downgrade não aplicado")
                 return
             
             # Definir contexto de LINK DOWNGRADE e router_id
@@ -10027,7 +10027,7 @@ class PlayerDashboard(tk.Toplevel):
             
             # Abrir inventário de equipamentos para seleção
             self._show_equipment_inventory_for_link_downgrade()
-            print("DEBUG: [LINK_DOWNGRADE] ✅ Inventário de equipamentos aberto para downgrade")
+            print("DEBUG: [LINK_DOWNGRADE] SUCCESS: Inventário de equipamentos aberto para downgrade")
         else:
             print(f"DEBUG: [LINK_DOWNGRADE] Nenhum Short Link {short_link} encontrado no inventário - não é possível fazer downgrade")
             print(f"DEBUG: [LINK_DOWNGRADE] LINK DOWNGRADE só funciona se houver {short_link} disponível no inventário")
@@ -10046,16 +10046,16 @@ class PlayerDashboard(tk.Toplevel):
         print("DEBUG: [LINK_DOWNGRADE_INVENTORY] Chamando show_inventory_matrix para equipments")
         self.show_inventory_matrix(["equipments"])
         
-        print("DEBUG: [LINK_DOWNGRADE_INVENTORY] ✅ Inventário específico para LINK DOWNGRADE criado")
+        print("DEBUG: [LINK_DOWNGRADE_INVENTORY] SUCCESS: Inventário específico para LINK DOWNGRADE criado")
 
     def _aplicar_add_router(self):
         """Abre página para escolher router gratuito (Equipment_1, Equipment_2, ou Equipment_3) da Store"""
         print("DEBUG: [ADD_ROUTER] Iniciando página de seleção de router")
         try:
             self._criar_router_selection_page()
-            print("DEBUG: [ADD_ROUTER] ✅ Página de seleção criada com sucesso")
+            print("DEBUG: [ADD_ROUTER] SUCCESS: Página de seleção criada com sucesso")
         except Exception as e:
-            print(f"DEBUG: [ADD_ROUTER] ❌ Erro ao criar página de seleção: {e}")
+            print(f"DEBUG: [ADD_ROUTER] ERROR: Erro ao criar página de seleção: {e}")
             import traceback
             print(f"DEBUG: [ADD_ROUTER] Traceback completo: {traceback.format_exc()}")
             # Fallback - retornar ao dashboard principal se houve erro
@@ -10095,9 +10095,9 @@ class PlayerDashboard(tk.Toplevel):
             
             # Mostrar inventário de equipamentos com callback específico para voltar a Actions/Events
             self._show_equipment_inventory_for_remove_router()
-            print("DEBUG: [REMOVE_ROUTER] ✅ Inventário de equipamentos aberto com sucesso")
+            print("DEBUG: [REMOVE_ROUTER] SUCCESS: Inventário de equipamentos aberto com sucesso")
         except Exception as e:
-            print(f"DEBUG: [REMOVE_ROUTER] ❌ Erro ao abrir inventário: {e}")
+            print(f"DEBUG: [REMOVE_ROUTER] ERROR: Erro ao abrir inventário: {e}")
             import traceback
             print(f"DEBUG: [REMOVE_ROUTER] Traceback completo: {traceback.format_exc()}")
             # Fallback - retornar ao dashboard principal se houve erro
@@ -10115,7 +10115,7 @@ class PlayerDashboard(tk.Toplevel):
         print("DEBUG: [REMOVE_ROUTER_INVENTORY] Chamando show_card_fullscreen_inventory para equipments")
         self.show_inventory_matrix(["equipments"], page=0)
         
-        print("DEBUG: [REMOVE_ROUTER_INVENTORY] ✅ Inventário específico para REMOVE ROUTER criado")
+        print("DEBUG: [REMOVE_ROUTER_INVENTORY] SUCCESS: Inventário específico para REMOVE ROUTER criado")
     
     def _criar_router_selection_page(self):
         """Cria página completa para seleção de router da Store (padrão igual Store_v2.py)"""
@@ -10318,7 +10318,7 @@ class PlayerDashboard(tk.Toplevel):
                                        state="disabled", command=self._confirmar_router_selection_page)
         self.confirm_button.pack()
         
-        print("DEBUG: [ADD_ROUTER] ✅ Página de seleção de router criada (padrão Store_v2.py)")
+        print("DEBUG: [ADD_ROUTER] SUCCESS: Página de seleção de router criada (padrão Store_v2.py)")
         
         # FORÇA ATUALIZAÇÃO FINAL DA INTERFACE
         self.update_idletasks()
@@ -10328,15 +10328,15 @@ class PlayerDashboard(tk.Toplevel):
         def verificar_pagina_final():
             if hasattr(self, '_in_router_selection_page') and self._in_router_selection_page:
                 widgets_count = len(self.winfo_children())
-                print(f"DEBUG: [ADD_ROUTER] ✅ Página ativa com {widgets_count} widgets após verificação final")
+                print(f"DEBUG: [ADD_ROUTER] SUCCESS: Página ativa com {widgets_count} widgets após verificação final")
                 
                 # FORÇAR REFRESH VISUAL ADICIONAL
                 self.lift()  # Traz a janela para frente
                 self.focus_force()  # Força foco
                 self.update_idletasks()
-                print("DEBUG: [ADD_ROUTER] ✅ Interface forçada para frente e atualizada")
+                print("DEBUG: [ADD_ROUTER] SUCCESS: Interface forçada para frente e atualizada")
             else:
-                print("DEBUG: [ADD_ROUTER] ⚠️ Flag de página perdida após verificação final")
+                print("DEBUG: [ADD_ROUTER] WARNING: Flag de página perdida após verificação final")
         
         # Verificação imediata + verificação com delay
         verificar_pagina_final()
@@ -10379,10 +10379,10 @@ class PlayerDashboard(tk.Toplevel):
         # Para cada base possível, testar se tem estrutura Equipments
         for base_path in possivel_bases:
             if not os.path.exists(base_path):
-                print(f"DEBUG: [ADD_ROUTER] ❌ Base não existe: {base_path}")
+                print(f"DEBUG: [ADD_ROUTER] ERROR: Base não existe: {base_path}")
                 continue
                 
-            print(f"DEBUG: [ADD_ROUTER] ✅ Testando base: {base_path}")
+            print(f"DEBUG: [ADD_ROUTER] SUCCESS: Testando base: {base_path}")
             
             # Verificar se tem diretório Equipments (teste múltiplas variações)
             # CORREÇÃO: Testar tanto "Equipments" quanto "equipments" para Raspberry Pi
@@ -10396,25 +10396,25 @@ class PlayerDashboard(tk.Toplevel):
             for variation in equipments_variations:
                 if os.path.exists(variation):
                     equipments_base = variation
-                    print(f"DEBUG: [ADD_ROUTER] ✅ Encontrou Equipments: {equipments_base}")
+                    print(f"DEBUG: [ADD_ROUTER] SUCCESS: Encontrou Equipments: {equipments_base}")
                     break
                 else:
-                    print(f"DEBUG: [ADD_ROUTER] ❌ Sem Equipments: {variation}")
+                    print(f"DEBUG: [ADD_ROUTER] ERROR: Sem Equipments: {variation}")
             
             if not equipments_base:
-                print(f"DEBUG: [ADD_ROUTER] ❌ Nenhuma variação de Equipments encontrada")
+                print(f"DEBUG: [ADD_ROUTER] ERROR: Nenhuma variação de Equipments encontrada")
                 continue
                 
-            print(f"DEBUG: [ADD_ROUTER] ✅ Encontrou Equipments: {equipments_base}")
+            print(f"DEBUG: [ADD_ROUTER] SUCCESS: Encontrou Equipments: {equipments_base}")
             
             # Testar cada cor para encontrar os routers
             for cor in ["Red", "Blue", "Green", "Yellow"]:
                 cor_dir = os.path.join(equipments_base, cor)
                 if not os.path.exists(cor_dir):
-                    print(f"DEBUG: [ADD_ROUTER] ❌ Cor {cor} não existe: {cor_dir}")
+                    print(f"DEBUG: [ADD_ROUTER] ERROR: Cor {cor} não existe: {cor_dir}")
                     continue
                     
-                print(f"DEBUG: [ADD_ROUTER] ✅ Testando cor {cor}: {cor_dir}")
+                print(f"DEBUG: [ADD_ROUTER] SUCCESS: Testando cor {cor}: {cor_dir}")
                 
                 # Verificar se tem todos os 3 routers nesta cor
                 routers_nesta_cor = []
@@ -10422,14 +10422,14 @@ class PlayerDashboard(tk.Toplevel):
                     router_path = os.path.join(cor_dir, router_filename)
                     if os.path.exists(router_path):
                         routers_nesta_cor.append(router_path)
-                        print(f"DEBUG: [ADD_ROUTER] ✅ Router encontrado: {router_path}")
+                        print(f"DEBUG: [ADD_ROUTER] SUCCESS: Router encontrado: {router_path}")
                     else:
-                        print(f"DEBUG: [ADD_ROUTER] ❌ Router missing: {router_path}")
+                        print(f"DEBUG: [ADD_ROUTER] ERROR: Router missing: {router_path}")
                 
                 # Se encontramos todos os 3, usar esta cor
                 if len(routers_nesta_cor) == 3:
                     equipments_encontrados = routers_nesta_cor
-                    print(f"DEBUG: [ADD_ROUTER] 🎉 SUCESSO! Todos os 3 routers encontrados em {cor_dir}")
+                    print(f"DEBUG: [ADD_ROUTER] CELEBRATION: SUCESSO! Todos os 3 routers encontrados em {cor_dir}")
                     break
             
             # Se encontramos, parar de procurar outras bases
@@ -10438,16 +10438,16 @@ class PlayerDashboard(tk.Toplevel):
         
         # FALLBACK: Se ainda não encontramos, criar placeholders visuais
         if not equipments_encontrados:
-            print("DEBUG: [ADD_ROUTER] ⚠️ NENHUM ROUTER ENCONTRADO - Usando placeholders")
+            print("DEBUG: [ADD_ROUTER] WARNING: NENHUM ROUTER ENCONTRADO - Usando placeholders")
             
             # Usar imagens de placeholder ou criar caminhos virtuais
             placeholder_base = "/tmp" if is_raspberry else os.getcwd()
             for i, router_filename in enumerate(routers_add_router, 1):
                 placeholder_path = f"PLACEHOLDER_ROUTER_{i}"
                 equipments_encontrados.append(placeholder_path)
-                print(f"DEBUG: [ADD_ROUTER] 📝 Placeholder criado: {placeholder_path}")
+                print(f"DEBUG: [ADD_ROUTER] NOTE: Placeholder criado: {placeholder_path}")
         
-        print(f"DEBUG: [ADD_ROUTER] 🏁 RESULTADO FINAL:")
+        print(f"DEBUG: [ADD_ROUTER] FINISH: RESULTADO FINAL:")
         print(f"DEBUG: [ADD_ROUTER]   Routers para ADD ROUTER: {len(equipments_encontrados)}")
         for i, router in enumerate(equipments_encontrados, 1):
             print(f"DEBUG: [ADD_ROUTER]   {i}. {router}")
@@ -10586,7 +10586,7 @@ class PlayerDashboard(tk.Toplevel):
             self.inventario["equipments"] = []
             
         self.inventario["equipments"].append(router_para_inventario)
-        print(f"DEBUG: [ADD_ROUTER] ✅ Router adicionado gratuitamente ao inventário!")
+        print(f"DEBUG: [ADD_ROUTER] SUCCESS: Router adicionado gratuitamente ao inventário!")
         print(f"DEBUG: [ADD_ROUTER] Inventário equipments agora tem: {len(self.inventario['equipments'])} itens")
         
         # Voltar ao PlayerDashboard
@@ -12698,7 +12698,7 @@ class PlayerDashboard(tk.Toplevel):
                     print(f"DEBUG: [FULLSCREEN] Verificando restrição Activity↔Activity - Challenges no inventário: {challenges_no_inventario}")
                     if challenges_no_inventario > 0:
                         pode_fazer_troca_activity = False
-                        print(f"DEBUG: [FULLSCREEN] ❌ Botão Switch carrossel NÃO criado - Restrição Activity↔Activity ativa (Challenges no inventário)")
+                        print(f"DEBUG: [FULLSCREEN] ERROR: Botão Switch carrossel NÃO criado - Restrição Activity↔Activity ativa (Challenges no inventário)")
                 
                 if next_phase_active and has_valid_positions and pode_fazer_troca_activity:
                     try:
@@ -12712,25 +12712,25 @@ class PlayerDashboard(tk.Toplevel):
                             if carta_tipo == "activities":
                                 # Activities: Switch no canto superior direito
                                 btn_switch_carrossel.place(relx=0.98, rely=0, anchor="ne")
-                                print(f"DEBUG: [FULLSCREEN] ✅ Botão Switch Activity posicionado no canto superior direito")
+                                print(f"DEBUG: [FULLSCREEN] SUCCESS: Botão Switch Activity posicionado no canto superior direito")
                             else:  # carta_tipo == "challenges"
                                 # Challenges: Switch no canto inferior direito (máximo canto possível)
                                 btn_switch_carrossel.place(relx=1.0, rely=1.0, anchor="se")
-                                print(f"DEBUG: [FULLSCREEN] ✅ Botão Switch Challenge posicionado no canto inferior direito (máximo canto)")
+                                print(f"DEBUG: [FULLSCREEN] SUCCESS: Botão Switch Challenge posicionado no canto inferior direito (máximo canto)")
                             
-                            print(f"DEBUG: [FULLSCREEN] ✅ Botão Switch carrossel CRIADO - Next Phase ativo + posições válidas + sem restrição Activity↔Activity")
+                            print(f"DEBUG: [FULLSCREEN] SUCCESS: Botão Switch carrossel CRIADO - Next Phase ativo + posições válidas + sem restrição Activity↔Activity")
                         else:
-                            print(f"DEBUG: [FULLSCREEN] ❌ Botão Switch carrossel NÃO criado - imagem não encontrada em {switch_img_path}")
+                            print(f"DEBUG: [FULLSCREEN] ERROR: Botão Switch carrossel NÃO criado - imagem não encontrada em {switch_img_path}")
                     except Exception as e:
                         btn_switch_carrossel = None
-                        print(f"DEBUG: [FULLSCREEN] ❌ Botão Switch carrossel NÃO criado - erro ao carregar imagem: {e}")
+                        print(f"DEBUG: [FULLSCREEN] ERROR: Botão Switch carrossel NÃO criado - erro ao carregar imagem: {e}")
                 else:
                     if not next_phase_active:
-                        print(f"DEBUG: [FULLSCREEN] ❌ Botão Switch carrossel NÃO criado - Next Phase NÃO ATIVO")
+                        print(f"DEBUG: [FULLSCREEN] ERROR: Botão Switch carrossel NÃO criado - Next Phase NÃO ATIVO")
                     elif not has_valid_positions:
-                        print(f"DEBUG: [FULLSCREEN] ❌ Botão Switch carrossel NÃO criado - SEM posições válidas no carrossel")
+                        print(f"DEBUG: [FULLSCREEN] ERROR: Botão Switch carrossel NÃO criado - SEM posições válidas no carrossel")
                     elif carta_tipo == "activities" and not pode_fazer_troca_activity:
-                        print(f"DEBUG: [FULLSCREEN] ❌ Botão Switch carrossel NÃO criado - Restrição Activity↔Activity (Challenges no inventário)")
+                        print(f"DEBUG: [FULLSCREEN] ERROR: Botão Switch carrossel NÃO criado - Restrição Activity↔Activity (Challenges no inventário)")
                 
                 # Configurar comando do botão Switch
                 def aceitar_carta():
@@ -12801,7 +12801,7 @@ class PlayerDashboard(tk.Toplevel):
                         self._mostrar_overlay_quit_challenge(carta_path)
                     
                     btn_quit_challenge.config(command=mostrar_confirmacao_quit)
-                    print(f"DEBUG: [FULLSCREEN] ✅ Botão Quit Challenge criado no canto superior direito")
+                    print(f"DEBUG: [FULLSCREEN] SUCCESS: Botão Quit Challenge criado no canto superior direito")
         
         # Para Users, Equipments e Services, adicionar botão de ativação/desativação
         # IMPORTANTE: APENAS após Next Phase ser ativado
@@ -14384,7 +14384,7 @@ class PlayerDashboard(tk.Toplevel):
                 medium_router_exists = any(os.path.basename(eq) == medium_router for eq in equipments_inventory)
                 
                 if medium_router_exists:
-                    print(f"DEBUG: [ROUTER_UPGRADE_CONFIRM] ❌ {medium_router} já existe no inventário - upgrade não aplicado")
+                    print(f"DEBUG: [ROUTER_UPGRADE_CONFIRM] ERROR: {medium_router} já existe no inventário - upgrade não aplicado")
                     # Limpar flags e voltar à página de inventário de Equipments
                     self._in_router_upgrade_context = False
                     self._router_upgrade_target_id = None
@@ -14431,7 +14431,7 @@ class PlayerDashboard(tk.Toplevel):
                         print(f"DEBUG: [ROUTER_UPGRADE] Botão Back REABILITADO após clicar Ok")
                     
                     # Voltar à página de inventário de Equipments
-                    print(f"DEBUG: [ROUTER_UPGRADE_CONFIRM] ✅ Router Upgrade aplicado com sucesso!")
+                    print(f"DEBUG: [ROUTER_UPGRADE_CONFIRM] SUCCESS: Router Upgrade aplicado com sucesso!")
                     print(f"DEBUG: [ROUTER_UPGRADE_CONFIRM] Voltando à página de inventário de Equipments")
                     self._voltar_ao_inventario_equipments(tipos, page)
                 else:
@@ -14557,7 +14557,7 @@ class PlayerDashboard(tk.Toplevel):
                 self._in_router_downgrade_context = False
                 self._router_downgrade_target_id = None
                 
-                print(f"DEBUG: [ROUTER_DOWNGRADE_CONFIRM] ✅ Router Downgrade aplicado com sucesso!")
+                print(f"DEBUG: [ROUTER_DOWNGRADE_CONFIRM] SUCCESS: Router Downgrade aplicado com sucesso!")
                 print(f"DEBUG: [ROUTER_DOWNGRADE_CONFIRM] Voltando ao inventário normal de equipamentos")
                 
                 # CORREÇÃO: Voltar ao inventário normal de equipments (não específico para downgrade)
@@ -14922,7 +14922,7 @@ class PlayerDashboard(tk.Toplevel):
                 short_link_exists = any(os.path.basename(eq) == short_link for eq in equipments_inventory)
                 
                 if short_link_exists:
-                    print(f"DEBUG: [LINK_UPGRADE_CONFIRM] ❌ {short_link} já existe no inventário - upgrade não aplicado")
+                    print(f"DEBUG: [LINK_UPGRADE_CONFIRM] ERROR: {short_link} já existe no inventário - upgrade não aplicado")
                     # Limpar flags e voltar à página de inventário de Equipments
                     self._in_link_upgrade_context = False
                     self._link_upgrade_target_id = None
@@ -14964,7 +14964,7 @@ class PlayerDashboard(tk.Toplevel):
                         print(f"DEBUG: [LINK_UPGRADE] Botão Back REABILITADO após clicar Ok")
                     
                     # Voltar à página de inventário de Equipments
-                    print(f"DEBUG: [LINK_UPGRADE_CONFIRM] ✅ Link Upgrade aplicado com sucesso!")
+                    print(f"DEBUG: [LINK_UPGRADE_CONFIRM] SUCCESS: Link Upgrade aplicado com sucesso!")
                     print(f"DEBUG: [LINK_UPGRADE_CONFIRM] Voltando à página de inventário de Equipments")
                     self._voltar_ao_inventario_equipments(tipos, page)
                 else:
@@ -15072,7 +15072,7 @@ class PlayerDashboard(tk.Toplevel):
                 long_link_exists = any(os.path.basename(eq) == long_link for eq in equipments_inventory)
                 
                 if long_link_exists:
-                    print(f"DEBUG: [LINK_DOWNGRADE_CONFIRM] ❌ {long_link} já existe no inventário - downgrade não aplicado")
+                    print(f"DEBUG: [LINK_DOWNGRADE_CONFIRM] ERROR: {long_link} já existe no inventário - downgrade não aplicado")
                     # Limpar flags e voltar à página de inventário de Equipments
                     self._in_link_downgrade_context = False
                     self._link_downgrade_target_id = None
@@ -15114,7 +15114,7 @@ class PlayerDashboard(tk.Toplevel):
                         print(f"DEBUG: [LINK_DOWNGRADE] Botão Back REABILITADO após clicar Ok")
                     
                     # Voltar à página de inventário de Equipments
-                    print(f"DEBUG: [LINK_DOWNGRADE_CONFIRM] ✅ Link Downgrade aplicado com sucesso!")
+                    print(f"DEBUG: [LINK_DOWNGRADE_CONFIRM] SUCCESS: Link Downgrade aplicado com sucesso!")
                     print(f"DEBUG: [LINK_DOWNGRADE_CONFIRM] Voltando à página de inventário de Equipments")
                     self._voltar_ao_inventario_equipments(tipos, page)
                 else:
@@ -15224,7 +15224,7 @@ class PlayerDashboard(tk.Toplevel):
                 botao_seta_visivel = True
                 print(f"DEBUG: [FULLSCREEN] Botão seta estava visível (flag genérica)")
         else:
-            print(f"DEBUG: [FULLSCREEN] ⚠️ Estado da dashboard não encontrado - usando detecção de widgets atual")
+            print(f"DEBUG: [FULLSCREEN] WARNING: Estado da dashboard não encontrado - usando detecção de widgets atual")
             # Fallback para detecção atual se não temos estado salvo
             botoes_plus_visiveis = {
                 'rxd_visivel': hasattr(self, '_btn_plus_rxd') and self._btn_plus_rxd is not None and self._btn_plus_rxd.winfo_exists(),
@@ -15350,26 +15350,26 @@ class PlayerDashboard(tk.Toplevel):
                     # NOVA FUNCIONALIDADE: Mover switch para canto inferior direito se é Challenge (máximo canto)
                     if is_challenge_card:
                         switch_btn.place(relx=1.0, rely=1.0, anchor="se")  # Canto inferior direito (máximo canto possível)
-                        print(f"DEBUG: [CARROSSEL FULLSCREEN] ✅ Botão Switch posicionado no canto inferior direito (Challenge - máximo canto)")
+                        print(f"DEBUG: [CARROSSEL FULLSCREEN] SUCCESS: Botão Switch posicionado no canto inferior direito (Challenge - máximo canto)")
                     else:
                         switch_btn.place(relx=0.98, rely=0, anchor="ne")  # Canto superior direito (Activity)
-                        print(f"DEBUG: [CARROSSEL FULLSCREEN] ✅ Botão Switch posicionado no canto superior direito (Activity)")
+                        print(f"DEBUG: [CARROSSEL FULLSCREEN] SUCCESS: Botão Switch posicionado no canto superior direito (Activity)")
                 else:
-                    print(f"DEBUG: [CARROSSEL FULLSCREEN] ❌ Botão Switch NÃO criado - imagem switch_card.png não encontrada em {switch_img_path}")
+                    print(f"DEBUG: [CARROSSEL FULLSCREEN] ERROR: Botão Switch NÃO criado - imagem switch_card.png não encontrada em {switch_img_path}")
             except Exception as e:
-                print(f"DEBUG: [CARROSSEL FULLSCREEN] ❌ Botão Switch NÃO criado - erro ao carregar imagem: {e}")
+                print(f"DEBUG: [CARROSSEL FULLSCREEN] ERROR: Botão Switch NÃO criado - erro ao carregar imagem: {e}")
         else:
             if not has_available_cards_for_switch:
                 if is_challenge_card:
-                    print(f"DEBUG: [CARROSSEL FULLSCREEN] ❌ Botão Switch NÃO criado - Não há Activities no inventário para trocar")
+                    print(f"DEBUG: [CARROSSEL FULLSCREEN] ERROR: Botão Switch NÃO criado - Não há Activities no inventário para trocar")
                 elif is_activity_card:
-                    print(f"DEBUG: [CARROSSEL FULLSCREEN] ❌ Botão Switch NÃO criado - Não há Challenges no inventário para trocar")
+                    print(f"DEBUG: [CARROSSEL FULLSCREEN] ERROR: Botão Switch NÃO criado - Não há Challenges no inventário para trocar")
                 else:
-                    print(f"DEBUG: [CARROSSEL FULLSCREEN] ❌ Botão Switch NÃO criado - Carta não é Activity nem Challenge")
+                    print(f"DEBUG: [CARROSSEL FULLSCREEN] ERROR: Botão Switch NÃO criado - Carta não é Activity nem Challenge")
             elif is_challenge_card and next_phase_active:
-                print(f"DEBUG: [CARROSSEL FULLSCREEN] ❌ Botão Switch NÃO criado - Challenge não pode ser trocada no Next Phase")
+                print(f"DEBUG: [CARROSSEL FULLSCREEN] ERROR: Botão Switch NÃO criado - Challenge não pode ser trocada no Next Phase")
             else:
-                print(f"DEBUG: [CARROSSEL FULLSCREEN] ❌ Botão Switch NÃO criado - condições não atendidas")
+                print(f"DEBUG: [CARROSSEL FULLSCREEN] ERROR: Botão Switch NÃO criado - condições não atendidas")
         
         # Configurar comando do botão Switch (abrir inventário para troca)
         def abrir_inventario_troca():
@@ -15378,25 +15378,25 @@ class PlayerDashboard(tk.Toplevel):
             
             # Verificar se a carta atual não é uma carta virada para baixo
             if "back_card" in os.path.basename(carta_path).lower():
-                print("DEBUG: [abrir_inventario_troca] ❌ Não é possível trocar uma carta virada para baixo")
+                print("DEBUG: [abrir_inventario_troca] ERROR: Não é possível trocar uma carta virada para baixo")
                 return
             
             # NOVA VERIFICAÇÃO: Só permitir troca se for Activity
             carta_basename = os.path.basename(carta_path).lower()
             if "challenge" in carta_basename:
-                print("DEBUG: [abrir_inventario_troca] ❌ Challenges do carrossel não podem ser trocadas no Next Phase")
+                print("DEBUG: [abrir_inventario_troca] ERROR: Challenges do carrossel não podem ser trocadas no Next Phase")
                 return
             
             if "activity" not in carta_basename:
-                print("DEBUG: [abrir_inventario_troca] ❌ Só Activities podem ser trocadas")
+                print("DEBUG: [abrir_inventario_troca] ERROR: Só Activities podem ser trocadas")
                 return
             
             # Verificar se Next Phase está ativo
             if not getattr(self, '_next_phase_active', False):
-                print("DEBUG: [abrir_inventario_troca] ❌ Troca só permitida durante Next Phase")
+                print("DEBUG: [abrir_inventario_troca] ERROR: Troca só permitida durante Next Phase")
                 return
             
-            print(f"DEBUG: [abrir_inventario_troca] ✅ Verificações passaram - abrindo inventário para troca")
+            print(f"DEBUG: [abrir_inventario_troca] SUCCESS: Verificações passaram - abrindo inventário para troca")
             
             # Guardar a carta atual do carrossel para troca
             self.carta_carrossel_para_troca = carta_path
@@ -15405,13 +15405,13 @@ class PlayerDashboard(tk.Toplevel):
                 self.carrossel_idx_selecao = self.cards.index(carta_path)
                 print(f"DEBUG: [abrir_inventario_troca] Carta encontrada no carrossel índice: {self.carrossel_idx_selecao}")
             except ValueError:
-                print(f"DEBUG: [abrir_inventario_troca] ⚠️  Carta não encontrada no carrossel - usando índice 0")
+                print(f"DEBUG: [abrir_inventario_troca] WARNING:  Carta não encontrada no carrossel - usando índice 0")
                 self.carrossel_idx_selecao = 0
             self.show_inventory_matrix_carrossel(["activities", "challenges"])
         
         if switch_btn is not None:
             switch_btn.config(command=abrir_inventario_troca)
-            print(f"DEBUG: [CARROSSEL FULLSCREEN] ✅ Botão Switch configurado para abrir inventário de troca")
+            print(f"DEBUG: [CARROSSEL FULLSCREEN] SUCCESS: Botão Switch configurado para abrir inventário de troca")
         
         # NOVA FUNCIONALIDADE: Botão Quit Challenge (canto superior direito, vermelho com unicode ✓)
         # CORREÇÃO: Se Challenge na Final Phase, mostrar botão completion em vez de quit
@@ -15465,7 +15465,7 @@ class PlayerDashboard(tk.Toplevel):
                         print(f"DEBUG: [CARROSSEL FULLSCREEN] Registo encontrado - Start turn: {start_turn}")
                         print(f"DEBUG: [CARROSSEL FULLSCREEN] Cálculo: {self._current_turn_number} - {start_turn} + 1 = {turns_elapsed}")
                     else:
-                        print(f"DEBUG: [CARROSSEL FULLSCREEN] ⚠️ SEM REGISTO DE INÍCIO - usando turno padrão")
+                        print(f"DEBUG: [CARROSSEL FULLSCREEN] WARNING: SEM REGISTO DE INÍCIO - usando turno padrão")
                     
                     # EXEMPLOS ESPECÍFICOS PARA DEBUG
                     if "Challenge_12" in os.path.basename(carta_path) and n_turns == 2:
@@ -15494,7 +15494,7 @@ class PlayerDashboard(tk.Toplevel):
         print(f"DEBUG: [CARROSSEL FULLSCREEN] === BOTÕES CHALLENGE REMOVIDOS ===")
         print(f"DEBUG: [CARROSSEL FULLSCREEN] is_challenge_card: {is_challenge_card}")
         print(f"DEBUG: [CARROSSEL FULLSCREEN] challenge_na_final_phase: {challenge_na_final_phase}")
-        print(f"DEBUG: [CARROSSEL FULLSCREEN] ✅ Todos os botões Challenge foram removidos do fullscreen")
+        print(f"DEBUG: [CARROSSEL FULLSCREEN] SUCCESS: Todos os botões Challenge foram removidos do fullscreen")
 
     # --- Carrossel: começa vazio e só adiciona Activities/Challenges aceites ---
     def adicionar_carta_carrossel(self, carta_path, carta_tipo):
@@ -15610,11 +15610,11 @@ class PlayerDashboard(tk.Toplevel):
             print(f"DEBUG: [_has_valid_carousel_positions] Pos {i}: '{carta_basename}' -> back_card: {is_back_card}, req_user_id: {required_user_id}, has_user: {has_user_id}")
             
             if is_back_card and has_user_id:
-                print(f"DEBUG: [_has_valid_carousel_positions] ✅ Posição {i} VÁLIDA para User ID {required_user_id}")
+                print(f"DEBUG: [_has_valid_carousel_positions] SUCCESS: Posição {i} VÁLIDA para User ID {required_user_id}")
                 valid_positions_found = True
         
         if not valid_positions_found:
-            print("DEBUG: [_has_valid_carousel_positions] ❌ NENHUMA posição válida no carrossel")
+            print("DEBUG: [_has_valid_carousel_positions] ERROR: NENHUMA posição válida no carrossel")
         
         print(f"DEBUG: [_has_valid_carousel_positions] === RESULTADO: {valid_positions_found} ===")
         return valid_positions_found
@@ -16053,21 +16053,21 @@ class PlayerDashboard(tk.Toplevel):
                             self.aceitar_carta_carrossel(carta_path, tipos, page)
                     
                     btn_switch_carrossel.config(command=switch_com_detecao_substituicao)
-                    print(f"DEBUG: [CARROSSEL] ✅ Botão Switch principal CRIADO - condições atendidas")
+                    print(f"DEBUG: [CARROSSEL] SUCCESS: Botão Switch principal CRIADO - condições atendidas")
                 else:
                     btn_switch_carrossel = None
-                    print(f"DEBUG: [CARROSSEL] ❌ Botão Switch principal NÃO criado - imagem não encontrada em {switch_img_path}")
+                    print(f"DEBUG: [CARROSSEL] ERROR: Botão Switch principal NÃO criado - imagem não encontrada em {switch_img_path}")
             except Exception as e:
                 btn_switch_carrossel = None
-                print(f"DEBUG: [CARROSSEL] ❌ Botão Switch principal NÃO criado - erro ao carregar imagem: {e}")
+                print(f"DEBUG: [CARROSSEL] ERROR: Botão Switch principal NÃO criado - erro ao carregar imagem: {e}")
         else:
             btn_switch_carrossel = None
             if activities_vendavel:
-                print(f"DEBUG: [CARROSSEL] ❌ Botão Switch principal NÃO criado - Activities vendável irá usar posição para botão ✔")
+                print(f"DEBUG: [CARROSSEL] ERROR: Botão Switch principal NÃO criado - Activities vendável irá usar posição para botão ✔")
             elif not next_phase_active:
-                print(f"DEBUG: [CARROSSEL] ❌ Botão Switch principal NÃO criado - Next Phase NÃO ATIVO")
+                print(f"DEBUG: [CARROSSEL] ERROR: Botão Switch principal NÃO criado - Next Phase NÃO ATIVO")
             elif not has_valid_positions:
-                print(f"DEBUG: [CARROSSEL] ❌ Botão Switch principal NÃO criado - SEM posições válidas no carrossel")
+                print(f"DEBUG: [CARROSSEL] ERROR: Botão Switch principal NÃO criado - SEM posições válidas no carrossel")
         
         # Adicionar lógica de venda (igual ao show_card_fullscreen_inventory)
         pode_vender = False
@@ -16183,19 +16183,19 @@ class PlayerDashboard(tk.Toplevel):
                             btn_switch_adicional = tk.Button(self, image=switch_img, bg="#FF9800", borderwidth=0, highlightthickness=0, cursor="hand2", activebackground="#E68900")
                             btn_switch_adicional.image = switch_img  # Manter referência
                             btn_switch_adicional.place(relx=1, rely=1, anchor="se")
-                            print(f"DEBUG: [CARROSSEL] ✅ Botão Switch adicional CRIADO - Next Phase ativo + posições válidas")
+                            print(f"DEBUG: [CARROSSEL] SUCCESS: Botão Switch adicional CRIADO - Next Phase ativo + posições válidas")
                         else:
                             btn_switch_adicional = None
-                            print(f"DEBUG: [CARROSSEL] ❌ Botão Switch adicional NÃO criado - imagem não encontrada em {switch_img_path}")
+                            print(f"DEBUG: [CARROSSEL] ERROR: Botão Switch adicional NÃO criado - imagem não encontrada em {switch_img_path}")
                     except Exception as e:
                         btn_switch_adicional = None
-                        print(f"DEBUG: [CARROSSEL] ❌ Botão Switch adicional NÃO criado - erro ao carregar imagem: {e}")
+                        print(f"DEBUG: [CARROSSEL] ERROR: Botão Switch adicional NÃO criado - erro ao carregar imagem: {e}")
                 else:
                     btn_switch_adicional = None
                     if not next_phase_active:
-                        print(f"DEBUG: [CARROSSEL] ❌ Botão Switch adicional NÃO criado - Next Phase NÃO ATIVO")
+                        print(f"DEBUG: [CARROSSEL] ERROR: Botão Switch adicional NÃO criado - Next Phase NÃO ATIVO")
                     elif not has_valid_positions:
-                        print(f"DEBUG: [CARROSSEL] ❌ Botão Switch adicional NÃO criado - SEM posições válidas no carrossel")
+                        print(f"DEBUG: [CARROSSEL] ERROR: Botão Switch adicional NÃO criado - SEM posições válidas no carrossel")
                 
                 def switch_action():
                     # CORREÇÃO: Aplicar a mesma lógica de detecção de progresso
@@ -16261,7 +16261,7 @@ class PlayerDashboard(tk.Toplevel):
                 self._mostrar_overlay_quit_challenge(carta_path)
             
             btn_quit_challenge.config(command=mostrar_confirmacao_quit)
-            print(f"DEBUG: [CARROSSEL_INVENTARIO] ✅ Botão Quit Challenge criado no canto superior direito")
+            print(f"DEBUG: [CARROSSEL_INVENTARIO] SUCCESS: Botão Quit Challenge criado no canto superior direito")
 
     def aceitar_carta_carrossel(self, carta_path, tipos, page=0):
         # NOVA RESTRIÇÃO: Verificar se é tentativa de trocar Challenge por outra carta que não seja Activity
@@ -16644,11 +16644,11 @@ class PlayerDashboard(tk.Toplevel):
         # MESMO que haja posições vazias
         if is_activity_card and challenges_no_inventario > 0:
             should_show_switch = False
-            print(f"DEBUG: [NEXT PHASE] ❌ Activity NÃO pode mostrar switch - há {challenges_no_inventario} Challenges no inventário (restrição Activity→Activity sempre aplicada)")
+            print(f"DEBUG: [NEXT PHASE] ERROR: Activity NÃO pode mostrar switch - há {challenges_no_inventario} Challenges no inventário (restrição Activity→Activity sempre aplicada)")
         elif has_empty_accessible_positions:
             # Se há posições vazias acessíveis E não é Activity com Challenges, permitir
             should_show_switch = True
-            print(f"DEBUG: [NEXT PHASE] ✅ Há posições vazias acessíveis - botão switch permitido (colocação)")
+            print(f"DEBUG: [NEXT PHASE] SUCCESS: Há posições vazias acessíveis - botão switch permitido (colocação)")
         else:
             # Se não há posições vazias, verificar se há cartas para trocar
             if is_activity_card:
@@ -16666,9 +16666,9 @@ class PlayerDashboard(tk.Toplevel):
                 # Activity pode trocar se há pelo menos uma outra Activity (total > 1)
                 if total_activities > 1:
                     should_show_switch = True
-                    print(f"DEBUG: [NEXT PHASE] ✅ Activity com {total_activities} Activities disponíveis (inventário + carrossel) - botão switch permitido (troca Activity→Activity)")
+                    print(f"DEBUG: [NEXT PHASE] SUCCESS: Activity com {total_activities} Activities disponíveis (inventário + carrossel) - botão switch permitido (troca Activity→Activity)")
                 else:
-                    print(f"DEBUG: [NEXT PHASE] ❌ Activity sem outras Activities para trocar (total: {total_activities}) - botão switch NÃO criado")
+                    print(f"DEBUG: [NEXT PHASE] ERROR: Activity sem outras Activities para trocar (total: {total_activities}) - botão switch NÃO criado")
             elif is_challenge_card:
                 # CORREÇÃO: Challenge pode trocar com outro Challenge do inventário OU com Challenge do carrossel
                 # Contar Challenges totais (inventário + carrossel)
@@ -16684,11 +16684,11 @@ class PlayerDashboard(tk.Toplevel):
                 # Challenge pode trocar se há pelo menos um outro Challenge (total > 1)
                 if total_challenges > 1:
                     should_show_switch = True
-                    print(f"DEBUG: [NEXT PHASE] ✅ Challenge com {total_challenges} Challenges disponíveis (inventário + carrossel) - botão switch permitido (troca)")
+                    print(f"DEBUG: [NEXT PHASE] SUCCESS: Challenge com {total_challenges} Challenges disponíveis (inventário + carrossel) - botão switch permitido (troca)")
                 else:
-                    print(f"DEBUG: [NEXT PHASE] ❌ Challenge sem outros Challenges para trocar (total: {total_challenges}) - botão switch NÃO criado")
+                    print(f"DEBUG: [NEXT PHASE] ERROR: Challenge sem outros Challenges para trocar (total: {total_challenges}) - botão switch NÃO criado")
             else:
-                print(f"DEBUG: [NEXT PHASE] ❌ Carta não é Activity nem Challenge - botão switch NÃO criado")
+                print(f"DEBUG: [NEXT PHASE] ERROR: Carta não é Activity nem Challenge - botão switch NÃO criado")
         
         # Só criar botão switch se Final Phase não estiver ativo E se houver cartas disponíveis para trocar
         if not final_phase_active and should_show_switch:
@@ -16793,14 +16793,14 @@ class PlayerDashboard(tk.Toplevel):
                 self._mostrar_overlay_quit_challenge(carta_path)
             
             btn_quit_challenge.config(command=mostrar_confirmacao_quit)
-            print(f"DEBUG: [NEXT PHASE] ✅ Botão Quit Challenge criado no canto superior direito")
+            print(f"DEBUG: [NEXT PHASE] SUCCESS: Botão Quit Challenge criado no canto superior direito")
         else:
             if next_phase_active:
-                print(f"DEBUG: [NEXT PHASE] ❌ Botão Quit Challenge NÃO criado - Next Phase está ativo")
+                print(f"DEBUG: [NEXT PHASE] ERROR: Botão Quit Challenge NÃO criado - Next Phase está ativo")
             elif final_phase_active:
-                print(f"DEBUG: [NEXT PHASE] ❌ Botão Quit Challenge NÃO criado - Final Phase está ativo")
+                print(f"DEBUG: [NEXT PHASE] ERROR: Botão Quit Challenge NÃO criado - Final Phase está ativo")
             elif not is_challenge_card:
-                print(f"DEBUG: [NEXT PHASE] ❌ Botão Quit Challenge NÃO criado - não é carta Challenge")
+                print(f"DEBUG: [NEXT PHASE] ERROR: Botão Quit Challenge NÃO criado - não é carta Challenge")
         
         print("DEBUG: Fullscreen Next Phase configurado - apenas X disponível durante Final Phase")
 
@@ -16973,7 +16973,7 @@ class PlayerDashboard(tk.Toplevel):
         
         # CORREÇÃO PROBLEMA 1: Verificar se Challenge já foi processado para evitar duplo processamento
         if hasattr(self, '_challenge_sendo_processado') and self._challenge_sendo_processado == carta_challenge_path:
-            print(f"DEBUG: [processar_challenge_aceite] ⚠️  Challenge já está sendo processado - ignorando chamada duplicada")
+            print(f"DEBUG: [processar_challenge_aceite] WARNING:  Challenge já está sendo processado - ignorando chamada duplicada")
             return
         
         # Marcar Challenge como sendo processado
@@ -17092,7 +17092,7 @@ class PlayerDashboard(tk.Toplevel):
                     "Rxd": 0,                          # Sempre 0 para nova carta
                     "Lost": 0                          # Sempre 0 para nova carta
                 }
-                print(f"DEBUG: [_substituir_activity_por_challenge] ✅ card_stats[{idx_carrossel}] resetado:")
+                print(f"DEBUG: [_substituir_activity_por_challenge] SUCCESS: card_stats[{idx_carrossel}] resetado:")
                 print(f"DEBUG: [_substituir_activity_por_challenge]   To send: {challenge_message_size}")
                 print(f"DEBUG: [_substituir_activity_por_challenge]   Rxd: 0")
                 print(f"DEBUG: [_substituir_activity_por_challenge]   Lost: 0")
@@ -17105,19 +17105,19 @@ class PlayerDashboard(tk.Toplevel):
                     self.progress_bars["To send"].configure(maximum=challenge_message_size)
                     self.progress_bars["To send"].set(challenge_message_size)  # Barra 100% cheia
                     self.progress_labels["To send"].config(text=str(challenge_message_size))
-                    print(f"DEBUG: [_substituir_activity_por_challenge] ✅ Barra To send: {challenge_message_size}/{challenge_message_size}")
+                    print(f"DEBUG: [_substituir_activity_por_challenge] SUCCESS: Barra To send: {challenge_message_size}/{challenge_message_size}")
                 
                 # Resetar Rxd para 0
                 if "Rxd" in self.progress_bars:
                     self.progress_bars["Rxd"].set(0)
                     self.progress_labels["Rxd"].config(text="0")
-                    print(f"DEBUG: [_substituir_activity_por_challenge] ✅ Barra Rxd: 0")
+                    print(f"DEBUG: [_substituir_activity_por_challenge] SUCCESS: Barra Rxd: 0")
                 
                 # Resetar Lost para 0
                 if "Lost" in self.progress_bars:
                     self.progress_bars["Lost"].set(0)
                     self.progress_labels["Lost"].config(text="0")
-                    print(f"DEBUG: [_substituir_activity_por_challenge] ✅ Barra Lost: 0")
+                    print(f"DEBUG: [_substituir_activity_por_challenge] SUCCESS: Barra Lost: 0")
                 
                 # Forçar atualização visual
                 for stat in ["To send", "Rxd", "Lost"]:
@@ -17130,7 +17130,7 @@ class PlayerDashboard(tk.Toplevel):
                 
                 self.update_idletasks()
                 self.update()
-                print(f"DEBUG: [_substituir_activity_por_challenge] ✅ Barras atualizadas e refreshed")
+                print(f"DEBUG: [_substituir_activity_por_challenge] SUCCESS: Barras atualizadas e refreshed")
             
             # 7. LIMPAR ESTADO DE SELEÇÃO E PROCESSAMENTO PARA EVITAR CONFLITOS
             print(f"DEBUG: [_substituir_activity_por_challenge] Passo 7: Limpando estado de seleção...")
@@ -17171,9 +17171,9 @@ class PlayerDashboard(tk.Toplevel):
             # 9. LIMPAR MARCADOR DE PROCESSAMENTO DEPOIS DE UM BREVE DELAY
             print(f"DEBUG: [_substituir_activity_por_challenge] Passo 9: Programando limpeza...")
             self.after(1000, lambda: setattr(self, '_challenge_sendo_processado', None))
-            print(f"DEBUG: [_substituir_activity_por_challenge] ✅ SUBSTITUIÇÃO COMPLETA")
-            print(f"DEBUG: [_substituir_activity_por_challenge] ✅ Challenge {os.path.basename(carta_challenge_path)} substitui Activity na posição {idx_carrossel}")
-            print(f"DEBUG: [_substituir_activity_por_challenge] ✅ Valores resetados: To send={challenge_message_size}, Rxd=0, Lost=0")
+            print(f"DEBUG: [_substituir_activity_por_challenge] SUCCESS: SUBSTITUIÇÃO COMPLETA")
+            print(f"DEBUG: [_substituir_activity_por_challenge] SUCCESS: Challenge {os.path.basename(carta_challenge_path)} substitui Activity na posição {idx_carrossel}")
+            print(f"DEBUG: [_substituir_activity_por_challenge] SUCCESS: Valores resetados: To send={challenge_message_size}, Rxd=0, Lost=0")
             
         except Exception as e:
             print(f"DEBUG: [_substituir_activity_por_challenge] ERRO CRÍTICO: {e}")
