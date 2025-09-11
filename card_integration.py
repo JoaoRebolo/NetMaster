@@ -17,44 +17,29 @@ from cards_database import (
     UserDatabase
 )
 
+# Importar utilitários para detecção de Raspberry Pi
+from raspberry_pi_utils import get_universal_paths
+
 class CardFileManager:
     """
     Gestor de arquivos de cartas - conecta dados com arquivos físicos
     """
     
     def __init__(self, base_dir="."):
-        self.base_dir = base_dir
-        self._detect_environment()
+        # Usar os utilitários universais para detecção automática
+        self.universal_paths = get_universal_paths()
+        self.base_dir = self.universal_paths['base_dir']
+        self.environment = self.universal_paths['environment']
+        print(f"Ambiente detectado: {self.environment}")
+        print(f"Caminho base: {self.base_dir}")
         self.card_mappings = self._build_card_mappings()
     
     def _detect_environment(self):
         """
-        Detecta o ambiente: Raspberry Pi ou desenvolvimento local
+        Método mantido para compatibilidade, mas usa os utilitários universais
         """
-        import platform
-        import os
-        
-        # Caminhos possíveis
-        raspberry_pi_path = "/home/joao_rebolo/netmaster_menu/img/cartas"
-        development_path = "/Users/joaop_27h1t5j/Desktop/IST/Bolsa/NetMaster/img/cartas"
-        
-        if os.path.exists(raspberry_pi_path):
-            self.base_dir = "/home/joao_rebolo/netmaster_menu"
-            self.environment = "raspberry_pi"
-            print(f"Ambiente detectado: Raspberry Pi")
-            print(f"Caminho base: {self.base_dir}")
-        elif os.path.exists(development_path):
-            self.base_dir = "/Users/joaop_27h1t5j/Desktop/IST/Bolsa/NetMaster"
-            self.environment = "development"
-            print(f"Ambiente detectado: Desenvolvimento Local")
-            print(f"Caminho base: {self.base_dir}")
-        else:
-            # Fallback para desenvolvimento local
-            self.base_dir = "/Users/joaop_27h1t5j/Desktop/IST/Bolsa/NetMaster"
-            self.environment = "development"
-            print(f"AVISO: Caminhos padrão não encontrados")
-            print(f"Usando ambiente de desenvolvimento: {self.base_dir}")
-            print("Certifique-se de que o sistema está configurado corretamente.")
+        # Este método agora é redundante pois a detecção é feita no __init__
+        pass
     
     def _get_users_path(self, color):
         """

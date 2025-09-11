@@ -4,6 +4,7 @@ from PIL import Image, ImageTk
 import os
 import re
 import traceback
+import subprocess
 try:
     import RPi.GPIO as GPIO
 except ImportError:
@@ -24,6 +25,8 @@ except ImportError:
     GPIO = MockGPIO()
 import random
 from Store_v2 import StoreWindow
+# Importar utilitários para detecção de Raspberry Pi
+from raspberry_pi_utils import get_universal_paths, find_existing_path, get_possible_raspberry_pi_paths
 # Importar sistema de integração da base de dados
 try:
     from card_integration import IntegratedCardDatabase
@@ -34,95 +37,92 @@ except ImportError as e:
     IntegratedCardDatabase = None
     ActionType = None
 
-IMG_DIR = os.path.join(os.path.dirname(__file__), "img")
-# Verificar se existe no Raspberry Pi
-if not os.path.exists(IMG_DIR):
-    raspberry_img_dir = "/home/joao_rebolo/netmaster_menu/img"
-    if os.path.exists(raspberry_img_dir):
-        IMG_DIR = raspberry_img_dir
-        print(f"DEBUG: Usando img do Raspberry Pi: {IMG_DIR}")
-    else:
-        print(f"DEBUG: Diretório img não encontrado, usando fallback: {IMG_DIR}")
+# Obter caminhos universais usando os utilitários
+universal_paths = get_universal_paths()
+IMG_DIR = universal_paths['img_dir']
+print(f"DEBUG: Usando IMG_DIR: {IMG_DIR} (ambiente: {universal_paths['environment']})")
 
 # Detectar automaticamente onde estão as cartas
 def detect_cartas_base_dir():
-    """Detecta automaticamente o diretório base das cartas"""
-    possible_dirs = [
-        # Raspberry Pi - nova estrutura
-        "/home/joao_rebolo/netmaster_menu",
-        # Desenvolvimento local - nova estrutura  
-        os.path.dirname(__file__),
-        # Fallback para img/cartas se existir
-        os.path.join(os.path.dirname(__file__), "img", "cartas")
+    """Detecta automaticamente o diretório base das cartas usando caminhos universais"""
+    # Usar os caminhos universais já detectados
+    universal_paths = get_universal_paths()
+    
+    # CORREÇÃO ESPECÍFICA: Se estivermos no Raspberry Pi, forçar o caminho correto
+    if universal_paths['environment'] == 'raspberry_pi':
+        raspberry_cartas_dir = "/home/joaorebolo2/netmaster_menu/img/cartas"
+        if os.path.exists(raspberry_cartas_dir):
+            print(f"DEBUG: [detect_cartas_base_dir] RASPBERRY PI - Usando caminho correto: {raspberry_cartas_dir}")
+            return raspberry_cartas_dir
+        else:
+            print(f"DEBUG: [detect_cartas_base_dir] RASPBERRY PI - Caminho esperado não existe: {raspberry_cartas_dir}")
+            print(f"DEBUG: [detect_cartas_base_dir] RASPBERRY PI - Usando fallback: {universal_paths['cartas_dir']}")
+            return universal_paths['cartas_dir']
+    
+    # Para desenvolvimento local, usar a lógica original
+    # Testar se o diretório base tem a estrutura esperada de cartas
+    test_paths = [
+        os.path.join(universal_paths['base_dir'], "Activities", "Residential-level"),
+        os.path.join(universal_paths['base_dir'], "Users", "Residential-level"),  
+        os.path.join(universal_paths['base_dir'], "Events", "Residential-level")
     ]
     
-    for dir_path in possible_dirs:
-        # Verificar se existe pelo menos um dos diretórios de cartas esperados
-        test_paths = [
-            os.path.join(dir_path, "Activities", "Residential-level"),
-            os.path.join(dir_path, "Users", "Residential-level"),
-            os.path.join(dir_path, "Events", "Residential-level")
-        ]
-        
-        if any(os.path.exists(test_path) for test_path in test_paths):
-            print(f"DEBUG: Usando diretório de cartas: {dir_path}")
-            return dir_path
+    if any(os.path.exists(test_path) for test_path in test_paths):
+        print(f"DEBUG: Usando diretório de cartas: {universal_paths['base_dir']}")
+        return universal_paths['base_dir']
     
-    print("DEBUG: Nenhum diretório de cartas encontrado!")
-    return possible_dirs[0]  # fallback
+    # Se não encontrar na estrutura esperada, tentar o diretório de cartas
+    if os.path.exists(universal_paths['cartas_dir']):
+        print(f"DEBUG: Usando diretório de cartas alternativo: {universal_paths['cartas_dir']}")
+        return os.path.dirname(universal_paths['cartas_dir'])
+    
+    print("DEBUG: Nenhum diretório de cartas encontrado, usando base_dir como fallback")
+    return universal_paths['base_dir']
 
 def detect_player_inventory_base_dir():
     """Detecta automaticamente o diretório base do inventário do jogador"""
-    # Detectar se estamos no Raspberry Pi
-    is_raspberry_pi = os.path.exists("/home/joao_rebolo") or "raspberry" in os.uname().nodename.lower()
+    # Usar os utilitários universais
+    universal_paths = get_universal_paths()
     
-    if is_raspberry_pi:
-        possible_dirs = [
-            # Raspberry Pi - estruturas possíveis
-            "/home/joao_rebolo/netmaster_menu/img/cartas",
-            "/home/joao_rebolo/netmaster_menu",
-            "/home/joao_rebolo/netmaster_menu/img",
-        ]
-    else:
-        possible_dirs = [
-            # Desenvolvimento local - inventário do jogador  
-            os.path.dirname(__file__),
-            # Fallback para estrutura local
-            os.path.join(os.path.dirname(__file__), "img", "cartas")
-        ]
-    
-    print(f"DEBUG: [detect_player_inventory_base_dir] Ambiente detectado: {'Raspberry Pi' if is_raspberry_pi else 'Desenvolvimento Local'}")
+    print(f"DEBUG: [detect_player_inventory_base_dir] Ambiente detectado: {universal_paths['environment']}")
     print(f"DEBUG: [detect_player_inventory_base_dir] Verificando diretórios possíveis...")
-    for i, dir_path in enumerate(possible_dirs):
-        print(f"DEBUG: [detect_player_inventory_base_dir] Opção {i+1}: {dir_path}")
-        print(f"DEBUG: [detect_player_inventory_base_dir] Diretório existe? {os.path.exists(dir_path)}")
+    print(f"DEBUG: [detect_player_inventory_base_dir] Diretório base: {universal_paths['base_dir']}")
+    
+    # CORREÇÃO ESPECÍFICA: Se estivermos no Raspberry Pi, forçar o caminho correto
+    if universal_paths['environment'] == 'raspberry_pi':
+        raspberry_cartas_dir = "/home/joaorebolo2/netmaster_menu/img/cartas"
+        if os.path.exists(raspberry_cartas_dir):
+            print(f"DEBUG: [detect_player_inventory_base_dir] RASPBERRY PI - Usando caminho correto: {raspberry_cartas_dir}")
+            return raspberry_cartas_dir
+        else:
+            print(f"DEBUG: [detect_player_inventory_base_dir] RASPBERRY PI - Caminho esperado não existe: {raspberry_cartas_dir}")
+            print(f"DEBUG: [detect_player_inventory_base_dir] RASPBERRY PI - Usando fallback: {universal_paths['cartas_dir']}")
+            return universal_paths['cartas_dir']
+    
+    # Para desenvolvimento local, usar a lógica original
+    # Testar se o diretório base tem a estrutura esperada
+    test_paths = [
+        os.path.join(universal_paths['base_dir'], "Activities", "Residential-level"),
+        os.path.join(universal_paths['base_dir'], "Users", "Residential-level"),
+        os.path.join(universal_paths['base_dir'], "Events", "Residential-level"),
+        # Para Raspberry Pi, testar também estrutura alternativa
+        os.path.join(universal_paths['base_dir'], "activities", "Residential-level"),
+        os.path.join(universal_paths['base_dir'], "users", "Residential-level"),
+        os.path.join(universal_paths['base_dir'], "events", "Residential-level")
+    ]
+    
+    print(f"DEBUG: [detect_player_inventory_base_dir] Testando caminhos:")
+    for j, test_path in enumerate(test_paths):
+        exists = os.path.exists(test_path)
+        print(f"DEBUG: [detect_player_inventory_base_dir]   Teste {j+1}: {test_path} -> {exists}")
         
-        # Verificar se existe pelo menos um dos diretórios de inventário esperados
-        test_paths = [
-            os.path.join(dir_path, "Activities", "Residential-level"),
-            os.path.join(dir_path, "Users", "Residential-level"),
-            os.path.join(dir_path, "Events", "Residential-level"),
-            # Para Raspberry Pi, testar também estrutura alternativa
-            os.path.join(dir_path, "activities", "Residential-level"),
-            os.path.join(dir_path, "users", "Residential-level"),
-            os.path.join(dir_path, "events", "Residential-level")
-        ]
-        
-        print(f"DEBUG: [detect_player_inventory_base_dir] Testando caminhos:")
-        for j, test_path in enumerate(test_paths):
-            exists = os.path.exists(test_path)
-            print(f"DEBUG: [detect_player_inventory_base_dir]   Teste {j+1}: {test_path} -> {exists}")
-        
-        if any(os.path.exists(test_path) for test_path in test_paths):
-            print(f"DEBUG: Usando diretório de inventário do jogador: {dir_path}")
-            return dir_path
+        if exists:
+            print(f"DEBUG: [detect_player_inventory_base_dir] Encontrado inventário em: {universal_paths['base_dir']}")
+            return universal_paths['base_dir']
     
     print("DEBUG: Nenhum diretório de inventário do jogador encontrado!")
-    # Retornar o primeiro diretório como fallback
-    fallback = possible_dirs[0] if possible_dirs else os.path.dirname(__file__)
-    print(f"DEBUG: Usando fallback: {fallback}")
-    return fallback
-    return possible_dirs[1]  # fallback para desenvolvimento local
+    print(f"DEBUG: Usando fallback: {universal_paths['base_dir']}")
+    return universal_paths['base_dir']
 
 CARTAS_BASE_DIR = detect_cartas_base_dir()
 COIN_IMG = os.path.join(IMG_DIR, "picoin.png")
@@ -251,6 +251,534 @@ def make_card_callback(parent, idx):
         parent.update_progress_bars_for_card(idx)
     return callback
 
+def get_equipment_object_name(carta_path, card_database=None):
+    """
+    Obtém o object_name de uma carta Equipment para usar na deteção de objetos.
+    
+    Args:
+        carta_path: Caminho para a carta Equipment (ex: "/path/Equipment_1.png")
+        card_database: Instância da base de dados de cartas (opcional)
+        
+    Returns:
+        Object name para deteção (ex: "router_simples_vermelho") ou None se não encontrado
+    """
+    try:
+        if not card_database:
+            # Criar instância temporária da base de dados se necessário
+            from card_integration import IntegratedCardDatabase
+            card_database = IntegratedCardDatabase(".")
+        
+        # Extrair informações do caminho da carta
+        filename = os.path.basename(carta_path)
+        
+        # Determinar cor baseada no diretório
+        color = None
+        if "/Blue/" in carta_path or "/blue/" in carta_path:
+            color = "blue"
+        elif "/Red/" in carta_path or "/red/" in carta_path:
+            color = "red"
+        elif "/Green/" in carta_path or "/green/" in carta_path:
+            color = "green"
+        elif "/Yellow/" in carta_path or "/yellow/" in carta_path:
+            color = "yellow"
+        
+        if not color:
+            print(f"DEBUG: [OBJECT_NAME] Não foi possível determinar cor para {carta_path}")
+            return None
+        
+        # Mapear filename para equipment_id na base de dados
+        # Equipment_1.png, Equipment_2.png, Equipment_3.png -> small_router_1_color
+        # Equipment_4.png, Equipment_5.png, Equipment_6.png -> medium_router_1_color
+        # Equipment_7.png, Equipment_8.png, Equipment_9.png -> short_link_1_color
+        # Equipment_10.png, Equipment_11.png, Equipment_12.png -> long_link_1_color
+        
+        match = re.match(r'Equipment_(\d+)\.png', filename)
+        if not match:
+            print(f"DEBUG: [OBJECT_NAME] Formato de filename inválido: {filename}")
+            return None
+        
+        equipment_num = int(match.group(1))
+        
+        # Mapear número para tipo e ID específico
+        if 1 <= equipment_num <= 3:
+            equipment_type = "small_router"
+            specific_id = equipment_num
+        elif 4 <= equipment_num <= 6:
+            equipment_type = "medium_router"
+            specific_id = equipment_num - 3
+        elif 7 <= equipment_num <= 9:
+            equipment_type = "short_link"
+            specific_id = equipment_num - 6
+        elif 10 <= equipment_num <= 12:
+            equipment_type = "long_link"
+            specific_id = equipment_num - 9
+        else:
+            print(f"DEBUG: [OBJECT_NAME] Número de equipment inválido: {equipment_num}")
+            return None
+        
+        # Construir equipment_id
+        equipment_id = f"{equipment_type}_{specific_id}_{color}"
+        
+        # Obter carta da base de dados
+        equipment_result = card_database.get_equipment_with_file(equipment_id)
+        
+        if equipment_result:
+            equipment_card, file_path = equipment_result
+            if hasattr(equipment_card, 'object_name') and equipment_card.object_name:
+                print(f"DEBUG: [OBJECT_NAME] Object name encontrado para {filename}: {equipment_card.object_name}")
+                return equipment_card.object_name
+            else:
+                print(f"DEBUG: [OBJECT_NAME] EquipmentCard encontrado mas sem object_name: {equipment_id}")
+                return None
+        else:
+            print(f"DEBUG: [OBJECT_NAME] Equipment não encontrado na base de dados para equipment_id: {equipment_id}")
+            return None
+            
+    except Exception as e:
+        print(f"DEBUG: [OBJECT_NAME] Erro ao obter object_name: {e}")
+        return None
+
+def create_yolo_loading_screen(parent_window, object_name):
+    """
+    Cria uma tela de loading fullscreen que aparece durante a inicialização do YOLO.
+    
+    Args:
+        parent_window: Janela principal do PlayerDashboard
+        object_name: Nome do objeto sendo detectado
+        
+    Returns:
+        Janela de loading criada
+    """
+    try:
+        # Criar janela de loading como Toplevel
+        loading_window = tk.Toplevel(parent_window)
+        loading_window.title("YOLO Detection Loading")
+        loading_window.configure(bg="black")
+        
+        # Configurar fullscreen
+        screen_width = parent_window.winfo_screenwidth()
+        screen_height = parent_window.winfo_screenheight()
+        loading_window.geometry(f"{screen_width}x{screen_height}+0+0")
+        loading_window.overrideredirect(True)
+        loading_window.attributes("-fullscreen", True)
+        
+        # Garantir que a janela fica sempre no topo
+        loading_window.attributes("-topmost", True)
+        loading_window.lift()
+        loading_window.focus_force()
+        
+        # Frame principal centralizado
+        main_frame = tk.Frame(loading_window, bg="black")
+        main_frame.pack(expand=True, fill="both")
+        
+        # Container para conteúdo centralizado
+        content_frame = tk.Frame(main_frame, bg="black")
+        content_frame.place(relx=0.5, rely=0.5, anchor="center")
+        
+        # Título principal
+        title_label = tk.Label(content_frame, 
+                              text="YOLO Object Detection", 
+                              font=("Helvetica", 20, "bold"), 
+                              fg="#8A2BE2", 
+                              bg="black")
+        title_label.pack(pady=(0, 20))
+        
+        # Subtítulo com objeto sendo detectado - texto explicativo em branco
+        init_label = tk.Label(content_frame, 
+                             text="Initializing detection for:", 
+                             font=("Helvetica", 15), 
+                             fg="white", 
+                             bg="black")
+        init_label.pack(pady=(0, 5))
+        
+        # Nome do objeto em ciano para destaque
+        object_label = tk.Label(content_frame, 
+                               text=object_name, 
+                               font=("Helvetica", 15), 
+                               fg="#00FFFF", 
+                               bg="black")
+        object_label.pack(pady=(0, 25))
+        
+        # Indicador de loading animado
+        loading_label = tk.Label(content_frame, 
+                                text="Loading", 
+                                font=("Helvetica", 18, "bold"), 
+                                fg="#FFD700", 
+                                bg="black")
+        loading_label.pack(pady=(0, 20))
+        
+        # Barra de progresso visual simples
+        progress_frame = tk.Frame(content_frame, bg="black")
+        progress_frame.pack(pady=(0, 30))
+        
+        # Criar barra de progresso usando labels
+        progress_bars = []
+        for i in range(8):
+            bar = tk.Label(progress_frame, text="█", font=("Helvetica", 20), 
+                          fg="#333333", bg="black")
+            bar.pack(side="left", padx=2)
+            progress_bars.append(bar)
+        
+        # Mensagem de status
+        status_label = tk.Label(content_frame, 
+                               text="Starting camera and loading AI model...", 
+                               font=("Helvetica", 14), 
+                               fg="#CCCCCC", 
+                               bg="black")
+        status_label.pack(pady=(0, 10))
+        
+        # Mensagem informativa
+        info_label = tk.Label(content_frame, 
+                             text="This may take a few seconds", 
+                             font=("Helvetica", 12, "italic"), 
+                             fg="#888888", 
+                             bg="black")
+        info_label.pack()
+        
+        # Animação do loading
+        loading_states = ["Loading", "Loading.", "Loading..", "Loading..."]
+        loading_index = 0
+        
+        progress_index = 0
+        progress_colors = ["#FF0000", "#FF4500", "#FFD700", "#00FF00"]
+        
+        def animate_loading():
+            nonlocal loading_index, progress_index
+            
+            # Animar texto de loading
+            loading_label.config(text=loading_states[loading_index])
+            loading_index = (loading_index + 1) % len(loading_states)
+            
+            # Animar barra de progresso
+            # Reset todas as barras
+            for bar in progress_bars:
+                bar.config(fg="#333333")
+            
+            # Iluminar barras progressivamente
+            for i in range((progress_index % 16) // 2 + 1):
+                if i < len(progress_bars):
+                    color_idx = min(i, len(progress_colors) - 1)
+                    progress_bars[i].config(fg=progress_colors[color_idx])
+            
+            progress_index += 1
+            
+            # Continuar animação se a janela ainda existe
+            try:
+                loading_window.after(300, animate_loading)
+            except tk.TclError:
+                # Janela foi destruída
+                pass
+        
+        # Iniciar animação
+        animate_loading()
+        
+        # Forçar atualização da interface
+        loading_window.update_idletasks()
+        loading_window.update()
+        
+        print(f"DEBUG: [LOADING] Loading screen criado com sucesso")
+        
+        return loading_window
+        
+    except Exception as e:
+        print(f"DEBUG: [LOADING] Erro ao criar loading screen: {e}")
+        return None
+
+def execute_detection_script_direct(object_name, parent_window=None, existing_loading_window=None):
+    """
+    Executa o script YOLO diretamente com loading screen já existente.
+    
+    Args:
+        object_name: Nome do objeto para deteção
+        parent_window: Janela principal 
+        existing_loading_window: Loading screen já criado
+    
+    Returns:
+        True se o script executou com sucesso, False caso contrário
+    """
+    try:
+        # Usar os utilitários universais para detectar ambiente e caminhos
+        universal_paths = get_universal_paths()
+        
+        if universal_paths['environment'] != 'raspberry_pi':
+            print(f"DEBUG: [DETECTION_DIRECT] Simulando execução do script (ambiente: {universal_paths['environment']}): ./detection_fullscreen.sh {object_name}")
+            # Simular delay e fechar loading screen
+            if existing_loading_window:
+                def close_loading_and_return():
+                    existing_loading_window.destroy()
+                    if parent_window:
+                        parent_window._voltar_inventario_apos_ativacao(['equipments'], 0)
+                parent_window.after(3000, close_loading_and_return)
+            return True
+        
+        # Usar o caminho do script detectado automaticamente
+        script_path = universal_paths['detection_script']
+        
+        # Verificar se existe
+        if not os.path.exists(script_path):
+            alternative_paths = get_possible_raspberry_pi_paths("object_detection/detection_fullscreen.sh")
+            alternative_paths.extend(get_possible_raspberry_pi_paths("detection_fullscreen.sh"))
+            
+            script_path = None
+            for path in alternative_paths:
+                if os.path.exists(path):
+                    script_path = path
+                    break
+            
+            if not script_path:
+                print(f"DEBUG: [DETECTION_DIRECT] Script não encontrado")
+                return False
+        
+        print(f"DEBUG: [DETECTION_DIRECT] Executando: {script_path} {object_name}")
+        
+        # Tornar o script executável
+        subprocess.run(['chmod', '+x', script_path], check=True)
+        
+        # Executar script em background
+        process = subprocess.Popen([script_path, object_name])
+        
+        print(f"DEBUG: [DETECTION_DIRECT] Script iniciado (PID: {process.pid})")
+        
+        # Monitorar script com loading screen existente
+        if parent_window and existing_loading_window:
+            def check_yolo_initialization():
+                poll_result = process.poll()
+                if poll_result is None:
+                    # YOLO deve estar inicializado - fechar loading screen
+                    print(f"DEBUG: [DETECTION_DIRECT] Fechando loading screen - YOLO inicializando")
+                    existing_loading_window.destroy()
+                    parent_window.withdraw()  # Esconder interface Python
+                    
+                    # Monitorar conclusão
+                    def check_script_completion():
+                        poll_result = process.poll()
+                        if poll_result is None:
+                            parent_window.after(1000, check_script_completion)
+                        else:
+                            print(f"DEBUG: [DETECTION_DIRECT] YOLO terminou - restaurando interface")
+                            parent_window.deiconify()
+                            parent_window._voltar_inventario_apos_ativacao(['equipments'], 0)
+                    
+                    parent_window.after(1000, check_script_completion)
+                else:
+                    # Script terminou antes de inicializar
+                    existing_loading_window.destroy()
+                    parent_window._voltar_inventario_apos_ativacao(['equipments'], 0)
+            
+            # Aguardar 4.5 segundos para YOLO inicializar
+            parent_window.after(4500, check_yolo_initialization)
+        
+        return True
+        
+    except Exception as e:
+        print(f"DEBUG: [DETECTION_DIRECT] Erro: {e}")
+        if existing_loading_window:
+            existing_loading_window.destroy()
+        return False
+
+def execute_detection_with_continuation(object_name, parent_window, loading_window, continuation_callback):
+    """
+    Executa o script YOLO com loading screen e chama callback quando terminar.
+    
+    Args:
+        object_name: Nome do objeto para deteção
+        parent_window: Janela principal 
+        loading_window: Loading screen já criado
+        continuation_callback: Função a chamar quando detecção terminar
+    
+    Returns:
+        True se o script executou com sucesso, False caso contrário
+    """
+    try:
+        # Usar os utilitários universais para detectar ambiente e caminhos
+        universal_paths = get_universal_paths()
+        
+        if universal_paths['environment'] != 'raspberry_pi':
+            print(f"DEBUG: [DETECTION_CONTINUATION] Simulando execução do script (ambiente: {universal_paths['environment']}): ./detection_fullscreen.sh {object_name}")
+            # Simular delay e chamar callback
+            if loading_window:
+                def close_loading_and_continue():
+                    loading_window.destroy()
+                    continuation_callback()
+                parent_window.after(3000, close_loading_and_continue)
+            return True
+        
+        # Usar o caminho do script detectado automaticamente
+        script_path = universal_paths['detection_script']
+        
+        # Verificar se existe
+        if not os.path.exists(script_path):
+            alternative_paths = get_possible_raspberry_pi_paths("object_detection/detection_fullscreen.sh")
+            alternative_paths.extend(get_possible_raspberry_pi_paths("detection_fullscreen.sh"))
+            
+            script_path = None
+            for path in alternative_paths:
+                if os.path.exists(path):
+                    script_path = path
+                    break
+            
+            if not script_path:
+                print(f"DEBUG: [DETECTION_CONTINUATION] Script não encontrado")
+                return False
+        
+        print(f"DEBUG: [DETECTION_CONTINUATION] Executando: {script_path} {object_name}")
+        
+        # Tornar o script executável
+        subprocess.run(['chmod', '+x', script_path], check=True)
+        
+        # Executar script em background
+        process = subprocess.Popen([script_path, object_name])
+        
+        print(f"DEBUG: [DETECTION_CONTINUATION] Script iniciado (PID: {process.pid})")
+        
+        # Monitorar script com loading screen existente
+        if parent_window and loading_window:
+            def check_yolo_initialization():
+                poll_result = process.poll()
+                if poll_result is None:
+                    # YOLO deve estar inicializado - fechar loading screen
+                    print(f"DEBUG: [DETECTION_CONTINUATION] Fechando loading screen - YOLO inicializando")
+                    loading_window.destroy()
+                    parent_window.withdraw()  # Esconder interface Python
+                    
+                    # Monitorar conclusão
+                    def check_script_completion():
+                        poll_result = process.poll()
+                        if poll_result is None:
+                            parent_window.after(1000, check_script_completion)
+                        else:
+                            print(f"DEBUG: [DETECTION_CONTINUATION] YOLO terminou - chamando callback")
+                            parent_window.deiconify()
+                            continuation_callback()
+                    
+                    parent_window.after(1000, check_script_completion)
+                else:
+                    # Script terminou antes de inicializar
+                    loading_window.destroy()
+                    continuation_callback()
+            
+            # Aguardar 4.5 segundos para YOLO inicializar
+            parent_window.after(4500, check_yolo_initialization)
+        
+        return True
+        
+    except Exception as e:
+        print(f"DEBUG: [DETECTION_CONTINUATION] Erro: {e}")
+        if loading_window:
+            loading_window.destroy()
+        return False
+
+def execute_detection_script(object_name, parent_window=None):
+    """
+    Executa o script detection_fullscreen.sh com o object_name especificado.
+    
+    Args:
+        object_name: Nome do objeto para deteção (ex: "router_simples_vermelho")
+        parent_window: Referência à janela principal para controle de visibilidade
+        
+    Returns:
+        True se o script executou com sucesso, False caso contrário
+    """
+    try:
+        # Usar os utilitários universais para detectar ambiente e caminhos
+        universal_paths = get_universal_paths()
+        
+        if universal_paths['environment'] != 'raspberry_pi':
+            print(f"DEBUG: [DETECTION] Simulando execução do script (ambiente: {universal_paths['environment']}): ./detection_fullscreen.sh {object_name}")
+            return True
+        
+        # Usar o caminho do script detectado automaticamente
+        script_path = universal_paths['detection_script']
+        
+        # Verificar se existe, senão tentar caminhos alternativos
+        if not os.path.exists(script_path):
+            # Tentar encontrar em caminhos possíveis usando os utilitários
+            alternative_paths = get_possible_raspberry_pi_paths("object_detection/detection_fullscreen.sh")
+            alternative_paths.extend(get_possible_raspberry_pi_paths("detection_fullscreen.sh"))
+            
+            script_path = None
+            for path in alternative_paths:
+                if os.path.exists(path):
+                    script_path = path
+                    print(f"DEBUG: [DETECTION] Script encontrado em: {script_path}")
+                    break
+            
+            if not script_path:
+                print(f"DEBUG: [DETECTION] Script não encontrado em nenhum dos caminhos:")
+                for path in alternative_paths[:5]:  # Mostrar apenas os primeiros 5 para não poluir o log
+                    print(f"DEBUG: [DETECTION]   - {path}")
+                print(f"DEBUG: [DETECTION]   ... e {len(alternative_paths)-5} outros caminhos")
+                return False
+        else:
+            print(f"DEBUG: [DETECTION] Script encontrado em: {script_path}")
+        
+        # Executar o script
+        print(f"DEBUG: [DETECTION] Executando: {script_path} {object_name}")
+        
+        # Tornar o script executável
+        subprocess.run(['chmod', '+x', script_path], check=True)
+        
+        # CORREÇÃO: Executar script SEM capturar saída para mostrar interface YOLO no LCD
+        print(f"DEBUG: [DETECTION] Iniciando detecção com interface visual no LCD...")
+        
+        # NOVA FUNCIONALIDADE: Criar loading screen antes de esconder interface Python
+        loading_window = None
+        if parent_window:
+            print(f"DEBUG: [DETECTION] Criando loading screen...")
+            loading_window = create_yolo_loading_screen(parent_window, object_name)
+        
+        # Executar script em background
+        process = subprocess.Popen([script_path, object_name])
+        
+        print(f"DEBUG: [DETECTION] Script iniciado em background (PID: {process.pid})")
+        print(f"DEBUG: [DETECTION] Interface YOLO deve aparecer em alguns segundos...")
+        print(f"DEBUG: [DETECTION] Loading screen ativa até YOLO inicializar")
+        
+        # Monitorar inicialização do YOLO e conclusão do script
+        if parent_window and loading_window:
+            def check_yolo_initialization():
+                # Verificar se o YOLO já inicializou (processo ainda rodando + tempo suficiente)
+                poll_result = process.poll()
+                if poll_result is None:
+                    # Processo ainda está rodando - verificar se já passou tempo suficiente para YOLO inicializar
+                    # Após 4-5 segundos, assumir que YOLO já inicializou e esconder loading screen
+                    print(f"DEBUG: [DETECTION] YOLO deve estar inicializado - escondendo loading screen")
+                    loading_window.destroy()
+                    parent_window.withdraw()  # Esconder interface Python agora
+                    
+                    # Continuar monitorando conclusão do script
+                    def check_script_completion():
+                        poll_result = process.poll()
+                        if poll_result is None:
+                            # Processo ainda está rodando - verificar novamente em 1 segundo
+                            parent_window.after(1000, check_script_completion)
+                        else:
+                            # Processo terminou - restaurar interface Python
+                            print(f"DEBUG: [DETECTION] Script YOLO terminou (código: {poll_result})")
+                            print(f"DEBUG: [DETECTION] Restaurando interface Python...")
+                            parent_window.deiconify()  # Mostrar janela novamente
+                    
+                    # Começar monitoramento de conclusão
+                    parent_window.after(1000, check_script_completion)
+                else:
+                    # Processo já terminou antes do YOLO inicializar - limpar loading screen
+                    print(f"DEBUG: [DETECTION] Script terminou antes do YOLO inicializar (código: {poll_result})")
+                    loading_window.destroy()
+                    parent_window.deiconify()
+            
+            # Aguardar 9-10 segundos para YOLO inicializar antes de esconder loading screen
+            parent_window.after(9500, check_yolo_initialization)
+        
+        # Retornar sucesso imediatamente - script roda em background
+        return True
+            
+    except subprocess.TimeoutExpired:
+        print(f"DEBUG: [DETECTION] Script timeout após 120 segundos")
+        return False
+    except Exception as e:
+        print(f"DEBUG: [DETECTION] Erro ao executar script: {e}")
+        return False
+
 class PlayerDashboard(tk.Toplevel):
     def __init__(self, root, player_color, saldo, other_players, player_name="Player", selected_card_idx=0):
         super().__init__(root)
@@ -339,6 +867,10 @@ class PlayerDashboard(tk.Toplevel):
             "activities": [],
         }
 
+        # CORREÇÃO CRÍTICA: Inicializar carrossel para evitar erros em adicionar_carta_carrossel
+        self.carrossel = []
+        print("DEBUG: [INIT] self.carrossel inicializado como lista vazia")
+
         # Variável para controlar se o botão Store deve estar desabilitado
         self._store_button_disabled = False
         
@@ -385,17 +917,61 @@ class PlayerDashboard(tk.Toplevel):
         # PROTEÇÃO CONTRA LOOP: Flag para evitar abrir inventário recursivamente
         self._inventory_opening = False
         
+        # Flag para controlar se overlay de completion está ativo
+        self._completion_overlay_active = False
+        
         # Cache de User IDs para controlo do carrossel durante Next Phase
         self._cached_user_ids = []
 
         # SISTEMA DE TRACKING TEMPORAL PARA CHALLENGES
-        self._challenge_start_turns = {}  # {carta_path: turno_inicio}
+        # CORREÇÃO CRÍTICA: Não inicializar vazio se já existe tracking preservado
+        # Isto evita perder o tracking durante reconstruções da interface
+        if not hasattr(self, '_challenge_start_turns'):
+            self._challenge_start_turns = {}  # {carta_path: turno_inicio}
+            print(f"DEBUG: [CHALLENGE_INIT] Challenge tracking inicializado vazio")
+        else:
+            print(f"DEBUG: [CHALLENGE_INIT] Challenge tracking já existe: {self._challenge_start_turns}")
+        
+        # SUPER BACKUP CRÍTICO: Sistema de backup múltiplas camadas para Raspberry Pi
+        # Garante que o tracking nunca seja perdido, independentemente do ambiente
+        if not hasattr(self.master, '_super_challenge_backup'):
+            self.master._super_challenge_backup = {}
+            print("DEBUG: [SUPER_BACKUP] Super backup inicializado no master")
+        if not hasattr(root, '_super_challenge_backup'):
+            root._super_challenge_backup = {}
+            print("DEBUG: [SUPER_BACKUP] Super backup inicializado no root")
+        
+        # Backup global adicional (para casos extremos)
+        if not hasattr(self, '_challenge_backup_registry'):
+            self._challenge_backup_registry = {}
+            print("DEBUG: [SUPER_BACKUP] Backup registry inicializado na instância")
+        
+        # SISTEMA DE TRACKING DE INTERAÇÕES DO JOGADOR COM CARTAS
+        # Registra quando jogador clica em botões +, independente dos valores escolhidos
+        self._cartas_interagidas_jogador = set()  # {carta_path} - cartas que tiveram interação do jogador
+        
+        # CORREÇÃO CRÍTICA: Flag para controlar incrementação de turnos
+        self._coming_from_end_turn = False  # True apenas quando vindo de end_turn
         
         # CORREÇÃO CRÍTICA: Preservar contadores de turnos entre sessões
         # Restaurar contadores de turnos preservados ou inicializar em 1
+        
+        # Detectar ambiente para debug específico
+        universal_paths = get_universal_paths()
+        ambiente = "RASPBERRY PI" if universal_paths['environment'] == 'raspberry_pi' else "DESENVOLVIMENTO"
+        
         print(f"DEBUG: [TURN_INIT] ======= INICIALIZAÇÃO DOS CONTADORES DE TURNO =======")
+        print(f"DEBUG: [TURN_INIT] AMBIENTE: {ambiente}")
+        print(f"DEBUG: [TURN_INIT] Universal paths: {universal_paths}")
         print(f"DEBUG: [TURN_INIT] Verificando se há contadores preservados no root...")
+        print(f"DEBUG: [TURN_INIT] Root object: {root}")
+        print(f"DEBUG: [TURN_INIT] Root type: {type(root)}")
         print(f"DEBUG: [TURN_INIT] hasattr(root, '_backup_turn_counters'): {hasattr(root, '_backup_turn_counters')}")
+        if hasattr(root, '_backup_turn_counters'):
+            print(f"DEBUG: [TURN_INIT] _backup_turn_counters found: {root._backup_turn_counters}")
+        print(f"DEBUG: [TURN_INIT] hasattr(root, '_backup_challenge_tracking'): {hasattr(root, '_backup_challenge_tracking')}")
+        if hasattr(root, '_backup_challenge_tracking'):
+            print(f"DEBUG: [TURN_INIT] _backup_challenge_tracking found: {root._backup_challenge_tracking}")
         
         if hasattr(root, '_backup_turn_counters'):
             backup_counters = root._backup_turn_counters
@@ -407,25 +983,253 @@ class PlayerDashboard(tk.Toplevel):
             print(f"DEBUG: [TURN_RESTORE]   _current_turn_number (Challenges): {self._current_turn_number}")
             print(f"DEBUG: [TURN_RESTORE]   _current_turn (Events): {self._current_turn}")
             print(f"DEBUG: [TURN_RESTORE]   _current_turn_id (Processing): {self._current_turn_id}")
+            
+            # CORREÇÃO CRÍTICA: Restaurar tracking de Challenges do backup de reconstrução
+            print(f"DEBUG: [CHALLENGE_TRACKING] === RESTAURANDO TRACKING DE CHALLENGES DO BACKUP ===")
+            print(f"DEBUG: [CHALLENGE_TRACKING] Tracking atual na instância: {getattr(self, '_challenge_start_turns', {})}")
+            backup_challenge_tracking = backup_counters.get('_challenge_start_turns', {})
+            print(f"DEBUG: [CHALLENGE_TRACKING] Tracking encontrado no backup: {backup_challenge_tracking}")
+            
+            # PRIORIDADE: Se já há tracking na instância atual, preservar e mesclar com backup
+            if hasattr(self, '_challenge_start_turns') and self._challenge_start_turns:
+                print(f"DEBUG: [CHALLENGE_TRACKING] PRESERVANDO tracking existente na instância")
+                # Mesclar backup com tracking existente (existente tem prioridade)
+                for path, turn in backup_challenge_tracking.items():
+                    if path not in self._challenge_start_turns:
+                        self._challenge_start_turns[path] = turn
+                        print(f"DEBUG: [CHALLENGE_TRACKING] Adicionado do backup: {os.path.basename(path)} -> turno {turn}")
+                    else:
+                        print(f"DEBUG: [CHALLENGE_TRACKING] Preservado existente: {os.path.basename(path)} -> turno {self._challenge_start_turns[path]}")
+            else:
+                # Se não há tracking existente, restaurar do backup
+                self._challenge_start_turns = backup_challenge_tracking.copy()
+                print(f"DEBUG: [CHALLENGE_TRACKING] Tracking restaurado do backup: {self._challenge_start_turns}")
+            
+            # CORREÇÃO CRÍTICA: Restaurar turnos reais de Services do backup
+            backup_service_turns = backup_counters.get('_service_real_activation_turns', {})
+            print(f"DEBUG: [SERVICE_TRACKING] === RESTAURANDO TURNOS REAIS DE SERVICES DO BACKUP ===")
+            print(f"DEBUG: [SERVICE_TRACKING] Turnos reais encontrados no backup: {backup_service_turns}")
+            
+            if backup_service_turns:
+                self._service_real_activation_turns = backup_service_turns.copy()
+                print(f"DEBUG: [SERVICE_TRACKING] Turnos reais de Services restaurados: {self._service_real_activation_turns}")
+                for path, turn in self._service_real_activation_turns.items():
+                    print(f"DEBUG: [SERVICE_TRACKING] Service {os.path.basename(path)} -> turno real {turn}")
+            else:
+                print(f"DEBUG: [SERVICE_TRACKING] Nenhum turno real de Service encontrado no backup")
+            
+            # CORREÇÃO CRÍTICA: Sincronizar root._backup_challenge_tracking após restaurar
+            if self._challenge_start_turns:
+                root._backup_challenge_tracking = self._challenge_start_turns.copy()
+                print(f"DEBUG: [CHALLENGE_TRACKING] root._backup_challenge_tracking sincronizado: {self._challenge_start_turns}")
+                print(f"DEBUG: [CHALLENGE_TRACKING] NOTA: Limpeza órfã será executada no próximo reset de turno")
         else:
             self._current_turn_number = 1     # Contador de turnos do jogador
             self._current_turn = 1           # Contador de turnos para o sistema de Events (começa em 1)
             self._current_turn_id = 1        # ID do turno atual para controle
             print(f"DEBUG: [TURN_INIT] Contadores de turnos inicializados em 1 (primeiro jogo)")
-        
+            
+            # CORREÇÃO CRÍTICA: Inicializar turnos reais de Services vazios se não há backup
+            print(f"DEBUG: [SERVICE_TRACKING] === INICIALIZANDO TURNOS REAIS DE SERVICES (SEM BACKUP) ===")
+            if not hasattr(self, '_service_real_activation_turns'):
+                self._service_real_activation_turns = {}
+                print(f"DEBUG: [SERVICE_TRACKING] Turnos reais de Services inicializados vazios")
+            else:
+                print(f"DEBUG: [SERVICE_TRACKING] Turnos reais já existem: {self._service_real_activation_turns}")
+            
+            # CORREÇÃO CRÍTICA: Restaurar tracking de Challenges se existir no root (não backup)
+            print(f"DEBUG: [CHALLENGE_TRACKING] === RESTAURANDO TRACKING DE CHALLENGES (SEM BACKUP) ===")
+            print(f"DEBUG: [CHALLENGE_TRACKING] Tracking atual na instância: {getattr(self, '_challenge_start_turns', {})}")
+            
+            # PRIORIDADE: Se já há tracking na instância atual, preservar
+            if hasattr(self, '_challenge_start_turns') and self._challenge_start_turns:
+                print(f"DEBUG: [CHALLENGE_TRACKING] PRESERVANDO tracking existente na instância: {self._challenge_start_turns}")
+                # Ainda assim verificar se há backup no root para mesclar
+                if hasattr(root, '_backup_challenge_tracking'):
+                    root_backup = root._backup_challenge_tracking
+                    print(f"DEBUG: [CHALLENGE_TRACKING] Mesclando com backup do root: {root_backup}")
+                    for path, turn in root_backup.items():
+                        if path not in self._challenge_start_turns:
+                            self._challenge_start_turns[path] = turn
+                            print(f"DEBUG: [CHALLENGE_TRACKING] Adicionado do root: {os.path.basename(path)} -> turno {turn}")
+            else:
+                # Se não há tracking existente, tentar restaurar do root
+                if hasattr(root, '_backup_challenge_tracking'):
+                    self._challenge_start_turns = root._backup_challenge_tracking.copy()
+                    print(f"DEBUG: [CHALLENGE_TRACKING] Tracking restaurado do root: {self._challenge_start_turns}")
+                else:
+                    self._challenge_start_turns = {}
+                    print(f"DEBUG: [CHALLENGE_TRACKING] Nenhum tracking encontrado - inicializando vazio")
+            
         print(f"DEBUG: [TURN_INIT] ======= CONTADORES FINAIS =======")
         print(f"DEBUG: [TURN_INIT] _current_turn_number: {self._current_turn_number}")
         print(f"DEBUG: [TURN_INIT] _current_turn: {self._current_turn}")
         print(f"DEBUG: [TURN_INIT] _current_turn_id: {self._current_turn_id}")
+        print(f"DEBUG: [TURN_INIT] _challenge_start_turns: {self._challenge_start_turns}")
         print(f"DEBUG: [TURN_INIT] ======= FIM INICIALIZAÇÃO =======")
         
         # SISTEMA DE TRACKING TEMPORAL PARA EVENTS
+        # CORREÇÃO CRÍTICA: Restaurar tracking de Events do backup se existir
+        print(f"DEBUG: [EVENT_TRACKING] === INICIALIZANDO TRACKING DE EVENTS ===")
+        
+        # Inicializar estruturas básicas
         self._event_start_turns = {}     # {carta_path: turno_inicio}
         self._event_duration_tracking = {} # {carta_path: {'duration_turns': int, 'start_turn': int}}
+        
+        # NOVO: Sistema de backup para Events (similar aos Challenges)
+        if hasattr(root, '_backup_turn_counters'):
+            backup_counters = root._backup_turn_counters
+            
+            # Restaurar tracking de Events do backup
+            backup_event_tracking = backup_counters.get('_event_duration_tracking', {})
+            backup_event_start_turns = backup_counters.get('_event_start_turns', {})
+            
+            print(f"DEBUG: [EVENT_TRACKING] Tracking de Events encontrado no backup:")
+            print(f"DEBUG: [EVENT_TRACKING]   _event_duration_tracking: {backup_event_tracking}")
+            print(f"DEBUG: [EVENT_TRACKING]   _event_start_turns: {backup_event_start_turns}")
+            
+            if backup_event_tracking:
+                self._event_duration_tracking = backup_event_tracking.copy()
+                print(f"DEBUG: [EVENT_TRACKING] ✅ _event_duration_tracking restaurado do backup")
+                
+                # Log detalhado do tracking restaurado
+                for path, tracking in self._event_duration_tracking.items():
+                    print(f"DEBUG: [EVENT_TRACKING]   {os.path.basename(path)}:")
+                    print(f"DEBUG: [EVENT_TRACKING]     start_turn: {tracking.get('start_turn')}")
+                    print(f"DEBUG: [EVENT_TRACKING]     duration_turns: {tracking.get('duration_turns')}")
+                    print(f"DEBUG: [EVENT_TRACKING]     expires_turn: {tracking.get('expires_turn')}")
+                    print(f"DEBUG: [EVENT_TRACKING]     is_active: {tracking.get('is_active')}")
+            
+            if backup_event_start_turns:
+                self._event_start_turns = backup_event_start_turns.copy()
+                print(f"DEBUG: [EVENT_TRACKING] ✅ _event_start_turns restaurado do backup")
+        else:
+            print(f"DEBUG: [EVENT_TRACKING] Nenhum backup encontrado - tracking inicializado vazio")
         
         # SISTEMA DE TRACKING TEMPORAL PARA SERVICES TEMPORARY
         self._service_start_turns = {}   # {carta_path: turno_inicio}
         self._service_duration_tracking = {} # {carta_path: {'duration_turns': int, 'start_turn': int}}
+        
+        # NOVO: SISTEMA DE PRESERVAÇÃO DO TURNO REAL DE ATIVAÇÃO DE SERVICES
+        # Esta variável preserva o turno em que o Service foi REALMENTE ativado pelo jogador
+        # Diferente de _service_start_turns que pode ser recriado durante reconstruções da interface
+        self._service_real_activation_turns = {}  # {carta_path: turno_real_de_ativacao}
+        
+        # SUPER BACKUP CRÍTICO PARA SERVICES (similar aos Challenges)
+        # Garante que o tracking de Services nunca seja perdido durante reconstruções
+        if not hasattr(self.master, '_super_service_backup'):
+            self.master._super_service_backup = {}
+        if not hasattr(root, '_super_service_backup'):
+            root._super_service_backup = {}
+        
+        # Backup global adicional para Services (para casos extremos)
+        if not hasattr(self, '_service_backup_registry'):
+            self._service_backup_registry = {}
+        
+        # Restaurar tracking de Services consolidado de múltiplos backups
+        print(f"DEBUG: [SERVICE_TRACKING] === INICIALIZANDO TRACKING ROBUSTO DE SERVICES ===")
+        
+        # Consolidar Services de todos os backups temporários
+        service_tracking_consolidado = {}
+        service_duration_consolidado = {}
+        
+        # 1. Backup imediato do master
+        if hasattr(self.master, '_service_tracking_backup_imediato'):
+            backup_data = self.master._service_tracking_backup_imediato
+            if backup_data:
+                print(f"DEBUG: [SERVICE_TRACKING] Consolidando do master_imediato: {len(backup_data)} itens")
+                service_tracking_consolidado.update(backup_data)
+        
+        # 2. Backup do root
+        if hasattr(root, '_backup_service_tracking'):
+            backup_data = root._backup_service_tracking
+            if backup_data:
+                print(f"DEBUG: [SERVICE_TRACKING] Consolidando do root_backup: {len(backup_data)} itens")
+                service_tracking_consolidado.update(backup_data)
+        
+        # 3. Backup de duration tracking
+        if hasattr(root, '_backup_turn_counters'):
+            backup_counters = root._backup_turn_counters
+            backup_service_duration = backup_counters.get('_service_duration_tracking', {})
+            if backup_service_duration:
+                print(f"DEBUG: [SERVICE_TRACKING] Consolidando duration tracking: {len(backup_service_duration)} itens")
+                service_duration_consolidado.update(backup_service_duration)
+        
+        # Aplicar consolidação
+        if service_tracking_consolidado:
+            self._service_start_turns = service_tracking_consolidado.copy()
+            print(f"DEBUG: [SERVICE_TRACKING] ✅ Service tracking consolidado restaurado: {len(self._service_start_turns)} itens")
+        
+        if service_duration_consolidado:
+            self._service_duration_tracking = service_duration_consolidado.copy()
+            print(f"DEBUG: [SERVICE_TRACKING] ✅ Service duration tracking consolidado restaurado: {len(self._service_duration_tracking)} itens")
+        
+        # Sincronizar backup principal
+        if service_tracking_consolidado or service_duration_consolidado:
+            root._backup_service_tracking = self._service_start_turns.copy()
+            print(f"DEBUG: [SERVICE_TRACKING] ✅ Backup principal de Services sincronizado")
+        
+        print(f"DEBUG: [SERVICE_TRACKING] === FIM INICIALIZAÇÃO ROBUSTA DE SERVICES ===")
+        
+        # SUPER BACKUP CRÍTICO PARA EVENTS (similar aos Challenges)
+        # Garante que o tracking de Events nunca seja perdido durante reconstruções
+        if not hasattr(self.master, '_super_event_backup'):
+            self.master._super_event_backup = {}
+        if not hasattr(root, '_super_event_backup'):
+            root._super_event_backup = {}
+        
+        # Backup global adicional para Events (para casos extremos)
+        if not hasattr(self, '_event_backup_registry'):
+            self._event_backup_registry = {}
+        
+        # Consolidar Events de todos os backups temporários
+        event_tracking_consolidado = {}
+        event_duration_consolidado = {}
+        
+        print(f"DEBUG: [EVENT_TRACKING] === MELHORANDO TRACKING ROBUSTO DE EVENTS ===")
+        
+        # 1. Backup imediato do master
+        if hasattr(self.master, '_event_tracking_backup_imediato'):
+            backup_data = self.master._event_tracking_backup_imediato
+            if backup_data:
+                print(f"DEBUG: [EVENT_TRACKING] Consolidando do master_imediato: {len(backup_data)} itens")
+                event_tracking_consolidado.update(backup_data)
+        
+        # 2. Backup do root
+        if hasattr(root, '_backup_event_tracking'):
+            backup_data = root._backup_event_tracking
+            if backup_data:
+                print(f"DEBUG: [EVENT_TRACKING] Consolidando do root_backup: {len(backup_data)} itens")
+                event_tracking_consolidado.update(backup_data)
+        
+        # 3. Backup de duration tracking (já implementado mas melhorado)
+        backup_counters = getattr(root, '_backup_turn_counters', {})
+        backup_event_duration = backup_counters.get('_event_duration_tracking', {})
+        backup_event_start_turns = backup_counters.get('_event_start_turns', {})
+        
+        if backup_event_duration:
+            print(f"DEBUG: [EVENT_TRACKING] Consolidando duration tracking: {len(backup_event_duration)} itens")
+            event_duration_consolidado.update(backup_event_duration)
+        
+        if backup_event_start_turns:
+            print(f"DEBUG: [EVENT_TRACKING] Consolidando start turns: {len(backup_event_start_turns)} itens")
+            event_tracking_consolidado.update(backup_event_start_turns)
+        
+        # Aplicar consolidação melhorada
+        if event_tracking_consolidado:
+            self._event_start_turns.update(event_tracking_consolidado)
+            print(f"DEBUG: [EVENT_TRACKING] ✅ Event tracking consolidado melhorado: {len(self._event_start_turns)} itens")
+        
+        if event_duration_consolidado:
+            self._event_duration_tracking.update(event_duration_consolidado)
+            print(f"DEBUG: [EVENT_TRACKING] ✅ Event duration tracking consolidado melhorado: {len(self._event_duration_tracking)} itens")
+        
+        # Sincronizar backup principal
+        if event_tracking_consolidado or event_duration_consolidado:
+            root._backup_event_tracking = self._event_start_turns.copy()
+            print(f"DEBUG: [EVENT_TRACKING] ✅ Backup principal de Events sincronizado")
+        
+        print(f"DEBUG: [EVENT_TRACKING] === FIM MELHORAMENTO ROBUSTO DE EVENTS ===")
         
         # INICIALIZAÇÃO DAS LISTAS DE CARTAS ATIVAS (movido do playerdashboard_interface)
         self.active_challenge = None  # Só pode haver 1 challenge ativo
@@ -775,22 +1579,39 @@ class PlayerDashboard(tk.Toplevel):
         CORREÇÃO: NÃO incrementar contador aqui - contadores já vêm incrementados do end_turn anterior
         """
         print("DEBUG: [TURN_RESET] === RESETANDO CONTADORES DE PROCESSAMENTO ===")
-        print(f"DEBUG: [TURN_RESET] Turno atual preservado do end_turn anterior: {self._current_turn_id}")
-        print(f"DEBUG: [TURN_RESET] Todos os contadores estão sincronizados:")
+        print(f"DEBUG: [TURN_RESET] Contadores preservados do end_turn anterior (SINCRONIZADOS):")
         print(f"DEBUG: [TURN_RESET]   _current_turn_number (Challenges): {self._current_turn_number}")
         print(f"DEBUG: [TURN_RESET]   _current_turn (Events): {self._current_turn}")
         print(f"DEBUG: [TURN_RESET]   _current_turn_id (Processing): {self._current_turn_id}")
         
-        # Resetar contadores de processamento SEM incrementar turno
+        # VERIFICAÇÃO CRÍTICA: Garantir sincronização de todos os contadores
+        if not (self._current_turn_number == self._current_turn == self._current_turn_id):
+            print(f"DEBUG: [TURN_RESET] ⚠️  WARNING: CONTADORES DESSINCRONIZADOS!")
+            # Correção automática para o maior valor
+            max_turn = max(self._current_turn_number, self._current_turn, self._current_turn_id)
+            self._current_turn_number = max_turn
+            self._current_turn = max_turn
+            self._current_turn_id = max_turn
+            print(f"DEBUG: [TURN_RESET] ✅ CONTADORES SINCRONIZADOS para turno {max_turn}")
+        
+        # Resetar APENAS os contadores de processamento por turno (não os contadores de turno)
         old_rxd_counters = self._rxd_processed_this_turn.copy()
         old_lost_counters = self._lost_processed_this_turn.copy()
+        old_interacoes = getattr(self, '_cartas_interagidas_jogador', set()).copy()
         
         self._rxd_processed_this_turn = {}
         self._lost_processed_this_turn = {}
+        self._cartas_interagidas_jogador = set()  # Reset interações do jogador
         
         print(f"DEBUG: [TURN_RESET] Contadores Rxd anteriores: {old_rxd_counters}")
         print(f"DEBUG: [TURN_RESET] Contadores Lost anteriores: {old_lost_counters}")
-        print(f"DEBUG: [TURN_RESET] Contadores resetados - botões + podem aparecer novamente")
+        print(f"DEBUG: [TURN_RESET] Interações jogador anteriores: {len(old_interacoes)} cartas")
+        print(f"DEBUG: [TURN_RESET] SUCCESS: Contadores de processamento resetados - botões + disponíveis")
+        print(f"DEBUG: [TURN_RESET] SUCCESS: Interações do jogador resetadas - novo turno limpo")
+        
+        # NOVA FUNCIONALIDADE: Limpar tracking órfão de Challenges que não estão mais no carrossel
+        self._cleanup_orphaned_challenge_tracking()
+        
         print("DEBUG: [TURN_RESET] === FIM RESET CONTADORES ===")
 
     def _get_processed_this_turn(self, carta_path, tipo):
@@ -1253,6 +2074,9 @@ class PlayerDashboard(tk.Toplevel):
         print(f"DEBUG: [ESTADO] controles_gestao_visiveis: {state.get('controles_gestao_visiveis', False)}")
         print(f"DEBUG: [ESTADO] botao_seta_visivel: {state.get('botao_seta_visivel', False)}")
         
+        # CRÍTICO: Preservar tracking de Challenges no estado salvo
+        state['_challenge_start_turns'] = self._challenge_start_turns.copy()
+        
         self._saved_dashboard_state = state
         print(f"DEBUG: [ESTADO] SUCCESS: Estado salvo com sucesso!")
         print(f"DEBUG: [ESTADO] Carta selecionada: {state.get('selected_carousel_card')}")
@@ -1260,6 +2084,7 @@ class PlayerDashboard(tk.Toplevel):
         print(f"DEBUG: [ESTADO] Índice destaque roxo: {state.get('destaque_roxo_index')}")
         print(f"DEBUG: [ESTADO] Final phase active: {state.get('_final_phase_active')}")
         print(f"DEBUG: [ESTADO] Gestão ativa: {state.get('_final_phase_gestao_ativa')}")
+        print(f"DEBUG: [ESTADO] Challenge tracking preservado: {state.get('_challenge_start_turns')}")
         print(f"DEBUG: [ESTADO] Botões preservados: rxd={state.get('btn_plus_rxd_visivel')}, lost={state.get('btn_plus_lost_visivel')}, seta={state.get('btn_seta_visivel')}")
         
         # GARANTIA ADICIONAL: Também salvar no estado imediato para fallback
@@ -1490,6 +2315,13 @@ class PlayerDashboard(tk.Toplevel):
         self._carta_atual_gestao = state.get('_carta_atual_gestao', 0)
         self._valores_pacotes = state.get('_valores_pacotes', {})
         
+        # CRÍTICO: Restaurar tracking de Challenges
+        if '_challenge_start_turns' in state:
+            self._challenge_start_turns = state['_challenge_start_turns'].copy()
+            print(f"DEBUG: [ESTADO] Challenge tracking restaurado: {self._challenge_start_turns}")
+        else:
+            print(f"DEBUG: [ESTADO] WARNING: Nenhum challenge tracking no estado salvo")
+        
         print(f"DEBUG: [ESTADO] Estado restaurado: carta_selecionada={self.selected_carousel_card}, "
               f"final_phase_active={self._final_phase_active}, "
               f"gestao_ativa={self._final_phase_gestao_ativa}, "
@@ -1717,10 +2549,10 @@ class PlayerDashboard(tk.Toplevel):
             if not cards_found:
                 print(f"DEBUG: [add_starter_cards] NENHUMA ESTRUTURA FUNCIONOU para {card_type}")
         
-        # Adicionar algumas cartas neutras (actions, events) + CHALLENGES ADICIONADAS ESPECIFICAMENTE
+        # Adicionar algumas cartas neutras (actions, events, challenges)
         print("DEBUG: [add_starter_cards] Processando cartas neutras...")
         neutral_types = {
-            "challenges": "Challenges",  # SUCCESS: CHALLENGES HABILITADAS - adicionar Challenge_3.png
+            "challenges": "Challenges",
             "actions": "Actions", 
             "events": "Events"
         }
@@ -1742,32 +2574,32 @@ class PlayerDashboard(tk.Toplevel):
                         files_in_path = os.listdir(path_attempt)
                         print(f"DEBUG: [add_starter_cards] Arquivos neutros encontrados: {files_in_path}")
                         
-                        # ESPECIAL: Para Actions, verificar explicitamente se Action_70.png existe
+                        # ESPECIAL: Para Actions, verificar explicitamente se Action_31.png e Action_46.png existem
                         if card_type == "actions":
-                            action_70_path = os.path.join(path_attempt, "Action_70.png")
-                            print(f"DEBUG: [add_starter_cards] Verificação explícita Action_70.png em: {action_70_path}")
-                            print(f"DEBUG: [add_starter_cards] Action_70.png existe? {os.path.exists(action_70_path)}")
-                            if os.path.exists(action_70_path) and "Action_70.png" not in files_in_path:
-                                print(f"DEBUG: [add_starter_cards] WARNING: PROBLEMA: Action_70.png existe no filesystem mas não retornado por listdir!")
-                                files_in_path.append("Action_70.png")  # Força a adição
+                            action_31_path = os.path.join(path_attempt, "Action_31.png")
+                            action_46_path = os.path.join(path_attempt, "Action_46.png")
+                            print(f"DEBUG: [add_starter_cards] Verificação explícita Action_31.png em: {action_31_path}")
+                            print(f"DEBUG: [add_starter_cards] Action_31.png existe? {os.path.exists(action_31_path)}")
+                            print(f"DEBUG: [add_starter_cards] Verificação explícita Action_46.png em: {action_46_path}")
+                            print(f"DEBUG: [add_starter_cards] Action_46.png existe? {os.path.exists(action_46_path)}")
+                            if os.path.exists(action_31_path) and "Action_31.png" not in files_in_path:
+                                print(f"DEBUG: [add_starter_cards] WARNING: PROBLEMA: Action_31.png existe no filesystem mas não retornado por listdir!")
+                                files_in_path.append("Action_31.png")  # Força a adição
+                            if os.path.exists(action_46_path) and "Action_46.png" not in files_in_path:
+                                print(f"DEBUG: [add_starter_cards] WARNING: PROBLEMA: Action_46.png existe no filesystem mas não retornado por listdir!")
+                                files_in_path.append("Action_46.png")  # Força a adição
                         
                         card_files = [os.path.join(path_attempt, f) for f in files_in_path 
                                     if f.lower().endswith(('.png', '.jpg', '.jpeg'))]
                         print(f"DEBUG: [add_starter_cards] Arquivos de carta neutros filtrados: {[os.path.basename(f) for f in card_files]}")
                         if card_files:
                             # Para actions e events, filtrar apenas cartas válidas para o jogador
-                            # Para challenges, adicionar especificamente o Challenge_8.png solicitado
                             if card_type == "challenges":
-                                # Adicionar especificamente apenas Challenge_3.png se estiver disponível
-                                target_challenges = ["Challenge_3.png"]
                                 valid_cards = []
                                 
-                                for target_challenge in target_challenges:
-                                    for card_file in card_files:
-                                        if os.path.basename(card_file) == target_challenge:
-                                            valid_cards.append(card_file)
-                                            print(f"DEBUG: [add_starter_cards] Challenge específico encontrado: {target_challenge}")
-                                            break
+                                # Adicionar challenges genéricos disponíveis
+                                for card_file in card_files:
+                                    valid_cards.append(card_file)
                                 
                                 if not valid_cards:
                                     # Se Challenge_3 não estiver disponível, pegar o primeiro Challenge disponível
@@ -1786,15 +2618,15 @@ class PlayerDashboard(tk.Toplevel):
                                     print(f"DEBUG: [add_starter_cards] Verificando arquivo {card_type}: {filename}")
                                     try:
                                         if card_type == "actions":
-                                            # ESPECÍFICO: Incluir Action_70.png e Action_10.png
-                                            if filename == "Action_70.png":
+                                            # ESPECÍFICO: Incluir Action_31.png e Action_46.png
+                                            if filename == "Action_31.png":
                                                 valid_cards.append(card_file)
-                                                print(f"DEBUG: [add_starter_cards] Action FORÇADA (Action_70): {filename}")
-                                            elif filename == "Action_10.png":
+                                                print(f"DEBUG: [add_starter_cards] Action FORÇADA (Action_31): {filename}")
+                                            elif filename == "Action_46.png":
                                                 valid_cards.append(card_file)
-                                                print(f"DEBUG: [add_starter_cards] Action FORÇADA (Action_10): {filename}")
+                                                print(f"DEBUG: [add_starter_cards] Action FORÇADA (Action_46): {filename}")
                                             else:
-                                                print(f"DEBUG: [add_starter_cards] Action IGNORADA (não é Action_70 nem Action_10): {filename}")
+                                                print(f"DEBUG: [add_starter_cards] Action IGNORADA (não é Action_31 nem Action_46): {filename}")
                                         elif card_type == "events":
                                             # Event_1.png -> event_1
                                             match = re.search(r'Event_(\d+)\.', filename)
@@ -1819,9 +2651,9 @@ class PlayerDashboard(tk.Toplevel):
                                 if card_type == "events":
                                     max_cards = min(2, len(card_files))  # Máximo 2 events (Event_55 e Event_14)
                                 elif card_type == "actions":
-                                    max_cards = min(2, len(card_files))  # Máximo 2 actions (Action_70.png e Action_10.png)
+                                    max_cards = min(4, len(card_files))  # Máximo 4 actions (Action_70, Action_10, Action_1, Action_16)
                                 elif card_type == "challenges":
-                                    max_cards = min(1, len(card_files))  # Máximo 1 Challenge (Challenge_3.png)
+                                    max_cards = min(2, len(card_files))  # Máximo 2 Challenges
                                 else:
                                     max_cards = min(3, len(card_files))
                                 
@@ -1836,35 +2668,15 @@ class PlayerDashboard(tk.Toplevel):
                                         print(f"DEBUG: [add_starter_cards] Challenge adicionado ao inventário: {os.path.basename(carta_path)}")
                                         print(f"DEBUG: [add_starter_cards] SUCCESS: Challenge estará disponível na página Activities/Challenges")
                                     
-                                    # Se for uma carta Event, registrar o tracking de duração
+                                    # Se for uma carta Event, NÃO criar tracking automático
                                     elif card_type == "events":
-                                        current_turn = getattr(self, '_current_turn', 0)
                                         carta_path = card_files[i]
                                         
-                                        # Obter duration_turns da carta
-                                        from cards_database import get_event_duration
-                                        duration_turns = get_event_duration(carta_path)
-                                        print(f"DEBUG: [add_starter_cards] get_event_duration({os.path.basename(carta_path)}) returned: {duration_turns} (type: {type(duration_turns)})")
-                                        if duration_turns is not None:
-                                            # CORREÇÃO: Verificar se é duração variável
-                                            if duration_turns == "variable":
-                                                print(f"DEBUG: [add_starter_cards] Event {os.path.basename(carta_path)} detectado como duração VARIÁVEL")
-                                                self._event_duration_tracking[carta_path] = {
-                                                    'start_turn': current_turn,
-                                                    'duration_turns': duration_turns,
-                                                    'expires_turn': None  # Será definido após o dado
-                                                }
-                                                print(f"DEBUG: [add_starter_cards] Event tracking adicionado: {os.path.basename(carta_path)} - turno:{current_turn}, duração:{duration_turns} (variável), expira:A ser determinado")
-                                            else:
-                                                print(f"DEBUG: [add_starter_cards] Event {os.path.basename(carta_path)} detectado como duração FIXA: {duration_turns}")
-                                                self._event_duration_tracking[carta_path] = {
-                                                    'start_turn': current_turn,
-                                                    'duration_turns': duration_turns,
-                                                    'expires_turn': current_turn + duration_turns  # expira após duration_turns turnos
-                                                }
-                                                print(f"DEBUG: [add_starter_cards] Event tracking adicionado: {os.path.basename(carta_path)} - turno:{current_turn}, duração:{duration_turns}, expira:{current_turn + duration_turns}")
-                                        else:
-                                            print(f"DEBUG: [add_starter_cards] Duração não encontrada para Event: {os.path.basename(carta_path)}")
+                                        print(f"DEBUG: [add_starter_cards] === EVENT ADICIONADO AO INVENTÁRIO ===")
+                                        print(f"DEBUG: [add_starter_cards] Event: {os.path.basename(carta_path)}")
+                                        print(f"DEBUG: [add_starter_cards] ⚠️  TRACKING NÃO CRIADO - será criado quando Event for ativado")
+                                        print(f"DEBUG: [add_starter_cards] ✅  Event adicionado ao inventário sem tracking pré-criado")
+                                        print(f"DEBUG: [add_starter_cards] === FIM: EVENT NO INVENTÁRIO ===")
                             else:
                                 print(f"DEBUG: [add_starter_cards] Nenhuma carta válida encontrada para {card_type} após filtragem")
                             cards_found = True
@@ -1883,13 +2695,13 @@ class PlayerDashboard(tk.Toplevel):
         for tipo, cartas in self.inventario.items():
             print(f"DEBUG: [PlayerDashboard]   {tipo}: {len(cartas)} cartas")
         
-        # Verificar se temos Action_70.png e Action_10.png no inventário
-        action_70_present = any("Action_70.png" in carta for carta in self.inventario.get("actions", []))
-        action_10_present = any("Action_10.png" in carta for carta in self.inventario.get("actions", []))
-        print(f"DEBUG: [PlayerDashboard] Action_70.png presente? {action_70_present}")
-        print(f"DEBUG: [PlayerDashboard] Action_10.png presente? {action_10_present}")
+        # Verificar se temos as Actions específicas no inventário
+        action_31_present = any("Action_31.png" in carta for carta in self.inventario.get("actions", []))
+        action_46_present = any("Action_46.png" in carta for carta in self.inventario.get("actions", []))
+        print(f"DEBUG: [PlayerDashboard] Action_31.png presente? {action_31_present}")
+        print(f"DEBUG: [PlayerDashboard] Action_46.png presente? {action_46_present}")
         
-        if action_70_present or action_10_present:
+        if action_31_present or action_46_present:
             print(f"DEBUG: [PlayerDashboard] SUCCESS: Actions específicas encontradas! NÃO adicionando Actions extras")
             # Só garantir que há Events suficientes, mas não Actions extras
             current_actions = len(self.inventario.get("actions", []))
@@ -1949,6 +2761,60 @@ class PlayerDashboard(tk.Toplevel):
             print(f"DEBUG: [PlayerDashboard] WARNING: Equipment_2.png deve ser ativada manualmente para usar REMOVE ROUTER")
         else:
             print(f"DEBUG: [PlayerDashboard] WARNING: Equipment_2.png não foi encontrada - REMOVE ROUTER não funcionará")
+        
+        # Adicionar Equipment_10.png especificamente ao inventário
+        equipment_10_path = os.path.join(base_path, "Equipments", "Residential-level", player_color_capitalized, "Equipment_10.png")
+        
+        print(f"DEBUG: [PlayerDashboard] Tentando adicionar Equipment_10.png para cor {player_color_capitalized}")
+        print(f"DEBUG: [PlayerDashboard] Caminho completo: {equipment_10_path}")
+        
+        # Verificar se o arquivo existe e adicionar ao inventário se não estiver já lá
+        equipment_10_final_path = None
+        if os.path.exists(equipment_10_path):
+            if equipment_10_path not in self.inventario["equipments"]:
+                self.inventario["equipments"].append(equipment_10_path)
+                print(f"DEBUG: [PlayerDashboard] SUCCESS: Equipment_10.png adicionada ao inventário: {equipment_10_path}")
+                equipment_10_final_path = equipment_10_path
+            else:
+                print(f"DEBUG: [PlayerDashboard] Equipment_10.png já estava no inventário")
+                equipment_10_final_path = equipment_10_path
+        else:
+            print(f"DEBUG: [PlayerDashboard] Equipment_10.png não encontrada em: {equipment_10_path}")
+            # Fallback: tentar outros caminhos possíveis incluindo variações de cor
+            fallback_paths_10 = [
+                os.path.join(base_path, "Equipments", "Residential-level", "Equipment_10.png"),  # Sem cor
+                os.path.join(base_path, "equipments", "Residential-level", player_color_capitalized, "Equipment_10.png"),  # Minúscula
+                os.path.join(os.path.dirname(__file__), "Equipments", "Residential-level", player_color_capitalized, "Equipment_10.png"),
+                os.path.join(os.path.dirname(__file__), "equipments", "Residential-level", player_color_capitalized, "Equipment_10.png")
+            ]
+            
+            for fallback_path in fallback_paths_10:
+                print(f"DEBUG: [PlayerDashboard] Testando fallback Equipment_10: {fallback_path}")
+                if os.path.exists(fallback_path):
+                    if fallback_path not in self.inventario["equipments"]:
+                        self.inventario["equipments"].append(fallback_path)
+                        print(f"DEBUG: [PlayerDashboard] SUCCESS: Equipment_10.png adicionada via fallback: {fallback_path}")
+                        equipment_10_final_path = fallback_path
+                        break
+                    else:
+                        print(f"DEBUG: [PlayerDashboard] Equipment_10.png já estava no inventário (fallback)")
+                        equipment_10_final_path = fallback_path
+                        break
+        
+        # Equipment_10.png adicionada ao inventário mas NÃO ativada automaticamente
+        # O jogador pode ativar manualmente para usar LINK UPGRADE
+        if equipment_10_final_path:
+            print(f"DEBUG: [PlayerDashboard] SUCCESS: Equipment_10.png adicionada ao inventário: {os.path.basename(equipment_10_final_path)}")
+            print(f"DEBUG: [PlayerDashboard] INFO: Equipment_10.png disponível para LINK UPGRADE")
+        else:
+            print(f"DEBUG: [PlayerDashboard] WARNING: Equipment_10.png não foi encontrada - LINK UPGRADE pode não funcionar")
+        
+        # CORREÇÃO CRÍTICA: NÃO ativar Events automaticamente durante inicialização
+        # O tracking será criado apenas quando o Event for realmente ativado
+        if self.inventario.get("events"):
+            print("DEBUG: [add_starter_cards] Events encontrados no inventário")
+            print("DEBUG: [add_starter_cards] ⚠️  Events NÃO serão ativados automaticamente")
+            print("DEBUG: [add_starter_cards] ✅  Tracking será criado quando Event for ativado no jogo")
     
     def _get_card_message_size(self, carta_path):
         """
@@ -2599,26 +3465,35 @@ class PlayerDashboard(tk.Toplevel):
             print(f"DEBUG: DEFINITIVO - Carta para aplicar valores: {os.path.basename(carta_real_para_valores) if carta_real_para_valores else 'N/A'}")
             print(f"DEBUG: DEFINITIVO - Message size: {correct_message_size}")
             
-            # CORREÇÃO PROBLEMA 1: Verificar se os valores preservados são zeros inválidos
+            # CORREÇÃO CRÍTICA: Validar consistência dos valores preservados
             to_send_preservado = preserved_stats.get("To send", 0)
             rxd_preservado = preserved_stats.get("Rxd", 0)
             lost_preservado = preserved_stats.get("Lost", 0)
             
-            # Se To send preservado é 0, verificar se há message_size válido na barra atual
-            if to_send_preservado == 0 and "To send" in self.progress_bars:
-                current_max = self.progress_bars["To send"]["maximum"]
-                current_value = self.progress_bars["To send"]["value"]
+            # CORREÇÃO FUNDAMENTAL: Sempre recalcular To send baseado em message_size - (Rxd + Lost)
+            # Isso garante que To send seja sempre consistente independentemente dos valores preservados
+            to_send_correto = max(correct_message_size - (rxd_preservado + lost_preservado), 0)
+            
+            print(f"DEBUG: VALIDAÇÃO DE CONSISTÊNCIA:")
+            print(f"DEBUG:   Message size: {correct_message_size}")
+            print(f"DEBUG:   Rxd preservado: {rxd_preservado}")
+            print(f"DEBUG:   Lost preservado: {lost_preservado}")
+            print(f"DEBUG:   To send preservado: {to_send_preservado}")
+            print(f"DEBUG:   To send CORRETO calculado: {to_send_correto}")
+            
+            # CORREÇÃO: Se To send preservado não está correto, corrigir automaticamente
+            if to_send_preservado != to_send_correto:
+                print(f"DEBUG: CORREÇÃO AUTOMÁTICA: To send inconsistente!")
+                print(f"DEBUG:   Preservado: {to_send_preservado}")
+                print(f"DEBUG:   Correto: {to_send_correto}")
+                print(f"DEBUG:   Aplicando correção automática...")
                 
-                print(f"DEBUG: CORREÇÃO PROBLEMA 1 - To send preservado é 0")
-                print(f"DEBUG: Máximo atual da barra: {current_max}, Valor atual: {current_value}")
-                
-                # Se a barra já tem um valor válido da base de dados, não sobrescrever com zero
-                if current_max > 0 and current_value > 0:
-                    print(f"DEBUG: SUCCESS: CORREÇÃO - Mantendo valor atual {current_value} em vez de aplicar 0")
-                    # Não aplicar o To send=0, manter o valor atual
-                    preserved_stats = preserved_stats.copy()
-                    preserved_stats["To send"] = current_value
-                    print(f"DEBUG: Stats corrigidas: {preserved_stats}")
+                # Corrigir os stats preservados
+                preserved_stats = preserved_stats.copy()
+                preserved_stats["To send"] = to_send_correto
+                print(f"DEBUG: SUCCESS: To send corrigido automaticamente: {to_send_correto}")
+            else:
+                print(f"DEBUG: SUCCESS: To send está consistente: {to_send_preservado}")
             
             # Aplicar cada valor preservado (possivelmente corrigido)
             for stat_name, value in preserved_stats.items():
@@ -3141,7 +4016,70 @@ class PlayerDashboard(tk.Toplevel):
             go_btn = tk.Button(center_frame, text="Go!", font=("Helvetica", 16, "bold"), bg="#005c75", fg="white")
 
             def roll_animation():
-                go_btn.pack_forget()
+                # CORREÇÃO CRÍTICA: Incrementar turno AQUI quando o jogador lança o dado
+                # Apenas incrementar se estivermos vindo de um End Turn (não primeiro turno do jogo)
+                # A flag coming_from_end_turn indica que acabamos de terminar um turno
+                
+                # Detectar ambiente para debug específico
+                universal_paths = get_universal_paths()
+                ambiente = "RASPBERRY PI" if universal_paths['environment'] == 'raspberry_pi' else "DESENVOLVIMENTO"
+                
+                coming_from_end_turn = hasattr(self, '_coming_from_end_turn') and self._coming_from_end_turn
+                print(f"DEBUG: [DICE_ROLL] AMBIENTE: {ambiente}")
+                print(f"DEBUG: [DICE_ROLL] Verificando flag _coming_from_end_turn...")
+                print(f"DEBUG: [DICE_ROLL] hasattr(self, '_coming_from_end_turn'): {hasattr(self, '_coming_from_end_turn')}")
+                if hasattr(self, '_coming_from_end_turn'):
+                    print(f"DEBUG: [DICE_ROLL] self._coming_from_end_turn: {self._coming_from_end_turn}")
+                print(f"DEBUG: [DICE_ROLL] coming_from_end_turn: {coming_from_end_turn}")
+                
+                if coming_from_end_turn:
+                    print("DEBUG: [DICE_ROLL] Vindo de END TURN - contadores já foram incrementados no backup!")
+                    print(f"DEBUG: [DICE_ROLL] Contadores atuais (já incrementados na inicialização):")
+                    print(f"DEBUG: [DICE_ROLL]   _current_turn_number: {self._current_turn_number}")
+                    print(f"DEBUG: [DICE_ROLL]   _current_turn: {self._current_turn}")
+                    print(f"DEBUG: [DICE_ROLL]   _current_turn_id: {self._current_turn_id}")
+                    
+                    # CRÍTICO: Verificar Challenges que atingiram o tempo limite após incremento
+                    try:
+                        print(f"DEBUG: [DICE_ROLL] Verificando Challenges que atingiram tempo limite...")
+                        self._verificar_challenges_tempo_limite()
+                        print(f"DEBUG: [DICE_ROLL] SUCCESS: Verificação de tempo limite executada")
+                    except Exception as e:
+                        print(f"DEBUG: [DICE_ROLL] ERROR: Erro na verificação de tempo limite: {e}")
+                    
+                    # NOVO: Verificar Events que expiraram no início do turno
+                    try:
+                        print(f"DEBUG: [DICE_ROLL] Verificando Events expirados no início do turno {self._current_turn}...")
+                        self._verificar_events_expirados()
+                        print(f"DEBUG: [DICE_ROLL] SUCCESS: Verificação de Events expirados executada")
+                    except Exception as e:
+                        print(f"DEBUG: [DICE_ROLL] ERROR: Erro na verificação de Events expirados: {e}")
+                    
+                    # CORREÇÃO: Limpar flag após processar
+                    self._coming_from_end_turn = False
+                    print("DEBUG: [DICE_ROLL] Flag _coming_from_end_turn limpa após processar incremento do backup")
+                else:
+                    print(f"DEBUG: [DICE_ROLL] AMBIENTE: {ambiente}")
+                    print("DEBUG: [DICE_ROLL] CRITICAL: Contadores NÃO foram incrementados!")
+                    print("DEBUG: [DICE_ROLL] Razão: Primeiro turno ou _coming_from_end_turn = False")
+                    print(f"DEBUG: [DICE_ROLL] Estado atual dos contadores (SEM INCREMENTO):")
+                    print(f"DEBUG: [DICE_ROLL]   _current_turn_number: {self._current_turn_number}")
+                    print(f"DEBUG: [DICE_ROLL]   _current_turn: {self._current_turn}")
+                    print(f"DEBUG: [DICE_ROLL]   _current_turn_id: {self._current_turn_id}")
+                    # GARANTIR que a flag está limpa no início do jogo
+                    self._coming_from_end_turn = False
+                
+                # CORREÇÃO CRÍTICA: Verificar se go_btn ainda existe antes de manipular
+                try:
+                    if go_btn.winfo_exists():
+                        go_btn.pack_forget()
+                    else:
+                        print("DEBUG: [DICE_ROLL] go_btn foi destruído - ignorando pack_forget")
+                except tk.TclError as e:
+                    print(f"DEBUG: [DICE_ROLL] WARNING: Erro ao ocultar go_btn (widget destruído): {e}")
+                except Exception as e:
+                    print(f"DEBUG: [DICE_ROLL] WARNING: Erro inesperado ao ocultar go_btn: {e}")
+                
                 frames = 25
                 results = [random.randint(1,6) for _ in range(frames)]
                 final = random.randint(1,6)
@@ -3687,32 +4625,77 @@ class PlayerDashboard(tk.Toplevel):
     def _criar_botao_end_turn(self):
         """Cria o botão End Turn"""
         def end_turn_action():
-            print("DEBUG: End Turn clicado - chamando método self.end_turn() correto")
+            print("DEBUG: [END_TURN_ACTION] === BOTÃO END TURN CLICADO ===")
             
-            # CORREÇÃO CRÍTICA: Chamar o método principal end_turn() que faz tudo corretamente
-            # incluindo incremento sincronizado de todos os contadores de turno
-            self.end_turn()
-            
-            # Após preservar todos os dados, resetar flags de fase para começar novo turno limpo
-            self._next_phase_active = False
-            self._final_phase_active = False
-            self._final_phase_gestao_ativa = False
-            self._challenge_accepted = False
-            self._show_end_turn_button = False
-            self._next_phase_manually_activated = False
-            
-            # RESETAR SELEÇÃO: Limpar seleção do carrossel para próximo turno
-            self.selected_carousel_index = None
-            self.selected_carousel_card = None
-            self._carta_destacada_posicao = None
-            
-            # Chamar a página de lançamento de dado
+            try:
+                # PROTEÇÃO: Desabilitar botão imediatamente para evitar duplo clique
+                if hasattr(self, 'end_turn_btn') and self.end_turn_btn:
+                    try:
+                        self.end_turn_btn.config(state="disabled", bg="#CCCCCC")
+                        print("DEBUG: [END_TURN_ACTION] Botão End Turn desabilitado")
+                    except tk.TclError:
+                        print("DEBUG: [END_TURN_ACTION] WARNING: Botão já destruído")
+                
+                # CORREÇÃO CRÍTICA: Chamar o método principal end_turn() que faz tudo corretamente
+                print("DEBUG: [END_TURN_ACTION] Chamando self.end_turn()...")
+                self.end_turn()
+                print("DEBUG: [END_TURN_ACTION] self.end_turn() executado com sucesso")
+                
+                # Resetar flags de fase para começar novo turno limpo
+                self._next_phase_active = False
+                self._final_phase_active = False
+                self._final_phase_gestao_ativa = False
+                self._challenge_accepted = False
+                self._show_end_turn_button = False
+                self._next_phase_manually_activated = False
+                
+                # RESETAR SELEÇÃO: Limpar seleção do carrossel para próximo turno
+                self.selected_carousel_index = None
+                self.selected_carousel_card = None
+                self._carta_destacada_posicao = None
+                print("DEBUG: [END_TURN_ACTION] Flags e seleções resetadas")
+                
+                # CORREÇÃO CRÍTICA: Verificar aplicação de forma mais robusta
+                try:
+                    # Aguardar um frame para garantir que end_turn() terminou completamente
+                    self.after(50, self._continue_end_turn_transition)
+                except Exception as e:
+                    print(f"DEBUG: [END_TURN_ACTION] ERROR: Erro ao agendar transição: {e}")
+                    
+            except Exception as e:
+                print(f"DEBUG: [END_TURN_ACTION] ERROR: Erro em end_turn_action: {e}")
+                import traceback
+                traceback.print_exc()
+
+        # Usar o método centralizado para gerenciar o botão
+        self._gerenciar_botao_end_turn(end_turn_action)
+        print("DEBUG: [CRIAR_END_TURN] Botão End Turn criado com comando configurado")
+        
+    def _continue_end_turn_transition(self):
+        """Continua a transição do End Turn após um delay"""
+        print("DEBUG: [END_TURN_TRANSITION] === CONTINUANDO TRANSIÇÃO ===")
+        try:
+            # Verificar se aplicação ainda existe
+            if not (hasattr(self, 'winfo_exists') and self.winfo_exists()):
+                print("DEBUG: [END_TURN_TRANSITION] WARNING: Aplicação destruída - abortando transição")
+                return
+                
+            # Obter dimensões da tela
             screen_width = self.winfo_screenwidth()
             screen_height = self.winfo_screenheight()
+            
+            print("DEBUG: [END_TURN_TRANSITION] Chamando show_dice_roll_screen...")
             self.show_dice_roll_screen(self.player_name, self.saldo, self.other_players, screen_width, screen_height)
+            print("DEBUG: [END_TURN_TRANSITION] SUCCESS: Transição para dice roll screen completa")
+            
+        except tk.TclError as e:
+            print(f"DEBUG: [END_TURN_TRANSITION] WARNING: TclError: {e}")
+        except Exception as e:
+            print(f"DEBUG: [END_TURN_TRANSITION] ERROR: Erro na transição: {e}")
+            import traceback
+            traceback.print_exc()
 
-        # Usar função centralizada
-        self._gerenciar_botao_end_turn(end_turn_action)
+
 
     def playerdashboard_interface(self, player_name, saldo, other_players, show_store_button=None):
         try:
@@ -3720,6 +4703,16 @@ class PlayerDashboard(tk.Toplevel):
             print(f"DEBUG: [INTERFACE] player_name: {player_name}, saldo: {saldo}")
             print(f"DEBUG: [INTERFACE] show_store_button: {show_store_button}")
             print(f"DEBUG: [INTERFACE] self existe? {hasattr(self, 'player_name')}")
+            
+            # CORREÇÃO CRÍTICA: Restaurar contadores de turno se foram feitos backups
+            # Isto resolve o problema dos contadores voltarem ao turno 1 após substituições
+            self._restore_turn_counters_after_reconstruction()
+            
+            # NOVA FUNCIONALIDADE: Limpar tracking órfão sempre ao entrar na interface principal
+            # Isto garante que Challenges completados/expirados não permanecem no tracking
+            print("DEBUG: [INTERFACE] === LIMPEZA ÓRFÃ NA INTERFACE ===")
+            self._cleanup_orphaned_challenge_tracking()
+            print("DEBUG: [INTERFACE] === FIM LIMPEZA ÓRFÃ ===")
             
             # PROTEÇÃO CONTRA LOOP: Limpar flag quando entra na interface principal
             self._inventory_opening = False
@@ -3749,9 +4742,11 @@ class PlayerDashboard(tk.Toplevel):
             # DETECÇÃO AUTOMÁTICA DE FASE: Verificar se o jogador deve estar numa fase avançada
             # com base no estado do jogo (cartas selecionadas, User IDs no inventário, etc.)
             # IMPORTANTE: Apenas aplicar quando NÃO está a vir da página de lançamento de dado
-            if not hasattr(self, '_turn_number'):
-                self._turn_number = 1
-            print(f"DEBUG: [INTERFACE] Turn number inicializado: {self._turn_number}")
+            
+            # CORREÇÃO CRÍTICA: _turn_number deve ser sempre sincronizado com _current_turn_number
+            # Remover lógica de incremento independente que causava dessincronização
+            self._turn_number = getattr(self, '_current_turn_number', 1)
+            print(f"DEBUG: [INTERFACE] Turn number sincronizado com _current_turn_number: {self._turn_number}")
             
             # FLUXO CORRETO: Sempre começar com página de dado, independentemente do turno
             # A detecção de fase só deve acontecer quando vem diretamente de uma Store/inventário
@@ -3761,11 +4756,11 @@ class PlayerDashboard(tk.Toplevel):
             if coming_from_dice_page:
                 # Reset da flag para evitar loops
                 self._coming_from_dice = False
-                print(f"DEBUG: [INTERFACE] Vindo da página de dado - turno {self._turn_number}")
+                print(f"DEBUG: [INTERFACE] Vindo da página de dado - turno correto: {self._turn_number}")
             else:
-                # Incrementar turno apenas quando NÃO vem da página de dado
-                self._turn_number = getattr(self, '_turn_number', 1) + 1
-                print(f"DEBUG: [INTERFACE] Navegação entre páginas - turno {self._turn_number}")
+                # CORREÇÃO: NÃO incrementar _turn_number aqui - apenas sincronizar
+                # O incremento real acontece no end_turn() via _increment_turn_counter()
+                print(f"DEBUG: [INTERFACE] Navegação entre páginas - turno atual: {self._turn_number}")
             
             print(f"DEBUG: [INTERFACE] Preparando para limpar widgets...")
             
@@ -4145,18 +5140,43 @@ class PlayerDashboard(tk.Toplevel):
                 print(f"DEBUG: Configurando botão '{text}' para Actions/Events")
                 def actions_events_handler():
                     print(f"DEBUG: *** BOTÃO ACTIONS/EVENTS CLICADO ***")
-                    # CAPTURAR ESTADO DOS BOTÕES IMEDIATAMENTE ANTES DE IR PARA INVENTÁRIO
+                    # CAPTURAR ESTADO DOS BOTÕES IMEDIATAMENTE ANTES DE PROCESSAR
                     self._capturar_estado_botoes_imediato()
-                    self.show_inventory_matrix(["actions", "events"])
+                    
+                    # NOVO: Verificar se há TODOS os events expirados primeiro
+                    events_expirados = self._encontrar_todos_events_expirados()
+                    if events_expirados:
+                        print(f"DEBUG: [ACTIONS_EVENTS_BUTTON] {len(events_expirados)} events expirados encontrados - iniciando overlays sequenciais")
+                        self._mostrar_overlays_events_expirados_sequencial(events_expirados, 0)
+                    else:
+                        print(f"DEBUG: [ACTIONS_EVENTS_BUTTON] Nenhum event expirado, abrindo inventário normal")
+                        self.show_inventory_matrix(["actions", "events"])
                 btn.config(command=actions_events_handler)
             else:
                 print(f"DEBUG: Configurando botão '{text}' para tipo '{inv_key}'")
-                def handler(tipo_carta=inv_key):
-                    print(f"DEBUG: *** BOTÃO {tipo_carta.upper()} CLICADO ***")
-                    # CAPTURAR ESTADO DOS BOTÕES IMEDIATAMENTE ANTES DE IR PARA INVENTÁRIO
-                    self._capturar_estado_botoes_imediato()
-                    self.show_inventory_matrix([tipo_carta])
-                btn.config(command=handler)
+                if inv_key == "services":
+                    # Handler especial para Services - verifica se há serviços expirados primeiro
+                    def services_handler():
+                        print(f"DEBUG: *** BOTÃO SERVICES CLICADO ***")
+                        # CAPTURAR ESTADO DOS BOTÕES IMEDIATAMENTE ANTES DE PROCESSAR
+                        self._capturar_estado_botoes_imediato()
+                        
+                        # NOVO: Verificar se há TODOS os serviços expirados primeiro
+                        services_expirados = self._encontrar_todos_services_expirados()
+                        if services_expirados:
+                            print(f"DEBUG: [SERVICE_BUTTON] {len(services_expirados)} serviços expirados encontrados - iniciando overlays sequenciais")
+                            self._mostrar_overlays_services_expirados_sequencial(services_expirados, 0)
+                        else:
+                            print(f"DEBUG: [SERVICE_BUTTON] Nenhum serviço expirado, abrindo inventário normal")
+                            self.show_inventory_matrix(["services"])
+                    btn.config(command=services_handler)
+                else:
+                    def handler(tipo_carta=inv_key):
+                        print(f"DEBUG: *** BOTÃO {tipo_carta.upper()} CLICADO ***")
+                        # CAPTURAR ESTADO DOS BOTÕES IMEDIATAMENTE ANTES DE IR PARA INVENTÁRIO
+                        self._capturar_estado_botoes_imediato()
+                        self.show_inventory_matrix([tipo_carta])
+                    btn.config(command=handler)
 
         # 2. Carrossel de cartas (agora abaixo dos botões)
         carousel_frame = tk.Frame(self, bg="black")
@@ -4636,6 +5656,9 @@ class PlayerDashboard(tk.Toplevel):
             if card_path in self.active_services:
                 self.active_services.remove(card_path)
                 print(f"DEBUG: Service desativado: {os.path.basename(card_path)} (total: {len(self.active_services)})")
+                
+                # CORREÇÃO: Limpar tracking do Service quando desativado manualmente
+                self._cleanup_expired_service_tracking(card_path)
 
     def discard_card(self, card_path):
         # Remove visualmente/desativa o challenge anterior
@@ -4759,50 +5782,150 @@ class PlayerDashboard(tk.Toplevel):
         """
         Garante que apenas o Event na posição 0 está ativo e contando tempo.
         Ativa o próximo Event na fila quando necessário.
+        CORREÇÃO: Cria tracking se não existir.
         """
         if not hasattr(self, '_event_duration_tracking'):
-            return
+            self._event_duration_tracking = {}
             
         cartas_events = self.inventario.get("events", [])
         if not cartas_events:
+            print("DEBUG: [ACTIVATE_EVENT] Nenhum Event no inventário")
             return
             
         current_turn = getattr(self, '_current_turn', 0)
         event_do_topo = cartas_events[0]
         
-        # Verificar se o Event do topo está ativo
-        if (event_do_topo in self._event_duration_tracking and 
-            self._event_duration_tracking[event_do_topo].get('is_active', False) == False):
+        print(f"DEBUG: [ACTIVATE_EVENT] === ATIVANDO EVENT DO TOPO ===")
+        print(f"DEBUG: [ACTIVATE_EVENT] Event do topo: {os.path.basename(event_do_topo)}")
+        print(f"DEBUG: [ACTIVATE_EVENT] Turno atual: {current_turn}")
+        
+        # CORREÇÃO CRÍTICA: Verificar PRIMEIRO se o Event JÁ EXPIROU antes de qualquer ação
+        # Se o Event já existe no tracking, verificar se já deveria ter expirado
+        if event_do_topo in self._event_duration_tracking:
+            existing_tracking = self._event_duration_tracking[event_do_topo]
+            expires_turn = existing_tracking.get('expires_turn')
             
-            # Ativar o Event do topo
-            duration_turns = self._event_duration_tracking[event_do_topo]['duration_turns']
+            # Se o Event já tem expires_turn definido e JÁ EXPIROU, removê-lo automaticamente
+            if expires_turn is not None and current_turn >= expires_turn:
+                print(f"DEBUG: [ACTIVATE_EVENT] 🚨 CRITICAL: Event JÁ EXPIROU - removendo automaticamente")
+                print(f"DEBUG: [ACTIVATE_EVENT]   Event: {os.path.basename(event_do_topo)}")
+                print(f"DEBUG: [ACTIVATE_EVENT]   Turno atual: {current_turn}, Expira no turno: {expires_turn}")
+                print(f"DEBUG: [ACTIVATE_EVENT]   Chamando _mostrar_overlay_event_expirado()")
+                
+                # Chamar o overlay de expiração
+                self._mostrar_overlay_event_expirado(event_do_topo)
+                return  # Sair da função sem ativar nada
+        
+        # CORREÇÃO FUNDAMENTAL: Se o Event tem tracking existente, PRESERVAR e não criar emergencial
+        if event_do_topo in self._event_duration_tracking:
+            existing_tracking = self._event_duration_tracking[event_do_topo]
+            print(f"DEBUG: [ACTIVATE_EVENT] ✅ Event do topo JÁ TEM tracking existente - PRESERVANDO:")
+            print(f"DEBUG: [ACTIVATE_EVENT]   Event: {os.path.basename(event_do_topo)}")
+            print(f"DEBUG: [ACTIVATE_EVENT]   start_turn: {existing_tracking.get('start_turn')}")
+            print(f"DEBUG: [ACTIVATE_EVENT]   duration_turns: {existing_tracking.get('duration_turns')}")
+            print(f"DEBUG: [ACTIVATE_EVENT]   expires_turn: {existing_tracking.get('expires_turn')}")
+            print(f"DEBUG: [ACTIVATE_EVENT]   is_active: {existing_tracking.get('is_active')}")
             
-            # CORREÇÃO: Verificar se é duração variável
-            if duration_turns == "variable":
-                # Para Events com duração variável, não calcular expires_turn ainda
-                # Será calculado apenas quando o dado for lançado
-                self._event_duration_tracking[event_do_topo].update({
-                    'start_turn': current_turn,
-                    'expires_turn': None,  # Será definido após o dado
-                    'is_active': True
-                })
-                print(f"DEBUG: [ACTIVATE_EVENT] Event ativado na posição 0: {os.path.basename(event_do_topo)}")
-                print(f"DEBUG: [ACTIVATE_EVENT]   Turno início: {current_turn}")
-                print(f"DEBUG: [ACTIVATE_EVENT]   Duration: {duration_turns} (será determinada por dado)")
-                print(f"DEBUG: [ACTIVATE_EVENT]   Expira no turno: A ser determinado")
+            # NÃO sobrescrever - apenas garantir que está ativo se necessário
+            if not existing_tracking.get('is_active', False):
+                print(f"DEBUG: [ACTIVATE_EVENT] 🔄 Ativando Event com tracking preservado")
+                self._event_duration_tracking[event_do_topo]['is_active'] = True
             else:
-                # Para Events com duração fixa
-                self._event_duration_tracking[event_do_topo].update({
-                    'start_turn': current_turn,
-                    'expires_turn': current_turn + duration_turns,
-                    'is_active': True
-                })
-                print(f"DEBUG: [ACTIVATE_EVENT] Event ativado na posição 0: {os.path.basename(event_do_topo)}")
-                print(f"DEBUG: [ACTIVATE_EVENT]   Turno início: {current_turn}")
-                print(f"DEBUG: [ACTIVATE_EVENT]   Duration: {duration_turns}")
-                print(f"DEBUG: [ACTIVATE_EVENT]   Expira no turno: {current_turn + duration_turns}")
+                print(f"DEBUG: [ACTIVATE_EVENT] ✅ Event já está ativo - nenhuma ação necessária")
             
-            self._event_start_turns[event_do_topo] = current_turn
+            # Pular para verificação de ativação (não criar tracking emergencial)
+        elif event_do_topo not in self._event_duration_tracking:
+            print(f"DEBUG: [ACTIVATE_EVENT] ❌ Event do topo SEM tracking - criando com turno de ativação...")
+            
+            # CORREÇÃO CRÍTICA: Ao criar tracking emergencial, usar uma heurística para determinar
+            # quando o Event foi realmente ativado, não apenas o turno atual
+            
+            # Se estivermos numa interface de navegação (turno 6), mas o Event deveria ter sido
+            # ativado antes, tentar recuperar o turno original
+            
+            # Para Event_55.png, se está sendo acessado no turno 6 mas deveria ter expirado,
+            # é porque foi ativado anteriormente - usar backup se disponível
+            start_turn_to_use = current_turn
+            
+            # Verificar se há informações de backup que podem indicar quando foi ativado
+            if hasattr(self, 'master') and hasattr(self.master, '_backup_turn_counters'):
+                backup = self.master._backup_turn_counters
+                event_backup = backup.get('_event_duration_tracking', {})
+                
+                if event_do_topo in event_backup:
+                    original_start = event_backup[event_do_topo].get('start_turn')
+                    if original_start is not None:
+                        start_turn_to_use = original_start
+                        print(f"DEBUG: [ACTIVATE_EVENT] ✅ Start turn recuperado do backup: {original_start}")
+                    else:
+                        print(f"DEBUG: [ACTIVATE_EVENT] ⚠️  Backup encontrado mas sem start_turn válido")
+                else:
+                    print(f"DEBUG: [ACTIVATE_EVENT] ⚠️  Event não encontrado no backup - usando turno atual: {current_turn}")
+            else:
+                print(f"DEBUG: [ACTIVATE_EVENT] ⚠️  Nenhum backup disponível - usando turno atual: {current_turn}")
+            
+            # Determinar duração baseada no nome do arquivo
+            duration_turns = None
+            if "Event_55.png" in event_do_topo:
+                duration_turns = "variable"
+                print(f"DEBUG: [ACTIVATE_EVENT] Event_55.png mapeado como duração VARIÁVEL")
+            elif "Event_14.png" in event_do_topo:
+                duration_turns = 1
+                print(f"DEBUG: [ACTIVATE_EVENT] Event_14.png mapeado como duração FIXA: 1")
+            else:
+                # Tentar obter da base de dados
+                try:
+                    from cards_database import get_event_duration
+                    duration_turns = get_event_duration(event_do_topo)
+                    print(f"DEBUG: [ACTIVATE_EVENT] Duração obtida da base de dados: {duration_turns}")
+                except Exception as e:
+                    print(f"DEBUG: [ACTIVATE_EVENT] ERROR base de dados: {e}")
+                    duration_turns = 3  # Fallback padrão
+                    print(f"DEBUG: [ACTIVATE_EVENT] Usando duração fallback: {duration_turns}")
+            
+            # Criar tracking com start_turn correto
+            if duration_turns == "variable":
+                self._event_duration_tracking[event_do_topo] = {
+                    'start_turn': start_turn_to_use,
+                    'duration_turns': duration_turns,
+                    'expires_turn': None,  # Será definido após o dado
+                    'is_active': False  # Será ativado abaixo
+                }
+            else:
+                self._event_duration_tracking[event_do_topo] = {
+                    'start_turn': start_turn_to_use,
+                    'duration_turns': duration_turns,
+                    'expires_turn': start_turn_to_use + duration_turns,
+                    'is_active': False  # Será ativado abaixo
+                }
+            print(f"DEBUG: [ACTIVATE_EVENT] ✅ Tracking criado com start_turn: {start_turn_to_use}")
+
+        
+        # NOVA LÓGICA SIMPLIFICADA: Se há tracking (preservado ou emergencial), apenas verificar ativação
+        if event_do_topo in self._event_duration_tracking:
+            existing_tracking = self._event_duration_tracking[event_do_topo]
+            
+            # Se não está ativo, ativar (sem alterar outros campos se já foram definidos)
+            if not existing_tracking.get('is_active', False):
+                print(f"DEBUG: [ACTIVATE_EVENT] 🔄 Ativando Event: {os.path.basename(event_do_topo)}")
+                self._event_duration_tracking[event_do_topo]['is_active'] = True
+                
+                # Apenas sincronizar _event_start_turns se necessário
+                start_turn = existing_tracking.get('start_turn')
+                if start_turn is not None:
+                    self._event_start_turns[event_do_topo] = start_turn
+                    print(f"DEBUG: [ACTIVATE_EVENT] ✅ Event ativado com tracking preservado: start_turn={start_turn}")
+                
+                # Log do estado final
+                print(f"DEBUG: [ACTIVATE_EVENT] Estado final do Event:")
+                print(f"DEBUG: [ACTIVATE_EVENT]   start_turn: {existing_tracking.get('start_turn')}")
+                print(f"DEBUG: [ACTIVATE_EVENT]   duration_turns: {existing_tracking.get('duration_turns')}")
+                print(f"DEBUG: [ACTIVATE_EVENT]   expires_turn: {existing_tracking.get('expires_turn')}")
+                print(f"DEBUG: [ACTIVATE_EVENT]   is_active: {existing_tracking.get('is_active')}")
+            else:
+                print(f"DEBUG: [ACTIVATE_EVENT] ✅ Event já está ativo - nenhuma ação necessária")
+        else:
+            print(f"DEBUG: [ACTIVATE_EVENT] ❌ ERRO: Event não tem tracking após verificação")
         
         # Garantir que Events em outras posições permanecem inativos
         for i, carta_path in enumerate(cartas_events[1:], 1):  # Começar do índice 1
@@ -4821,36 +5944,81 @@ class PlayerDashboard(tk.Toplevel):
         """
         Verifica automaticamente Events expirados e remove-os do inventário,
         devolvendo-os à Store.
+        CORREÇÃO: Também verifica Events de duração variável com expires_turn definido.
         """
         if not hasattr(self, '_event_duration_tracking'):
             return
         
         current_turn = getattr(self, '_current_turn', 0)
-        events_para_remover = []
         
-        print(f"DEBUG: Verificando Events expirados no turno {current_turn}")
+        print(f"DEBUG: [VERIFICAR_EVENTS] === VERIFICAÇÃO DE EVENTS EXPIRADOS ===")
+        print(f"DEBUG: [VERIFICAR_EVENTS] Turno atual: {current_turn}")
+        print(f"DEBUG: [VERIFICAR_EVENTS] Total Events no tracking: {len(self._event_duration_tracking)}")
         
-        # GARANTIR que o tracking está correto antes de verificar expiração
-        self._ensure_active_event_tracking()
-        
+        # CORREÇÃO CRÍTICA: Verificar TODOS os Events no tracking, não só os ativos
+        # porque Events de duração variável podem ter expires_turn definido mas is_active=False
         for carta_path, event_data in self._event_duration_tracking.items():
             is_active = event_data.get('is_active', False)
             start_turn = event_data.get('start_turn')
             duration_turns = event_data.get('duration_turns')
+            expires_turn = event_data.get('expires_turn')
             
-            # Só verificar expiração para Events ativos
-            if is_active and start_turn is not None and duration_turns is not None:
-                expires_turn = start_turn + duration_turns  # expira após duration_turns turnos
-                
-                print(f"DEBUG: Event {os.path.basename(carta_path)} (ativo) - start: {start_turn}, duration: {duration_turns}, expires: {expires_turn}")
+            print(f"DEBUG: [VERIFICAR_EVENTS] Event: {os.path.basename(carta_path)}")
+            print(f"DEBUG: [VERIFICAR_EVENTS]   is_active: {is_active}")
+            print(f"DEBUG: [VERIFICAR_EVENTS]   start_turn: {start_turn}")
+            print(f"DEBUG: [VERIFICAR_EVENTS]   duration_turns: {duration_turns}")
+            print(f"DEBUG: [VERIFICAR_EVENTS]   expires_turn: {expires_turn}")
+            
+            # NOVA LÓGICA: Se expires_turn está definido (dado foi lançado), verificar expiração
+            # independentemente do status is_active
+            if expires_turn is not None and start_turn is not None:
+                print(f"DEBUG: [VERIFICAR_EVENTS]   Event com expires_turn definido - verificando expiração")
                 
                 if current_turn >= expires_turn:
-                    print(f"DEBUG: Event {os.path.basename(carta_path)} expirou (turno {current_turn} >= {expires_turn})")
-                    # NOVO: Mostrar overlay de expiração em vez de processar automaticamente
+                    print(f"DEBUG: [VERIFICAR_EVENTS]   ❌ Event EXPIROU: turno {current_turn} >= {expires_turn}")
+                    print(f"DEBUG: [VERIFICAR_EVENTS]   Chamando overlay de expiração...")
+                    
+                    # Mostrar overlay de expiração
                     self._mostrar_overlay_event_expirado(carta_path)
                     return  # Sair após mostrar o primeiro overlay (processar um de cada vez)
+                else:
+                    print(f"DEBUG: [VERIFICAR_EVENTS]   ✅ Event ainda válido até turno {expires_turn}")
+            
+            # LÓGICA LEGADA: Para Events ativos com duração fixa (não variável)
+            elif is_active and start_turn is not None and duration_turns is not None:
+                # CORREÇÃO CRÍTICA: Verificar se duration_turns é numérico antes de somar
+                if duration_turns == "variable":
+                    print(f"DEBUG: [VERIFICAR_EVENTS]   Event com duração variável sem expires_turn - aguardando dado")
+                    continue
+                    
+                # Garantir que duration_turns é um número
+                try:
+                    duration_turns_int = int(duration_turns)
+                    calculated_expires_turn = start_turn + duration_turns_int
+                except (ValueError, TypeError) as e:
+                    print(f"DEBUG: [VERIFICAR_EVENTS]   ERRO: duration_turns inválido: {duration_turns} - {e}")
+                    continue
+                
+                print(f"DEBUG: [VERIFICAR_EVENTS]   Event ativo com duração fixa - calculando expiração")
+                print(f"DEBUG: [VERIFICAR_EVENTS]   Calculated expires_turn: {calculated_expires_turn}")
+                
+                if current_turn >= calculated_expires_turn:
+                    print(f"DEBUG: [VERIFICAR_EVENTS]   ❌ Event EXPIROU: turno {current_turn} >= {calculated_expires_turn}")
+                    print(f"DEBUG: [VERIFICAR_EVENTS]   Chamando overlay de expiração...")
+                    
+                    # Mostrar overlay de expiração
+                    self._mostrar_overlay_event_expirado(carta_path)
+                    return  # Sair após mostrar o primeiro overlay (processar um de cada vez)
+                else:
+                    print(f"DEBUG: [VERIFICAR_EVENTS]   ✅ Event ainda válido até turno {calculated_expires_turn}")
             else:
-                print(f"DEBUG: Event {os.path.basename(carta_path)} (inativo) - ignorando verificação de expiração")
+                print(f"DEBUG: [VERIFICAR_EVENTS]   Event inativo ou sem dados suficientes - ignorando")
+        
+        print(f"DEBUG: [VERIFICAR_EVENTS] === FIM VERIFICAÇÃO - NENHUM EVENT EXPIRADO ===")
+        
+        # CORREÇÃO: Garantir que o tracking está correto APÓS verificar expirações
+        # Isso evita reativar Events que deveriam ter expirado
+        self._ensure_active_event_tracking()
         
         # CÓDIGO LEGADO COMENTADO: Processamento automático removido em favor de overlays
         # O processamento agora é feito através do overlay mostrado acima
@@ -5185,6 +6353,9 @@ class PlayerDashboard(tk.Toplevel):
     def _iniciar_gestao_pacotes(self):
         """Inicia o sistema de gestão de pacotes no Final Phase"""
         print("DEBUG: [GESTÃO_PACOTES] Iniciando sistema de gestão de pacotes")
+        
+        # DEBUG: Verificar estado do tracking de Challenges antes de iniciar gestão
+        self._debug_challenge_tracking_state()
         
         # Encontrar cartas ativas no carrossel
         cartas_ativas = self._obter_cartas_ativas_carrossel()
@@ -5901,10 +7072,10 @@ class PlayerDashboard(tk.Toplevel):
             print(f"DEBUG: [GESTÃO_PACOTES] Challenge - Mostrar botão Lost: {mostrar_botao_lost}")
             print(f"DEBUG: [GESTÃO_PACOTES]   - drops_allowed ({drops_allowed}) OU penalty_per_packet existe ({penalty_per_packet is not None})")
         else:
-            # Para Activities: Lost é permitido apenas se há penalty_per_packet específico
-            mostrar_botao_lost = (penalty_per_packet is not None)
+            # Para Activities: Lost é permitido se drops_allowed=True OU há penalty_per_packet específico
+            mostrar_botao_lost = drops_allowed or (penalty_per_packet is not None)
             print(f"DEBUG: [GESTÃO_PACOTES] Activity - Mostrar botão Lost: {mostrar_botao_lost}")
-            print(f"DEBUG: [GESTÃO_PACOTES]   - penalty_per_packet existe: {penalty_per_packet is not None}")
+            print(f"DEBUG: [GESTÃO_PACOTES]   - drops_allowed ({drops_allowed}) OU penalty_per_packet existe ({penalty_per_packet is not None})")
         
         print(f"DEBUG: [GESTÃO_PACOTES] DECISÃO FINAL - Mostrar botão Lost: {mostrar_botao_lost}")
         
@@ -6100,6 +7271,30 @@ class PlayerDashboard(tk.Toplevel):
             self._btn_plus_lost.place(relx=0.175, rely=0.865, anchor="center")
         
         print(f"DEBUG: [ESTADO] Controles específicos criados: Rxd={mostrar_rxd}, Lost={mostrar_lost}")
+        
+        # CORREÇÃO CRÍTICA: Se nenhum botão foi criado, verificar se deve finalizar gestão
+        if not mostrar_rxd and not mostrar_lost:
+            print("DEBUG: [ESTADO] ALERTA: Nenhum botão de gestão foi criado")
+            
+            # CORREÇÃO: Usar mesma lógica correta para verificar próxima carta
+            carta_atual_index = getattr(self, '_carta_atual_gestao', 0)
+            total_cartas = len(getattr(self, '_cartas_gestao', []))
+            proxima_carta_index = carta_atual_index + 1
+            
+            print(f"DEBUG: [ESTADO] Análise de cartas:")
+            print(f"DEBUG: [ESTADO]   Carta atual (índice): {carta_atual_index}")
+            print(f"DEBUG: [ESTADO]   Total de cartas: {total_cartas}")
+            print(f"DEBUG: [ESTADO]   Próxima carta (índice): {proxima_carta_index}")
+            
+            if proxima_carta_index < total_cartas:
+                print("DEBUG: [ESTADO] Há próxima carta - criando botão seta para continuar")
+                self.after(100, self._verificar_e_mostrar_botao_seta_se_necessario)
+            else:
+                print("DEBUG: [ESTADO] SUCCESS: Última carta processada - FINALIZANDO GESTÃO AUTOMATICAMENTE")
+                print("DEBUG: [ESTADO] SUCCESS: Sistema detectou conclusão automática da gestão de pacotes")
+                # Agendar finalização para após a interface estar pronta
+                self.after(100, self._finalizar_gestao_pacotes)
+                return
     
     def _verificar_e_mostrar_botao_seta_se_necessario(self):
         """
@@ -6133,7 +7328,30 @@ class PlayerDashboard(tk.Toplevel):
         
         # REGRA CORRIGIDA: Só mostrar botão seta se NENHUM botão + está visível E não há botão seta visível
         if not btn_rxd_visivel and not btn_lost_visivel and not btn_seta_visivel:
-            print("DEBUG: [GESTÃO_PACOTES] SUCCESS: Condição atendida - criando botão seta automaticamente")
+            print("DEBUG: [GESTÃO_PACOTES] Não há botões + visíveis - verificando se há mais cartas")
+            
+            # PROTEÇÃO CRÍTICA: Verificar se gestão ainda está ativa antes de processar
+            if not getattr(self, '_final_phase_gestao_ativa', False):
+                print("DEBUG: [GESTÃO_PACOTES] WARNING: Gestão não está ativa - ignorando verificação")
+                return
+            
+            # CORREÇÃO: Sempre mostrar botão seta após processar carta
+            # O usuário deve clicar no botão seta para avançar ou finalizar
+            carta_atual_index = getattr(self, '_carta_atual_gestao', 0)
+            total_cartas = len(getattr(self, '_cartas_gestao', []))
+            proxima_carta_index = carta_atual_index + 1
+            
+            print(f"DEBUG: [GESTÃO_PACOTES] Análise de cartas:")
+            print(f"DEBUG: [GESTÃO_PACOTES]   Carta atual (índice): {carta_atual_index}")
+            print(f"DEBUG: [GESTÃO_PACOTES]   Total de cartas: {total_cartas}")
+            print(f"DEBUG: [GESTÃO_PACOTES]   Próxima carta (índice): {proxima_carta_index}")
+            
+            # SEMPRE mostrar botão seta - deixar o usuário decidir quando avançar/finalizar
+            if proxima_carta_index < total_cartas:
+                print("DEBUG: [GESTÃO_PACOTES] SUCCESS: Há próxima carta - criando botão seta para continuar")
+            else:
+                print("DEBUG: [GESTÃO_PACOTES] SUCCESS: Última carta - criando botão seta para finalizar")
+            
             self._mostrar_botao_seta()
         elif btn_seta_visivel:
             print("DEBUG: [GESTÃO_PACOTES] SUCCESS: Botão seta já visível - nada a fazer")
@@ -6158,12 +7376,23 @@ class PlayerDashboard(tk.Toplevel):
         """Mostra overlay com botões baseados nas opções de rate da carta"""
         print(f"DEBUG: [GESTÃO_PACOTES] Mostrando overlay para {tipo} com rate_options {rate_options}")
         
+        # PROTEÇÃO: Fechar overlay anterior se existir
+        if hasattr(self, '_overlay_entrada') and self._overlay_entrada:
+            print("DEBUG: [OVERLAY] Fechando overlay anterior antes de criar novo...")
+            try:
+                self._overlay_entrada.destroy()
+            except:
+                pass
+            self._overlay_entrada = None
+        
         # Criar overlay semi-transparente
         self._overlay_entrada = tk.Toplevel(self)
         self._overlay_entrada.title("")
         self._overlay_entrada.configure(bg="black")
         self._overlay_entrada.overrideredirect(True)
         self._overlay_entrada.attributes("-alpha", 0.9)
+        self._overlay_entrada.attributes("-topmost", True)  # Garantir que fica por cima
+        self._overlay_entrada.transient(self)  # Garantir que é modal
         
         # Centralizar overlay
         overlay_width = 300
@@ -6236,8 +7465,19 @@ class PlayerDashboard(tk.Toplevel):
         E AUTOMATICAMENTE atualiza To send quando Rxd ou Lost mudam
         NOVA FUNCIONALIDADE: Remove o botão + correspondente após aplicar valor
         CORREÇÃO PROBLEMA 2: Garantir que valores selecionados são aplicados corretamente
+        CORREÇÃO CENÁRIO ZEROS: Registra interação do jogador independente dos valores escolhidos
         """
         print(f"DEBUG: [GESTÃO_PACOTES] Aplicando valor {valor} para {tipo}")
+        
+        # CORREÇÃO CENÁRIO ZEROS: Registar interação do jogador INDEPENDENTE do valor escolhido
+        # Isto garante que mesmo clicando 0+0, a carta é considerada "processada pelo jogador"
+        carta_atual_para_interacao = self._get_current_actual_card()
+        if carta_atual_para_interacao:
+            self._cartas_interagidas_jogador.add(carta_atual_para_interacao)
+            print(f"DEBUG: [INTERACAO] Carta {os.path.basename(carta_atual_para_interacao)} registada como interagida pelo jogador")
+            print(f"DEBUG: [INTERACAO] Total cartas interagidas: {len(self._cartas_interagidas_jogador)}")
+        else:
+            print(f"DEBUG: [INTERACAO] WARNING: Não foi possível registar interação - carta atual não encontrada")
         
         # CORREÇÃO FUNDAMENTAL: Usar carta selecionada diretamente do carrossel
         # Evita problemas de sincronização após restauração de fullscreen
@@ -6291,17 +7531,26 @@ class PlayerDashboard(tk.Toplevel):
             # CORREÇÃO PROBLEMA 2: Aplicar o valor selecionado como INCREMENTO
             # O valor selecionado é ADICIONADO ao valor atual
             if tipo == 'enviados':
-                # CORREÇÃO: Valor selecionado é ADICIONADO ao Rxd atual
-                novo_rxd = rxd_anterior + valor  # Incrementa o valor existente
+                # CORREÇÃO CRÍTICA: Distinguir entre REGISTRAR TENTATIVA e APLICAR VALOR
+                # Quando valor=0, registramos a tentativa MAS NÃO alteramos o valor efetivo
+                if valor > 0:
+                    # Valor > 0: Incrementa realmente o Rxd
+                    novo_rxd = rxd_anterior + valor
+                    self.card_stats[posicao_carrossel]['Rxd'] = novo_rxd
+                    print(f"DEBUG: [GESTÃO_PACOTES] SUCCESS: Rxd incrementado efetivamente: {rxd_anterior} + {valor} = {novo_rxd}")
+                else:
+                    # Valor = 0: NÃO altera o valor efetivo, mas registra a tentativa
+                    novo_rxd = rxd_anterior  # Mantém valor anterior
+                    print(f"DEBUG: [GESTÃO_PACOTES] SUCCESS: Rxd MANTIDO (valor=0): {rxd_anterior} (sem alteração)")
+                
                 novo_lost = lost_anterior  # Lost mantém-se igual
-                self.card_stats[posicao_carrossel]['Rxd'] = novo_rxd
-                print(f"DEBUG: [GESTÃO_PACOTES] SUCCESS: CORREÇÃO - Rxd incrementado: {rxd_anterior} + {valor} = {novo_rxd}")
                 print(f"DEBUG: [GESTÃO_PACOTES] SUCCESS: card_stats[{posicao_carrossel}]['Rxd'] = {novo_rxd}")
                 
-                # NOVO: Incrementar contador de processamento por turno
-                # CORREÇÃO: Sempre incrementar em 1 (independente do valor selecionado)
+                # IMPORTANTE: Sempre incrementar contador de processamento (independente do valor)
                 # Isto garante que o botão + desaparece após ser usado, mesmo com valor 0
+                # O contador registra a TENTATIVA do jogador, não o valor efetivo aplicado
                 self._increment_processed_this_turn(carta_atual, 'rxd', 1)
+                print(f"DEBUG: [GESTÃO_PACOTES] SUCCESS: Tentativa de processamento registrada para Rxd (valor selecionado: {valor})")
                 
                 # NOVA FUNCIONALIDADE: Remover botão + de Rxd após aplicar valor
                 if hasattr(self, '_btn_plus_rxd') and self._btn_plus_rxd:
@@ -6322,17 +7571,27 @@ class PlayerDashboard(tk.Toplevel):
                         print(f"DEBUG: [GESTÃO_PACOTES] WARNING: Erro ao remover botão + Rxd: {e}")
                     
             elif tipo == 'perdidos':
-                # CORREÇÃO: Valor selecionado é ADICIONADO ao Lost atual
+                # CORREÇÃO CRÍTICA: Distinguir entre REGISTRAR TENTATIVA e APLICAR VALOR
+                # Quando valor=0, registramos a tentativa MAS NÃO alteramos o valor efetivo
                 novo_rxd = rxd_anterior  # Rxd mantém-se igual
-                novo_lost = lost_anterior + valor  # Incrementa o valor existente
-                self.card_stats[posicao_carrossel]['Lost'] = novo_lost
-                print(f"DEBUG: [GESTÃO_PACOTES] SUCCESS: CORREÇÃO - Lost incrementado: {lost_anterior} + {valor} = {novo_lost}")
+                
+                if valor > 0:
+                    # Valor > 0: Incrementa realmente o Lost
+                    novo_lost = lost_anterior + valor
+                    self.card_stats[posicao_carrossel]['Lost'] = novo_lost
+                    print(f"DEBUG: [GESTÃO_PACOTES] SUCCESS: Lost incrementado efetivamente: {lost_anterior} + {valor} = {novo_lost}")
+                else:
+                    # Valor = 0: NÃO altera o valor efetivo, mas registra a tentativa
+                    novo_lost = lost_anterior  # Mantém valor anterior
+                    print(f"DEBUG: [GESTÃO_PACOTES] SUCCESS: Lost MANTIDO (valor=0): {lost_anterior} (sem alteração)")
+                
                 print(f"DEBUG: [GESTÃO_PACOTES] SUCCESS: card_stats[{posicao_carrossel}]['Lost'] = {novo_lost}")
                 
-                # NOVO: Incrementar contador de processamento por turno
-                # CORREÇÃO: Sempre incrementar em 1 (independente do valor selecionado)
+                # IMPORTANTE: Sempre incrementar contador de processamento (independente do valor)
                 # Isto garante que o botão + desaparece após ser usado, mesmo com valor 0
+                # O contador registra a TENTATIVA do jogador, não o valor efetivo aplicado
                 self._increment_processed_this_turn(carta_atual, 'lost', 1)
+                print(f"DEBUG: [GESTÃO_PACOTES] SUCCESS: Tentativa de processamento registrada para Lost (valor selecionado: {valor})")
                 
                 # NOVA FUNCIONALIDADE: Remover botão + de Lost após aplicar valor
                 if hasattr(self, '_btn_plus_lost') and self._btn_plus_lost:
@@ -6356,10 +7615,35 @@ class PlayerDashboard(tk.Toplevel):
                 novo_rxd = rxd_anterior
                 novo_lost = lost_anterior
             
-            # CORREÇÃO CRÍTICA: Calcular To send automaticamente
-            # To send = message_size - Rxd (apenas pacotes recebidos reduzem To send)
-            # Lost = pacotes perdidos (não afetam To send)
-            novo_to_send = max(message_size - novo_rxd, 0)
+            # CORREÇÃO CRÍTICA: Calcular To send com lógica especial para Activities
+            # Para Activities com message_received não None e penalty_per_packet não None:
+            # - Lost não decrementa To send (pacotes perdidos são contabilizados separadamente)
+            # - Apenas Rxd decrementa To send
+            
+            # Obter dados da carta para verificar se é uma Activity especial
+            carta_atual = self.cards[posicao_carrossel] if posicao_carrossel < len(self.cards) else None
+            dados_carta = self._obter_dados_carta(carta_atual) if carta_atual else None
+            
+            is_activity_especial = False
+            if dados_carta and 'message_received' in dados_carta and 'penalty_per_packet' in dados_carta:
+                message_received = dados_carta.get('message_received')
+                penalty_per_packet = dados_carta.get('penalty_per_packet')
+                if message_received is not None and penalty_per_packet is not None:
+                    is_activity_especial = True
+                    print(f"DEBUG: [GESTÃO_PACOTES] Activity especial detectada: message_received={message_received}, penalty_per_packet={penalty_per_packet}")
+            
+            if is_activity_especial:
+                # Para Activities especiais: apenas Rxd decrementa To send
+                novo_to_send = max(message_size - novo_rxd, 0)
+                print(f"DEBUG: [GESTÃO_PACOTES] LÓGICA ESPECIAL PARA ACTIVITY:")
+                print(f"DEBUG: [GESTÃO_PACOTES]   To send = message_size - Rxd (Lost não decrementa)")
+                print(f"DEBUG: [GESTÃO_PACOTES]   To send = {message_size} - {novo_rxd} = {novo_to_send}")
+            else:
+                # Para Challenges e Activities normais: tanto Rxd quanto Lost decrementam To send
+                novo_to_send = max(message_size - (novo_rxd + novo_lost), 0)
+                print(f"DEBUG: [GESTÃO_PACOTES] LÓGICA NORMAL:")
+                print(f"DEBUG: [GESTÃO_PACOTES]   To send = message_size - (Rxd + Lost)")
+                print(f"DEBUG: [GESTÃO_PACOTES]   To send = {message_size} - ({novo_rxd} + {novo_lost}) = {novo_to_send}")
             
             # Atualizar To send nos card_stats
             self.card_stats[posicao_carrossel]['To send'] = novo_to_send
@@ -6369,8 +7653,11 @@ class PlayerDashboard(tk.Toplevel):
             print(f"DEBUG: [GESTÃO_PACOTES]   Aplicado a: {tipo}")
             print(f"DEBUG: [GESTÃO_PACOTES]   NOVO Rxd total: {novo_rxd}")
             print(f"DEBUG: [GESTÃO_PACOTES]   NOVO Lost total: {novo_lost}")
-            print(f"DEBUG: [GESTÃO_PACOTES]   NOVO To send: {novo_to_send} (= {message_size} - {novo_rxd})")
-            print(f"DEBUG: [GESTÃO_PACOTES]   WARNING: Lost packets ({novo_lost}) não afetam To send")
+            print(f"DEBUG: [GESTÃO_PACOTES]   NOVO To send: {novo_to_send}")
+            if is_activity_especial:
+                print(f"DEBUG: [GESTÃO_PACOTES]   CORREÇÃO ESPECIAL: Para Activity com message_received/penalty_per_packet, apenas Rxd reduz To send")
+            else:
+                print(f"DEBUG: [GESTÃO_PACOTES]   CORREÇÃO NORMAL: Tanto Lost quanto Rxd reduzem To send")
             
             # CORREÇÃO: Atualizar TODAS as barras visualmente
             if hasattr(self, 'progress_bars') and hasattr(self, 'progress_labels'):
@@ -6411,19 +7698,55 @@ class PlayerDashboard(tk.Toplevel):
     
     def _fechar_overlay_entrada(self):
         """Fecha o overlay de entrada"""
-        if hasattr(self, '_overlay_entrada') and self._overlay_entrada:
-            self._overlay_entrada.destroy()
+        try:
+            if hasattr(self, '_overlay_entrada') and self._overlay_entrada:
+                print("DEBUG: [OVERLAY] Fechando overlay de entrada...")
+                self._overlay_entrada.destroy()
+                self._overlay_entrada = None
+                print("DEBUG: [OVERLAY] SUCCESS: Overlay de entrada fechado com sucesso")
+            else:
+                print("DEBUG: [OVERLAY] WARNING: Nenhum overlay de entrada encontrado para fechar")
+        except Exception as e:
+            print(f"DEBUG: [OVERLAY] ERRO ao fechar overlay de entrada: {e}")
+            # Força limpeza da referência mesmo com erro
             self._overlay_entrada = None
     
     def _aplicar_valor_e_fechar_overlay(self, tipo, valor):
         """Aplica o valor selecionado e fecha o overlay"""
         print(f"DEBUG: [GESTÃO_PACOTES] Aplicando valor {valor} para {tipo} e fechando overlay")
         
-        # Aplicar o valor
-        self._aplicar_valor_entrada(tipo, valor)
+        try:
+            # Aplicar o valor
+            self._aplicar_valor_entrada(tipo, valor)
+            print(f"DEBUG: [GESTÃO_PACOTES] SUCCESS: Valor {valor} aplicado para {tipo}")
+        except Exception as e:
+            print(f"DEBUG: [GESTÃO_PACOTES] ERRO ao aplicar valor: {e}")
         
-        # Fechar o overlay
-        self._fechar_overlay_entrada()
+        try:
+            # Fechar o overlay
+            self._fechar_overlay_entrada()
+            print(f"DEBUG: [GESTÃO_PACOTES] SUCCESS: Overlay fechado após aplicar valor")
+        except Exception as e:
+            print(f"DEBUG: [GESTÃO_PACOTES] ERRO ao fechar overlay: {e}")
+            # Força limpeza da referência mesmo com erro
+            if hasattr(self, '_overlay_entrada'):
+                self._overlay_entrada = None
+    
+    def _is_challenge_card(self, carta_path):
+        """
+        Verifica se uma carta é do tipo Challenge baseada no caminho.
+        
+        Args:
+            carta_path: Caminho para a carta (ex: "/path/Challenge_1.png")
+            
+        Returns:
+            True se for uma carta Challenge, False caso contrário
+        """
+        if not carta_path:
+            return False
+            
+        filename = os.path.basename(carta_path)
+        return filename.startswith('Challenge_') and filename.endswith('.png')
     
     def _incrementar_valor(self, tipo, message_size):
         """
@@ -6645,6 +7968,16 @@ class PlayerDashboard(tk.Toplevel):
             print(f"DEBUG: [COMPLETION] Carta: {os.path.basename(carta_atual)}")
             print(f"DEBUG: [COMPLETION] Motivo: {completion_reason}")
             
+            # VALIDAÇÃO EXTRA: Confirmar que To send é realmente 0 antes de mostrar overlay
+            if to_send_atual > 0:
+                print(f"DEBUG: [COMPLETION] ❌ ERRO CRÍTICO: Completion calculado incorretamente!")
+                print(f"DEBUG: [COMPLETION] completion_achieved = {completion_achieved}")
+                print(f"DEBUG: [COMPLETION] Mas to_send_atual = {to_send_atual} (deveria ser 0)")
+                print(f"DEBUG: [COMPLETION] CANCELANDO overlay - valores inconsistentes")
+                return
+            
+            print(f"DEBUG: [COMPLETION] ✅ Validação confirmada: To send = 0, mostrando overlay")
+            
             # Mostrar overlay de congratulações
             self._mostrar_overlay_completion(carta_atual, dados_carta)
         else:
@@ -6653,7 +7986,7 @@ class PlayerDashboard(tk.Toplevel):
             print(f"DEBUG: [COMPLETION]   Rxd: {rxd_acumulado} (deve ser >= {message_size})")
             print(f"DEBUG: [COMPLETION]   Tipo: {'Challenge (flexível)' if is_challenge else 'Activity (restritivo)'}")
     
-    def _mostrar_overlay_completion(self, carta_path, dados_carta, is_sequential=False, carta_index=None):
+    def _mostrar_overlay_completion(self, carta_path, dados_carta, is_sequential=False, carta_index=None, tempo_limite_obrigatorio=False):
         """
         Mostra overlay de congratulações quando Activity/Challenge é completada
         
@@ -6661,10 +7994,74 @@ class PlayerDashboard(tk.Toplevel):
             carta_path: Caminho da carta completada
             dados_carta: Dados da carta da base de dados
             is_sequential: Se True, este overlay faz parte de uma sequência (múltiplas cartas completadas)
+            tempo_limite_obrigatorio: Se True, completion foi por tempo limite obrigatório (finaliza gestão)
             carta_index: Índice específico da carta no carrossel (para cálculo correto de reward)
         """
+        print(f"DEBUG: [COMPLETION] ===== VALIDAÇÃO CRÍTICA ANTES DE MOSTRAR OVERLAY =====")
+        print(f"DEBUG: [COMPLETION] Carta: {os.path.basename(carta_path)}")
+        print(f"DEBUG: [COMPLETION] Tempo limite obrigatório: {tempo_limite_obrigatorio}")
+        print(f"DEBUG: [COMPLETION] Índice da carta: {carta_index}")
+        
+        # CORREÇÃO CRÍTICA: VALIDAÇÃO EXTRA ANTES DE MOSTRAR OVERLAY
+        # Verificar se a carta realmente pode ser completada antes de mostrar overlay
+        if not tempo_limite_obrigatorio:
+            # Se não é completion por tempo limite, verificar condições normais
+            carta_basename = os.path.basename(carta_path).lower()
+            is_challenge = "challenge" in carta_basename
+            is_activity = "activity" in carta_basename
+            
+            # Obter valores atuais das barras
+            if carta_index is not None and hasattr(self, 'card_stats') and carta_index < len(self.card_stats):
+                stats = self.card_stats[carta_index]
+                to_send_atual = stats.get('To send', 0)
+                rxd_atual = stats.get('Rxd', 0)
+                lost_atual = stats.get('Lost', 0)
+            else:
+                # Fallback: tentar obter dos progress_labels
+                try:
+                    to_send_atual = int(self.progress_labels.get("To send", tk.Label()).cget("text") or "0")
+                    rxd_atual = int(self.progress_labels.get("Rxd", tk.Label()).cget("text") or "0")
+                    lost_atual = int(self.progress_labels.get("Lost", tk.Label()).cget("text") or "0")
+                except:
+                    to_send_atual = 0
+                    rxd_atual = 0
+                    lost_atual = 0
+            
+            message_size = dados_carta.get('message_size', 0)
+            
+            print(f"DEBUG: [COMPLETION] VALIDAÇÃO DOS VALORES ATUAIS:")
+            print(f"DEBUG: [COMPLETION]   To send: {to_send_atual}")
+            print(f"DEBUG: [COMPLETION]   Rxd: {rxd_atual}")
+            print(f"DEBUG: [COMPLETION]   Lost: {lost_atual}")
+            print(f"DEBUG: [COMPLETION]   Message size: {message_size}")
+            print(f"DEBUG: [COMPLETION]   Tipo: {'Challenge' if is_challenge else 'Activity'}")
+            
+            # REGRA CRÍTICA: Para Challenges e Activities, To send DEVE ser 0 para completion normal
+            if to_send_atual > 0:
+                print(f"DEBUG: [COMPLETION] ❌ ERRO CRÍTICO: Completion inválido!")
+                print(f"DEBUG: [COMPLETION] To send deve ser 0, mas é {to_send_atual}")
+                print(f"DEBUG: [COMPLETION] CANCELANDO overlay de completion - condições não atendidas")
+                print(f"DEBUG: [COMPLETION] ===== OVERLAY CANCELADO =====")
+                return  # NÃO mostrar overlay se condições não estão atendidas
+            
+            print(f"DEBUG: [COMPLETION] ✅ VALIDAÇÃO PASSOU: To send = 0, pode mostrar completion")
+        else:
+            print(f"DEBUG: [COMPLETION] ✅ COMPLETION POR TEMPO LIMITE: Validação bypassed")
+        
         print(f"DEBUG: [COMPLETION] Mostrando overlay de congratulações")
         print(f"DEBUG: [COMPLETION] Sequencial: {is_sequential}")
+        
+        # Inicializar variável de decisão da gestão
+        gestao_deve_continuar = None
+        
+        # CORREÇÃO: Marcar que overlay de completion está ativo
+        self._completion_overlay_active = True
+        print("DEBUG: [COMPLETION] Flag _completion_overlay_active = True")
+        
+        # NOVA FLAG: Marcar se completion foi por tempo limite obrigatório
+        self._completion_tempo_limite_obrigatorio = tempo_limite_obrigatorio
+        if tempo_limite_obrigatorio:
+            print("DEBUG: [COMPLETION] COMPLETION POR TEMPO LIMITE OBRIGATÓRIO - Gestão será finalizada após overlay")
         
         # CORREÇÃO: Limpar controles de gestão antes de mostrar overlay
         # Isso evita que o botão roxo apareça por baixo do overlay
@@ -6807,9 +8204,17 @@ class PlayerDashboard(tk.Toplevel):
             # Marcar como processado
             self._completion_processed = True
             
+            # CORREÇÃO CRÍTICA: Preservar decisão da gestão que foi calculada acima
+            nonlocal gestao_deve_continuar
+            
             # Atualizar saldo do jogador
             self.saldo += reward_value
             print(f"DEBUG: [COMPLETION] Saldo atualizado: +{reward_value}, novo saldo: {self.saldo}")
+            
+            # NOVO: Limpar tracking de Challenge se for Challenge completado
+            if card_type == "Challenge":
+                self._cleanup_completed_challenge_tracking(carta_path)
+                print(f"DEBUG: [COMPLETION] Challenge tracking limpo para: {os.path.basename(carta_path)}")
             
             # AGORA remover carta do carrossel e devolver para store
             self._devolver_carta_para_store(carta_path, card_type)
@@ -6896,17 +8301,113 @@ class PlayerDashboard(tk.Toplevel):
                 # VERIFICAÇÃO CRÍTICA: Se gestão está ativa mas não há cartas para processar, finalizar imediatamente
                 gestao_esta_ativa = (hasattr(self, '_final_phase_gestao_ativa') and self._final_phase_gestao_ativa)
                 
-                # NOVA LÓGICA: A gestão deve continuar APENAS se há cartas VÁLIDAS na lista de gestão
-                gestao_deve_continuar = gestao_esta_ativa and cartas_gestao_restantes > 0
+                # CORREÇÃO CRÍTICA: Verificar se há cartas SEGUINTES para processar
+                # Mesmo com tempo limite obrigatório, verificar se há cartas nas posições seguintes
+                tempo_limite_obrigatorio = getattr(self, '_completion_tempo_limite_obrigatorio', False)
+                
+                # NOVA LÓGICA CORRETA: Verificar se há cartas APÓS a posição atual que precisam ser processadas
+                cartas_seguintes_existem = False
+                if hasattr(self, '_cartas_gestao') and hasattr(self, '_carta_atual_gestao') and self._cartas_gestao:
+                    posicao_atual = self._carta_atual_gestao
+                    # Verificar todas as posições APÓS a atual
+                    for i in range(posicao_atual + 1, len(self._cartas_gestao)):
+                        carta_seguinte = self._cartas_gestao[i]
+                        # Verificar se carta seguinte está face up (ativa) no carrossel
+                        try:
+                            carrossel_idx = self.cards.index(carta_seguinte)
+                            if carrossel_idx < len(self.card_face_up_flags) and self.card_face_up_flags[carrossel_idx]:
+                                cartas_seguintes_existem = True
+                                print(f"DEBUG: [COMPLETION] Carta seguinte encontrada na posição {i}: {os.path.basename(carta_seguinte)}")
+                                break
+                        except (ValueError, IndexError):
+                            continue
+                
+                # CORREÇÃO CRÍTICA: SEMPRE inicializar cartas_nao_processadas
+                cartas_nao_processadas = 0
+                cartas_processadas_debug = []
+                
+                if tempo_limite_obrigatorio and not cartas_seguintes_existem:
+                    print("DEBUG: [COMPLETION] TEMPO LIMITE OBRIGATÓRIO e NÃO há cartas seguintes - FINALIZANDO gestão")
+                    gestao_deve_continuar = False
+                elif tempo_limite_obrigatorio and cartas_seguintes_existem:
+                    print("DEBUG: [COMPLETION] TEMPO LIMITE OBRIGATÓRIO mas HÁ cartas seguintes - CONTINUANDO gestão")
+                    gestao_deve_continuar = True
+                    # AINDA ASSIM calcular cartas não processadas para debugging (com lógica corrigida)
+                    for carta in cartas_validas_gestao:
+                        try:
+                            carta_idx = self.cards.index(carta)
+                            carta_stats = self.card_stats[carta_idx] if carta_idx < len(self.card_stats) else {"To send": 0, "Rxd": 0, "Lost": 0}
+                            
+                            # MESMA CORREÇÃO: Só considerar processada se jogador interagiu NESTE CICLO
+                            foi_processada_interacao = carta in getattr(self, '_cartas_interagidas_jogador', set())
+                            foi_processada = foi_processada_interacao
+                            
+                            if not foi_processada:
+                                cartas_nao_processadas += 1
+                            else:
+                                cartas_processadas_debug.append(f"{os.path.basename(carta)}(interação_registrada)")
+                        except (ValueError, IndexError):
+                            continue
+                else:
+                    # CORREÇÃO CRÍTICA: A gestão deve continuar APENAS se há cartas AINDA NÃO PROCESSADAS
+                    # Não é suficiente verificar se há cartas na lista - deve verificar se há cartas que ainda precisem de processamento
+                    
+                    # CORREÇÃO CRÍTICA: Durante gestão de pacotes, apenas cartas que AINDA NÃO foram processadas
+                    # pelo jogador NESTE CICLO DE GESTÃO devem continuar. 
+                    # IMPORTANTE: Valores de turnos anteriores NÃO significam que foram processadas neste ciclo!
+                    
+                    # Verificar quantas cartas na lista de gestão ainda não foram processadas NESTE CICLO
+                    for carta in cartas_validas_gestao:
+                        # Obter posição no carrossel
+                        try:
+                            carta_idx = self.cards.index(carta)
+                            carta_stats = self.card_stats[carta_idx] if carta_idx < len(self.card_stats) else {"To send": 0, "Rxd": 0, "Lost": 0}
+                            
+                            # CORREÇÃO CRÍTICA: Durante gestão de pacotes, só considerar "processada" se:
+                            # 1. Jogador interagiu com a carta NESTE CICLO DE GESTÃO (registro de interação)
+                            # 2. OU carta foi explicitamente processada pelo sistema NESTE CICLO
+                            
+                            # IMPORTANTE: Valores > 0 de turnos anteriores NÃO contam como "processada neste ciclo"!
+                            foi_processada_interacao = carta in getattr(self, '_cartas_interagidas_jogador', set())
+                            
+                            # DEBUG: Mostrar análise detalhada de cada carta
+                            print(f"DEBUG: [COMPLETION] Analisando carta: {os.path.basename(carta)}")
+                            print(f"DEBUG: [COMPLETION]   Stats atuais: Rxd={carta_stats.get('Rxd', 0)}, Lost={carta_stats.get('Lost', 0)}")
+                            print(f"DEBUG: [COMPLETION]   Interação registrada: {foi_processada_interacao}")
+                            print(f"DEBUG: [COMPLETION]   Cartas interagidas: {[os.path.basename(c) for c in getattr(self, '_cartas_interagidas_jogador', set())]}")
+                            
+                            # DECISÃO FINAL: Carta é considerada processada APENAS se jogador interagiu NESTE CICLO
+                            foi_processada = foi_processada_interacao
+                            
+                            if not foi_processada:
+                                cartas_nao_processadas += 1
+                                print(f"DEBUG: [COMPLETION]   RESULTADO: NÃO processada neste ciclo - DEVE continuar gestão")
+                            else:
+                                cartas_processadas_debug.append(f"{os.path.basename(carta)}(interação_registrada)")
+                                print(f"DEBUG: [COMPLETION]   RESULTADO: Processada neste ciclo - pode pular")
+                        except (ValueError, IndexError):
+                            # Carta não encontrada no carrossel
+                            print(f"DEBUG: [COMPLETION] AVISO: Carta {os.path.basename(carta)} não encontrada no carrossel")
+                            continue
+                    
+                    print(f"DEBUG: [COMPLETION] === ANÁLISE DE PROCESSAMENTO DAS CARTAS ===")
+                    print(f"DEBUG: [COMPLETION] Cartas válidas na gestão: {len(cartas_validas_gestao)}")
+                    print(f"DEBUG: [COMPLETION] Cartas processadas: {len(cartas_processadas_debug)} - {cartas_processadas_debug}")
+                    print(f"DEBUG: [COMPLETION] Cartas não processadas: {cartas_nao_processadas}")
+                    
+                    # LÓGICA CORRIGIDA: Gestão deve continuar APENAS se há cartas não processadas
+                    gestao_deve_continuar = gestao_esta_ativa and cartas_nao_processadas > 0
                 
                 print(f"DEBUG: [COMPLETION] ===== DECISÃO DE CONTINUAÇÃO DA GESTÃO =====")
                 print(f"DEBUG: [COMPLETION] gestao_esta_ativa: {gestao_esta_ativa}")
                 print(f"DEBUG: [COMPLETION] cartas_reais_no_carrossel: {cartas_reais_no_carrossel}")
                 print(f"DEBUG: [COMPLETION] cartas_gestao_restantes: {cartas_gestao_restantes}")
+                print(f"DEBUG: [COMPLETION] cartas_nao_processadas: {cartas_nao_processadas}")
                 print(f"DEBUG: [COMPLETION] len(_cartas_gestao): {len(getattr(self, '_cartas_gestao', []))}")
                 print(f"DEBUG: [COMPLETION] _carta_atual_gestao: {getattr(self, '_carta_atual_gestao', 'N/A')}")
                 print(f"DEBUG: [COMPLETION] cartas_validas_gestao: {[os.path.basename(c) for c in cartas_validas_gestao]}")
                 print(f"DEBUG: [COMPLETION] gestao_deve_continuar: {gestao_deve_continuar}")
+                print(f"DEBUG: [COMPLETION] RAZÃO: {'Há cartas não processadas' if cartas_nao_processadas > 0 else 'Todas as cartas já foram processadas'}")
                 
                 # CORREÇÃO CRÍTICA: PRIMEIRO remover carta da LISTA DE GESTÃO, não do carrossel
                 print(f"DEBUG: [COMPLETION] === REMOVENDO CARTA DA LISTA DE GESTÃO ===")
@@ -6953,21 +8454,89 @@ class PlayerDashboard(tk.Toplevel):
                 print(f"DEBUG: [COMPLETION] === REMOVENDO CARTA COMPLETADA DO CARROSSEL ===")
                 self._remover_carta_do_carrossel(carta_path)
                 
-                # TERCEIRO: Determinar se gestão deve continuar baseado nas cartas restantes NA LISTA DE GESTÃO
-                gestao_deve_continuar = False
+                # TERCEIRO: Determinar se gestão deve continuar baseado na lista de gestão ATUALIZADA
+                # CORREÇÃO CRÍTICA: A carta já foi removida da lista _cartas_gestao acima
+                print(f"DEBUG: [COMPLETION] === VERIFICAÇÃO FINAL DE CONTINUAÇÃO ===")
+                print(f"DEBUG: [COMPLETION] _cartas_gestao atual: {[os.path.basename(c) for c in getattr(self, '_cartas_gestao', [])]}")
+                print(f"DEBUG: [COMPLETION] Tamanho da lista: {len(getattr(self, '_cartas_gestao', []))}")
+                
+                # CORREÇÃO CRÍTICA: NÃO resetar gestao_deve_continuar aqui!
+                # A primeira lógica já tomou a decisão correta baseada em tempo_limite_obrigatorio e cartas seguintes
+                # gestao_deve_continuar = False  # REMOVIDO - não sobrescrever primeira decisão
+                # CORREÇÃO CRÍTICA: Apenas verificar cartas válidas para informação, NÃO alterar gestao_deve_continuar
                 if hasattr(self, '_cartas_gestao') and self._cartas_gestao:
-                    print(f"DEBUG: [COMPLETION] SUCCESS: Há {len(self._cartas_gestao)} cartas restantes na lista de gestão - gestão deve continuar")
-                    gestao_deve_continuar = True
+                    # Verificar se ainda há cartas válidas na lista de gestão (apenas para logs informativos)
+                    cartas_validas_na_gestao = 0
+                    for carta in self._cartas_gestao:
+                        if carta and hasattr(self, 'cards') and carta in self.cards:
+                            carta_basename = os.path.basename(carta).lower()
+                            # Carta deve ser Activity ou Challenge E existir no carrossel E estar virada para cima
+                            if (not carta_basename.startswith("back_card_") and 
+                                ("activity" in carta_basename or "challenge" in carta_basename)):
+                                
+                                # Verificar flag da carta
+                                carta_index = self.cards.index(carta)
+                                is_face_up = True  # Default para compatibilidade
+                                if hasattr(self, 'card_face_up_flags') and carta_index < len(self.card_face_up_flags):
+                                    is_face_up = self.card_face_up_flags[carta_index]
+                                
+                                if is_face_up:
+                                    cartas_validas_na_gestao += 1
+                                    print(f"DEBUG: [COMPLETION] Carta válida encontrada: {os.path.basename(carta)}")
                     
-                    # Garantir que _carta_atual_gestao está dentro dos limites
-                    if self._carta_atual_gestao >= len(self._cartas_gestao):
-                        self._carta_atual_gestao = 0
+                    print(f"DEBUG: [COMPLETION] Cartas válidas restantes na gestão: {cartas_validas_na_gestao}")
+                    print(f"DEBUG: [COMPLETION] IMPORTANTE: Respeitando decisão da primeira lógica: gestao_deve_continuar = {gestao_deve_continuar}")
                     
-                    proxima_carta = self._cartas_gestao[self._carta_atual_gestao]
-                    print(f"DEBUG: [COMPLETION] SUCCESS: Próxima carta será: {os.path.basename(proxima_carta)} (posição gestão: {self._carta_atual_gestao})")
+                    # NOVA VERIFICAÇÃO: Mesmo que hajam cartas válidas, verificar se já foram processadas
+                    if cartas_validas_na_gestao > 0 and gestao_deve_continuar:
+                        # Garantir que _carta_atual_gestao está dentro dos limites
+                        if self._carta_atual_gestao >= len(self._cartas_gestao):
+                            self._carta_atual_gestao = 0
+                        
+                        # CORREÇÃO ADICIONAL: Verificar se as cartas restantes ainda precisam processamento NESTE CICLO
+                        cartas_restantes_nao_processadas = 0
+                        for carta in self._cartas_gestao:
+                            try:
+                                carta_idx = self.cards.index(carta)
+                                carta_stats = self.card_stats[carta_idx] if carta_idx < len(self.card_stats) else {"To send": 0, "Rxd": 0, "Lost": 0}
+                                
+                                # APLICAR A MESMA LÓGICA CORRIGIDA: APENAS interação do jogador NESTE CICLO
+                                foi_processada_interacao = carta in getattr(self, '_cartas_interagidas_jogador', set())
+                                foi_processada = foi_processada_interacao
+                                
+                                print(f"DEBUG: [COMPLETION] Verificação final carta: {os.path.basename(carta)}")
+                                print(f"DEBUG: [COMPLETION]   Interação neste ciclo: {foi_processada_interacao}")
+                                
+                                if not foi_processada:
+                                    cartas_restantes_nao_processadas += 1
+                                    print(f"DEBUG: [COMPLETION]   RESULTADO: Precisa processamento - contando como não processada")
+                                else:
+                                    print(f"DEBUG: [COMPLETION]   RESULTADO: Já processada neste ciclo - pode pular")
+                            except (ValueError, IndexError):
+                                print(f"DEBUG: [COMPLETION] AVISO: Carta {os.path.basename(carta)} não encontrada no carrossel para verificação final")
+                                continue
+                        
+                        print(f"DEBUG: [COMPLETION] VERIFICAÇÃO FINAL:")
+                        print(f"DEBUG: [COMPLETION]   Cartas válidas restantes: {cartas_validas_na_gestao}")
+                        print(f"DEBUG: [COMPLETION]   Cartas restantes NÃO processadas: {cartas_restantes_nao_processadas}")
+                        
+                        if cartas_restantes_nao_processadas == 0:
+                            print(f"DEBUG: [COMPLETION] CORREÇÃO: Todas as cartas restantes já foram processadas - FINALIZANDO gestão")
+                            gestao_deve_continuar = False
+                        else:
+                            proxima_carta = self._cartas_gestao[self._carta_atual_gestao]
+                            print(f"DEBUG: [COMPLETION] SUCCESS: Próxima carta será: {os.path.basename(proxima_carta)} (posição gestão: {self._carta_atual_gestao})")
+                    elif cartas_validas_na_gestao == 0:
+                        print(f"DEBUG: [COMPLETION] INFO: Não há cartas VÁLIDAS restantes na lista - finalizando independentemente da primeira decisão")
+                        gestao_deve_continuar = False
+                    else:
+                        print(f"DEBUG: [COMPLETION] INFO: Há cartas válidas mas primeira lógica decidiu finalizar gestão")
+                        # NÃO sobrescrever gestao_deve_continuar aqui - primeira lógica já decidiu
                 else:
-                    print(f"DEBUG: [COMPLETION] ERROR: Lista de gestão vazia - finalizando gestão")
-                    gestao_deve_continuar = False
+                    print(f"DEBUG: [COMPLETION] INFO: Lista de gestão vazia - finalizando gestão")
+                    # Só finalizar se primeira lógica não decidiu continuar por tempo_limite_obrigatorio
+                    if not (tempo_limite_obrigatorio and gestao_deve_continuar):
+                        gestao_deve_continuar = False
                 
                 # TERCEIRO: Ajustar índice se está fora de range
                 if hasattr(self, '_cartas_gestao') and self._cartas_gestao and hasattr(self, '_carta_atual_gestao'):
@@ -6978,6 +8547,14 @@ class PlayerDashboard(tk.Toplevel):
                 # Fechar overlay atual (destruir todos os widgets)
                 for widget in self.winfo_children():
                     widget.destroy()
+                
+                # CORREÇÃO: Remover flag de overlay ativo quando widgets são destruídos
+                self._completion_overlay_active = False
+                print("DEBUG: [COMPLETION] Flag _completion_overlay_active = False (overlay fechado)")
+                
+                # Limpar flag de tempo limite obrigatório
+                if hasattr(self, '_completion_tempo_limite_obrigatorio'):
+                    delattr(self, '_completion_tempo_limite_obrigatorio')
                 
                 print(f"DEBUG: [COMPLETION] ===== DECISÃO DE CONTINUAÇÃO DA GESTÃO =====")
                 print(f"DEBUG: [COMPLETION] gestao_esta_ativa: {gestao_esta_ativa}")
@@ -7005,32 +8582,48 @@ class PlayerDashboard(tk.Toplevel):
                         proxima_carta = self._cartas_gestao[self._carta_atual_gestao]
                         print(f"DEBUG: [COMPLETION] SUCCESS: Próxima carta determinada: {os.path.basename(proxima_carta)} (posição gestão: {self._carta_atual_gestao})")
                         
-                        # Encontrar a posição desta carta no carrossel ATUALIZADO (após remoção)
+                        # CORREÇÃO CRÍTICA: Encontrar posição da próxima carta no carrossel ATUALIZADO 
+                        # Após remoção, as cartas mudam de posição - procurar pelo basename da carta
                         proxima_posicao = None
+                        proxima_carta_basename = os.path.basename(proxima_carta)
+                        
                         if hasattr(self, 'cards'):
+                            print(f"DEBUG: [COMPLETION] Procurando carta {proxima_carta_basename} no carrossel atualizado:")
                             for i, carta in enumerate(self.cards):
-                                if carta == proxima_carta:
+                                carta_basename = os.path.basename(carta)
+                                print(f"DEBUG: [COMPLETION]   Posição {i}: {carta_basename}")
+                                
+                                # CORREÇÃO: Comparar basename e verificar se carta está face up
+                                if (carta_basename == proxima_carta_basename and 
+                                    i < len(self.card_face_up_flags) and 
+                                    self.card_face_up_flags[i]):
                                     proxima_posicao = i
-                                    print(f"DEBUG: [COMPLETION] SUCCESS: Próxima carta encontrada no carrossel posição {i}")
+                                    print(f"DEBUG: [COMPLETION] SUCCESS: {proxima_carta_basename} encontrada na posição {i} e está face up")
                                     break
                         
                         if proxima_posicao is not None:
                             print(f"DEBUG: [COMPLETION] SUCCESS: Atualizando seleção para próxima carta válida:")
-                            print(f"DEBUG: [COMPLETION]   Carta: {os.path.basename(proxima_carta)}")
+                            print(f"DEBUG: [COMPLETION]   Carta: {proxima_carta_basename}")
                             print(f"DEBUG: [COMPLETION]   Posição carrossel: {proxima_posicao}")
                             print(f"DEBUG: [COMPLETION]   Posição gestão: {self._carta_atual_gestao}")
                             
                             # ATUALIZAR seleção do carrossel para a próxima carta CORRETA
-                            self.selected_carousel_card = proxima_carta
+                            self.selected_carousel_card = self.cards[proxima_posicao]  # Usar carta do carrossel atual
                             self.selected_carousel_index = proxima_posicao
                             
                         else:
-                            print(f"DEBUG: [COMPLETION] ERROR: ERRO: Próxima carta {os.path.basename(proxima_carta)} não encontrada no carrossel")
+                            print(f"DEBUG: [COMPLETION] WARNING: Carta {proxima_carta_basename} não encontrada face up no carrossel")
                             print(f"DEBUG: [COMPLETION] Carrossel atual: {[os.path.basename(c) for c in self.cards]}")
-                            gestao_deve_continuar = False
+                            print(f"DEBUG: [COMPLETION] Estados face up: {self.card_face_up_flags}")
+                            print(f"DEBUG: [COMPLETION] IMPORTANTE: Mesmo assim, continuar gestão - carta pode estar noutro slot")
+                            # NÃO definir gestao_deve_continuar = False - deixar a gestão continuar
                     
                     if gestao_deve_continuar:
                         print(f"DEBUG: [COMPLETION] Reconstruindo dashboard e continuando gestão...")
+                        
+                        # BACKUP CRÍTICO: Preservar tracking antes da reconstrução da interface
+                        print(f"DEBUG: [COMPLETION] BACKUP DOS CONTADORES antes da reconstrução...")
+                        self._backup_turn_counters_before_reconstruction()
                         
                         # RECONSTRUIR DASHBOARD antes de continuar gestão
                         self.playerdashboard_interface(self.player_name, self.saldo, self.other_players)
@@ -7064,6 +8657,9 @@ class PlayerDashboard(tk.Toplevel):
                     
                     # CORREÇÃO NOVA: Forçar atualização dos destaques para garantir que carta restante fique destacada
                     self.after(200, lambda: self._update_carousel_selection_highlights())
+                    
+            # CORREÇÃO CRÍTICA: Preservar a decisão da gestão para retorno
+            print(f"DEBUG: [COMPLETION] Preservando decisão final: gestao_deve_continuar = {gestao_deve_continuar}")
         
         # Texto do botão baseado no tipo de carta
         if card_type == "Activity":
@@ -7309,82 +8905,339 @@ class PlayerDashboard(tk.Toplevel):
     
     def _get_turns_elapsed_for_challenge(self, carta_path):
         """
-        Calcula quantos turnos se passaram desde que a carta Challenge foi aceite
-        CORREÇÃO: Detecção automática de Challenges sem registo baseada no turno atual e n_turns
-        """
-        # VERIFICAÇÃO DE SINCRONIZAÇÃO DOS CONTADORES
-        print(f"DEBUG: [TIME_TRACKING] === VERIFICAÇÃO DE SINCRONIZAÇÃO ===")
-        print(f"DEBUG: [TIME_TRACKING] _current_turn_number (Challenges): {self._current_turn_number}")
-        print(f"DEBUG: [TIME_TRACKING] _current_turn (Events): {self._current_turn}")
-        print(f"DEBUG: [TIME_TRACKING] _current_turn_id (Processing): {self._current_turn_id}")
+        Calcula quantos turnos uma Challenge esteve ativa usando a fórmula:
+        turnos_ativo = turno_atual - turno_carta_ativou + 1
         
-        if carta_path in self._challenge_start_turns:
-            start_turn = self._challenge_start_turns[carta_path]
-            turns_elapsed = self._current_turn_number - start_turn + 1  # +1 porque o turno atual conta
-            print(f"DEBUG: [TIME_TRACKING] Challenge {os.path.basename(carta_path)}:")
-            print(f"  Turno de início: {start_turn}")
-            print(f"  Turno atual: {self._current_turn_number} (USANDO CONTADOR CORRETO)")
-            print(f"  Turnos decorridos: {turns_elapsed}")
-            return turns_elapsed
-        else:
-            # CORREÇÃO AUTOMÁTICA: Se não há registo mas o turno atual é maior que n_turns da carta,
-            # calcular automaticamente o turno de início provável
-            print(f"DEBUG: [TIME_TRACKING] Challenge {os.path.basename(carta_path)} sem registo de início")
+        CORREÇÃO CRÍTICA: Implementa busca por basename como fallback para resolver
+        incompatibilidade entre caminhos completos no tracking e basenames no carrossel.
+        
+        Args:
+            carta_path (str): Caminho da carta Challenge
             
-            # Tentar obter n_turns da carta para correção automática
-            try:
-                dados_carta = self._obter_dados_carta(carta_path)
-                n_turns = dados_carta.get('n_turns', 1) if dados_carta else 1
-                
-                print(f"DEBUG: [TIME_TRACKING] n_turns detectado: {n_turns}")
-                print(f"DEBUG: [TIME_TRACKING] Turno atual: {self._current_turn_number} (CONTADOR SINCRONIZADO)")
-                
-                # Se o turno atual for maior que n_turns, calcular turno de início
-                if self._current_turn_number > n_turns:
-                    # Calcular turno de início baseado na suposição de que o Challenge deve estar na Final Phase
-                    calculated_start_turn = self._current_turn_number - n_turns
-                    turns_elapsed = self._current_turn_number - calculated_start_turn + 1
-                    
-                    print(f"DEBUG: [TIME_TRACKING] SUCCESS: CORREÇÃO AUTOMÁTICA APLICADA:")
-                    print(f"  Turno início calculado: {calculated_start_turn}")
-                    print(f"  Turnos decorridos: {turns_elapsed}")
-                    print(f"  Challenge deve estar na Final Phase: {turns_elapsed >= n_turns}")
-                    
-                    # Registar o turno de início calculado para futuras verificações
-                    self._challenge_start_turns[carta_path] = calculated_start_turn
-                    
-                    return turns_elapsed
-                else:
-                    # Se o turno atual for <= n_turns, assumir que foi aceite no turno 1
-                    print(f"DEBUG: [TIME_TRACKING] Turno atual <= n_turns, assumindo início no turno 1")
-                    turns_elapsed = self._current_turn_number
-                    
-                    # Registar o turno 1 como início
-                    self._challenge_start_turns[carta_path] = 1
-                    
-                    return turns_elapsed
-                    
-            except Exception as e:
-                print(f"DEBUG: [TIME_TRACKING] WARNING: Erro ao obter dados da carta: {e}")
-                # Fallback: assumir que foi aceite no turno atual (1 turno decorrido)
-                print(f"DEBUG: [TIME_TRACKING] Fallback: assumindo turno atual")
-                return 1
+        Returns:
+            int: Número de turnos que a carta esteve ativa
+        """
+        if not carta_path:
+            print(f"DEBUG: [TURNS_ELAPSED] Carta path vazio ou None")
+            return 0
+        
+        carta_filename = os.path.basename(carta_path)
+        print(f"DEBUG: [TURNS_ELAPSED] Calculando turnos para: {carta_filename}")
+        print(f"DEBUG: [TURNS_ELAPSED] Caminho fornecido: {carta_path}")
+        print(f"DEBUG: [TURNS_ELAPSED] Turno atual: {self._current_turn_number}")
+        print(f"DEBUG: [TURNS_ELAPSED] Tracking disponível: {self._challenge_start_turns}")
+        
+        # CORREÇÃO CRÍTICA: Primeiro tentar caminho exato
+        if carta_path in self._challenge_start_turns:
+            turno_inicio = self._challenge_start_turns[carta_path]
+            turnos_ativa = self._current_turn_number - turno_inicio + 1
+            print(f"DEBUG: [TURNS_ELAPSED] ✅ Registo encontrado por caminho exato:")
+            print(f"DEBUG: [TURNS_ELAPSED]   Turno de ativação: {turno_inicio}")
+            print(f"DEBUG: [TURNS_ELAPSED]   Turno atual: {self._current_turn_number}")
+            print(f"DEBUG: [TURNS_ELAPSED]   Fórmula: {self._current_turn_number} - {turno_inicio} + 1 = {turnos_ativa}")
+            print(f"DEBUG: [TURNS_ELAPSED]   Challenge ativa há {turnos_ativa} turnos")
+            print(f"DEBUG: [TURNS_ELAPSED]   AMBIENTE: {get_universal_paths()['environment']}")
+            return turnos_ativa
+        
+        # CORREÇÃO CRÍTICA: Se não encontrou por caminho exato, procurar por basename
+        print(f"DEBUG: [TURNS_ELAPSED] ⚠️ Caminho exato não encontrado, procurando por basename: {carta_filename}")
+        print(f"DEBUG: [TURNS_ELAPSED] ANÁLISE DETALHADA do tracking disponível:")
+        
+        for i, (tracked_path, turno_inicio) in enumerate(self._challenge_start_turns.items(), 1):
+            tracked_basename = os.path.basename(tracked_path)
+            match_basename = tracked_basename == carta_filename
+            print(f"DEBUG: [TURNS_ELAPSED]   Entrada {i}:")
+            print(f"DEBUG: [TURNS_ELAPSED]     Caminho: {tracked_path}")
+            print(f"DEBUG: [TURNS_ELAPSED]     Basename: {tracked_basename}")
+            print(f"DEBUG: [TURNS_ELAPSED]     Match com {carta_filename}? {match_basename}")
+            print(f"DEBUG: [TURNS_ELAPSED]     Turno início: {turno_inicio}")
+            
+            if match_basename:
+                turnos_ativa = self._current_turn_number - turno_inicio + 1
+                print(f"DEBUG: [TURNS_ELAPSED] ✅ MATCH ENCONTRADO por basename!")
+                print(f"DEBUG: [TURNS_ELAPSED]   Tracking path: {tracked_path}")
+                print(f"DEBUG: [TURNS_ELAPSED]   Basename match: {tracked_basename} == {carta_filename}")
+                print(f"DEBUG: [TURNS_ELAPSED]   Turno de ativação: {turno_inicio}")
+                print(f"DEBUG: [TURNS_ELAPSED]   Turno atual: {self._current_turn_number}")
+                print(f"DEBUG: [TURNS_ELAPSED]   Fórmula: {self._current_turn_number} - {turno_inicio} + 1 = {turnos_ativa}")
+                print(f"DEBUG: [TURNS_ELAPSED]   Challenge ativa há {turnos_ativa} turnos")
+                print(f"DEBUG: [TURNS_ELAPSED]   AMBIENTE: {get_universal_paths()['environment']}")
+                return turnos_ativa
+        
+        # Se nem por basename encontrou, então realmente não foi registada
+        print(f"DEBUG: [TURNS_ELAPSED] ❌ ERRO CRÍTICO: Challenge {carta_filename} não tem registo de ativação!")
+        print(f"DEBUG: [TURNS_ELAPSED] Nem por caminho exato nem por basename foi encontrada no tracking")
+        print(f"DEBUG: [TURNS_ELAPSED] CAUSA POSSÍVEL: Challenge não foi registada quando adicionada ao carrossel")
+        print(f"DEBUG: [TURNS_ELAPSED] DIAGNÓSTICO:")
+        print(f"DEBUG: [TURNS_ELAPSED]   - Caminho procurado: {carta_path}")
+        print(f"DEBUG: [TURNS_ELAPSED]   - Basename procurado: {carta_filename}")
+        print(f"DEBUG: [TURNS_ELAPSED]   - Total tracking entries: {len(self._challenge_start_turns)}")
+        print(f"DEBUG: [TURNS_ELAPSED]   - Método de busca: caminho exato + basename fallback")
+        
+        # CORREÇÃO AUTOMÁTICA: Tentar recuperar Challenge sem tracking
+        print(f"DEBUG: [TURNS_ELAPSED] 🔧 TENTANDO RECUPERAÇÃO AUTOMÁTICA...")
+        if self._tentar_recuperar_challenge_perdida(carta_path):
+            # Se conseguiu recuperar, tentar novamente
+            print(f"DEBUG: [TURNS_ELAPSED] ✅ Challenge recuperado! Tentando novamente...")
+            if carta_path in self._challenge_start_turns:
+                turno_inicio = self._challenge_start_turns[carta_path]
+                turnos_ativa = self._current_turn_number - turno_inicio + 1
+                print(f"DEBUG: [TURNS_ELAPSED] ✅ RECUPERAÇÃO SUCESSO: Challenge ativa há {turnos_ativa} turnos")
+                return turnos_ativa
+        
+        print(f"DEBUG: [TURNS_ELAPSED] ❌ RECUPERAÇÃO FALHADA: Retornando 0 turnos")
+        print(f"DEBUG: [TURNS_ELAPSED] CORREÇÃO SUGERIDA: Verificar _register_challenge_start_turn() ou _substituir_activity_por_challenge()")
+        return 0
     
-    def _register_challenge_start_turn(self, carta_path):
+    def _tentar_recuperar_challenge_perdida(self, carta_path):
+        """
+        Tenta recuperar uma Challenge que perdeu o registo de tracking.
+        
+        CORREÇÃO CRÍTICA: Challenge recém aceite deve ser registado NO TURNO ATUAL.
+        A recuperação anterior estava incorretamente estimando turnos passados.
+        
+        Args:
+            carta_path (str): Caminho da Challenge perdida
+            
+        Returns:
+            bool: True se conseguiu recuperar, False caso contrário
+        """
+        try:
+            print(f"DEBUG: [RECOVERY] === INICIANDO RECUPERAÇÃO DE CHALLENGE PERDIDA ===")
+            print(f"DEBUG: [RECOVERY] Challenge: {os.path.basename(carta_path)}")
+            print(f"DEBUG: [RECOVERY] Caminho: {carta_path}")
+            
+            # PRIMEIRO: Verificar se Challenge está nos backups consolidados
+            # Se está, não é Challenge perdida - é problema de sincronização temporária
+            fontes_backup = []
+            
+            # Backup imediato (mais recente)
+            if hasattr(self, '_estado_botoes_imediato') and self._estado_botoes_imediato:
+                backup_imediato = getattr(self._estado_botoes_imediato, 'challenge_tracking_consolidado', {})
+                if backup_imediato:
+                    fontes_backup.append((backup_imediato, 'imediato'))
+            
+            # Backups do master (root)
+            if hasattr(self.master, '_backup_challenge_tracking'):
+                fontes_backup.append((self.master._backup_challenge_tracking, 'master_backup'))
+            if hasattr(self.master, '_super_challenge_backup'):
+                fontes_backup.append((self.master._super_challenge_backup, 'super_backup'))
+            
+            # Backup do registry 
+            if hasattr(self, '_challenge_backup_registry'):
+                fontes_backup.append((self._challenge_backup_registry, 'registry_backup'))
+            
+            print(f"DEBUG: [RECOVERY] Verificando {len(fontes_backup)} fontes de backup...")
+            
+            # Procurar Challenge nos backups
+            for backup_source, nome_fonte in fontes_backup:
+                if carta_path in backup_source:
+                    turno_correto = backup_source[carta_path]
+                    print(f"DEBUG: [RECOVERY] ✅ ENCONTRADO em {nome_fonte}: turno {turno_correto}")
+                    self._challenge_start_turns[carta_path] = turno_correto
+                    print(f"DEBUG: [RECOVERY] ✅ RECUPERAÇÃO DE BACKUP: Challenge registado no turno {turno_correto}")
+                    print(f"DEBUG: [RECOVERY] === FIM RECUPERAÇÃO (BACKUP) ===")
+                    return True
+            
+            print(f"DEBUG: [RECOVERY] Challenge não encontrado em backups - assumindo Challenge RECÉM ACEITE")
+            
+            # Se não encontrado em backups, é Challenge recém aceite no turno atual
+            turno_atual = self._current_turn_number
+            print(f"DEBUG: [RECOVERY] Turno atual: {turno_atual}")
+            print(f"DEBUG: [RECOVERY] CORREÇÃO: Challenge recém aceite deve iniciar NO TURNO ATUAL")
+            
+            # Registar no turno atual
+            self._challenge_start_turns[carta_path] = turno_atual
+            print(f"DEBUG: [RECOVERY] ✅ Challenge registado como RECÉM ACEITE no turno {turno_atual}")
+            print(f"DEBUG: [RECOVERY] Challenge ficará ativo por toda a sua duração normal")
+            print(f"DEBUG: [RECOVERY] === FIM RECUPERAÇÃO (NOVA CHALLENGE) ===")
+            return True
+            
+        except Exception as e:
+            print(f"DEBUG: [RECOVERY] ❌ ERRO durante recuperação: {e}")
+            print(f"DEBUG: [RECOVERY] === FIM RECUPERAÇÃO (ERRO) ===")
+            return False
+    
+    def _debug_challenge_tracking_state(self):
+        """
+        Método de debug para analisar o estado atual do tracking de Challenges
+        e identificar inconsistências entre carrossel e tracking
+        """
+        print(f"DEBUG: [TRACKING_DEBUG] ========== ESTADO DO CHALLENGE TRACKING ==========")
+        print(f"DEBUG: [TRACKING_DEBUG] Turno atual: {self._current_turn_number}")
+        print(f"DEBUG: [TRACKING_DEBUG] Challenges no tracking: {len(self._challenge_start_turns)}")
+        
+        # Analisar tracking atual
+        for i, (tracked_path, turno_inicio) in enumerate(self._challenge_start_turns.items(), 1):
+            turnos_ativa = self._current_turn_number - turno_inicio + 1
+            print(f"DEBUG: [TRACKING_DEBUG] Entrada {i}:")
+            print(f"DEBUG: [TRACKING_DEBUG]   Caminho: {tracked_path}")
+            print(f"DEBUG: [TRACKING_DEBUG]   Basename: {os.path.basename(tracked_path)}")
+            print(f"DEBUG: [TRACKING_DEBUG]   Turno início: {turno_inicio}")
+            print(f"DEBUG: [TRACKING_DEBUG]   Turnos ativa: {turnos_ativa}")
+        
+        # Analisar cartas no carrossel
+        print(f"DEBUG: [TRACKING_DEBUG] ========== CHALLENGES NO CARROSSEL ==========")
+        if hasattr(self, 'cards'):
+            for i, carta_path in enumerate(self.cards):
+                if carta_path and self._is_challenge_card(carta_path):
+                    carta_basename = os.path.basename(carta_path)
+                    has_tracking = carta_path in self._challenge_start_turns
+                    has_tracking_basename = any(os.path.basename(p) == carta_basename for p in self._challenge_start_turns.keys())
+                    
+                    print(f"DEBUG: [TRACKING_DEBUG] Posição {i}:")
+                    print(f"DEBUG: [TRACKING_DEBUG]   Caminho: {carta_path}")
+                    print(f"DEBUG: [TRACKING_DEBUG]   Basename: {carta_basename}")
+                    print(f"DEBUG: [TRACKING_DEBUG]   Tem tracking exato: {has_tracking}")
+                    print(f"DEBUG: [TRACKING_DEBUG]   Tem tracking basename: {has_tracking_basename}")
+                    
+                    if not has_tracking and not has_tracking_basename:
+                        print(f"DEBUG: [TRACKING_DEBUG]   ⚠️ PROBLEMA: Challenge sem tracking!")
+        
+        print(f"DEBUG: [TRACKING_DEBUG] ========== FIM ANÁLISE TRACKING ==========")
+    
+    def _register_challenge_start_turn(self, carta_path, turno_especifico=None):
         """
         Regista o turno em que uma carta Challenge foi aceite
+        CORREÇÃO CRÍTICA: Aceitar turno específico para casos onde o timing é crítico
+        CORREÇÃO ESPECÍFICA: Normalizar caminhos para garantir compatibilidade com busca posterior
+        CORREÇÃO EMERGENCIAL: Garantir que tracking nunca se perde durante reconstruções
+        CORREÇÃO FUNDAMENTAL: Detectar se estamos numa substituição e sempre usar turno correto
+        
+        Args:
+            carta_path: Caminho da carta Challenge
+            turno_especifico: Turno específico para registar (opcional - se None, usa turno atual)
         """
-        self._challenge_start_turns[carta_path] = self._current_turn_number
-        print(f"DEBUG: [TIME_TRACKING] Challenge {os.path.basename(carta_path)} registado no turno {self._current_turn_number}")
+        print(f"DEBUG: [CHALLENGE_REGISTER] === REGISTANDO CHALLENGE START TURN ===")
+        print(f"DEBUG: [CHALLENGE_REGISTER] Challenge: {os.path.basename(carta_path)}")
+        print(f"DEBUG: [CHALLENGE_REGISTER] Caminho original: {carta_path}")
+        print(f"DEBUG: [CHALLENGE_REGISTER] Turno específico solicitado: {turno_especifico}")
+        
+        # PROTEÇÃO CRÍTICA: Inicializar _challenge_start_turns se não existir
+        if not hasattr(self, '_challenge_start_turns'):
+            self._challenge_start_turns = {}
+            print(f"DEBUG: [CHALLENGE_REGISTER] WARNING: _challenge_start_turns não existia! Inicializado vazio.")
+        
+        # CORREÇÃO CRÍTICA: Usar turno específico se fornecido, senão usar turno atual
+        if turno_especifico is not None:
+            turno_registo = turno_especifico
+            print(f"DEBUG: [CHALLENGE_REGISTER] USANDO TURNO ESPECÍFICO: {turno_registo}")
+        else:
+            turno_registo = self._current_turn_number
+            print(f"DEBUG: [CHALLENGE_REGISTER] USANDO TURNO ATUAL: {turno_registo}")
+        
+        print(f"DEBUG: [CHALLENGE_REGISTER] Turno atual do sistema: {self._current_turn_number}")
+        print(f"DEBUG: [CHALLENGE_REGISTER] Turno de registo (aceite neste turno): {turno_registo}")
+        print(f"DEBUG: [CHALLENGE_REGISTER] Tracking atual: {self._challenge_start_turns}")
+        
+        # CORREÇÃO ESPECÍFICA: Normalizar caminho para usar sempre o basename
+        # Isto garante compatibilidade independentemente do caminho completo usado
+        challenge_basename = os.path.basename(carta_path)
+        
+        # CORREÇÃO FUNDAMENTAL: Detectar se esta função está a ser chamada durante aceitação/substituição
+        # Se turno_especifico foi fornecido, significa que estamos numa operação controlada (aceitar/substituir)
+        is_controlled_registration = turno_especifico is not None
+        print(f"DEBUG: [CHALLENGE_REGISTER] Operação controlada (aceitar/substituir): {is_controlled_registration}")
+        
+        # CORREÇÃO CRÍTICA: Verificar se já existe registo por basename (busca robusta)
+        existing_path = None
+        existing_turn = None
+        
+        # Primeiro verificar caminho exato
+        if carta_path in self._challenge_start_turns:
+            existing_path = carta_path
+            existing_turn = self._challenge_start_turns[carta_path]
+        
+        # Se não encontrou por caminho exato, procurar por basename
+        if not existing_path:
+            for tracked_path, turno in self._challenge_start_turns.items():
+                if os.path.basename(tracked_path) == challenge_basename:
+                    existing_path = tracked_path
+                    existing_turn = turno
+                    break
+        
+        # CORREÇÃO FUNDAMENTAL: Se já existe registo, distinguir entre operações controladas e recuperação automática
+        if existing_path:
+            print(f"DEBUG: [CHALLENGE_REGISTER] Challenge {challenge_basename} JÁ tem registo:")
+            print(f"DEBUG: [CHALLENGE_REGISTER]   Caminho tracking: {existing_path}")
+            print(f"DEBUG: [CHALLENGE_REGISTER]   Turno existente: {existing_turn}")
+            print(f"DEBUG: [CHALLENGE_REGISTER]   Tentativa de re-registo com turno: {turno_registo}")
+            print(f"DEBUG: [CHALLENGE_REGISTER]   Operação controlada: {is_controlled_registration}")
+            
+            # CORREÇÃO CRÍTICA: Se é operação controlada (aceitar/substituir Challenge), SEMPRE atualizar
+            if is_controlled_registration:
+                print(f"DEBUG: [CHALLENGE_REGISTER] *** OPERAÇÃO CONTROLADA DETECTADA ***")
+                print(f"DEBUG: [CHALLENGE_REGISTER] Challenge está sendo aceite/substituído AGORA - ATUALIZANDO turno!")
+                print(f"DEBUG: [CHALLENGE_REGISTER] SOBRESCREVENDO turno {existing_turn} -> {turno_registo}")
+                
+                # Atualizar com o turno correto da aceitação/substituição
+                if existing_path != carta_path:
+                    # Migrar chave se necessário
+                    del self._challenge_start_turns[existing_path]
+                    print(f"DEBUG: [CHALLENGE_REGISTER] Chave migrada: {existing_path} -> {carta_path}")
+                
+                self._challenge_start_turns[carta_path] = turno_registo
+                print(f"DEBUG: [CHALLENGE_REGISTER] SUCCESS: Challenge registado com turno ATUAL {turno_registo}")
+                return
+            else:
+                # Operação não controlada (recuperação automática) - preservar turno existente
+                print(f"DEBUG: [CHALLENGE_REGISTER] Operação NÃO controlada (recuperação automática)")
+                print(f"DEBUG: [CHALLENGE_REGISTER] PRESERVANDO turno original {existing_turn} - NÃO sobrescrevendo!")
+                
+                # CORREÇÃO ESPECÍFICA: Se os caminhos são diferentes mas o basename igual, 
+                # manter o registo com o caminho do carrossel (mais preciso) MAS preservar turno original
+                if existing_path != carta_path:
+                    print(f"DEBUG: [CHALLENGE_REGISTER] MIGRAÇÃO: Atualizando chave de tracking:")
+                    print(f"DEBUG: [CHALLENGE_REGISTER]   De: {existing_path}")
+                    print(f"DEBUG: [CHALLENGE_REGISTER]   Para: {carta_path}")
+                    print(f"DEBUG: [CHALLENGE_REGISTER]   Preservando turno original: {existing_turn}")
+                    del self._challenge_start_turns[existing_path]
+                    self._challenge_start_turns[carta_path] = existing_turn
+                    print(f"DEBUG: [CHALLENGE_REGISTER] SUCCESS: Chave migrada mantendo turno original {existing_turn}")
+                else:
+                    print(f"DEBUG: [CHALLENGE_REGISTER] SUCCESS: Registo já existe e está correto - nenhuma ação necessária")
+                return
+        
+        # NOTA: O código de verificação de substituição foi removido porque agora sempre preservamos
+        # o turno original. Substituições devem ser tratadas explicitamente por outras funções.
+        
+        # Registar novo Challenge com o turno correto de aceitação
+        self._challenge_start_turns[carta_path] = turno_registo
+        print(f"DEBUG: [CHALLENGE_REGISTER] SUCCESS: Challenge {challenge_basename} registado no turno {turno_registo}")
+        print(f"DEBUG: [CHALLENGE_REGISTER] Caminho de tracking: {carta_path}")
+        print(f"DEBUG: [CHALLENGE_REGISTER] Tracking atualizado: {self._challenge_start_turns}")
+        print(f"DEBUG: [CHALLENGE_REGISTER] === FIM REGISTO ===")
+        
+        # BACKUP CRÍTICO: Salvar tracking no root E master como backup de segurança
+        try:
+            # Backup no root (primary)
+            if hasattr(self, 'winfo_toplevel'):
+                root = self.winfo_toplevel()
+                if root:
+                    root._backup_challenge_tracking = self._challenge_start_turns.copy()
+                    print(f"DEBUG: [CHALLENGE_REGISTER] BACKUP: Tracking salvo no ROOT (primary)")
+            
+            # Backup no master (secondary)
+            if hasattr(self, 'master') and self.master is not None:
+                if not hasattr(self.master, '_challenge_start_turns_backup'):
+                    self.master._challenge_start_turns_backup = {}
+                self.master._challenge_start_turns_backup[carta_path] = turno_registo
+                print(f"DEBUG: [CHALLENGE_REGISTER] BACKUP: Tracking salvo no master (secondary)")
+        except Exception as e:
+            print(f"DEBUG: [CHALLENGE_REGISTER] WARNING: Não foi possível salvar backup: {e}")
+
     
     def _verificar_challenges_tempo_limite(self):
         """
-        Verifica se alguma carta Challenge atingiu o limite de n_turns e força completion obrigatório
-        Chamado automaticamente no end_turn()
+        Verifica se alguma carta Challenge atingiu o limite de n_turns (apenas para logs informativos)
+        CORREÇÃO: NÃO remove cartas automaticamente - elas devem ser completadas manualmente pelo jogador
         """
-        print("DEBUG: [CHALLENGE_TIMEOUT] === VERIFICANDO CHALLENGES COM TEMPO LIMITE ===")
+        print("DEBUG: [CHALLENGE_TIMEOUT] === VERIFICANDO CHALLENGES COM TEMPO LIMITE (INFO ONLY) ===")
         
-        cartas_para_completion_obrigatorio = []
+        print(f"DEBUG: [CHALLENGE_TIMEOUT] Turno atual: {self._current_turn_number}")
+        print(f"DEBUG: [CHALLENGE_TIMEOUT] Challenge registrados: {self._challenge_start_turns}")
+        
+        challenges_expirados = []
         
         # Verificar todas as cartas no carrossel
         for i, carta_path in enumerate(self.cards):
@@ -7416,171 +9269,221 @@ class PlayerDashboard(tk.Toplevel):
             print(f"DEBUG: [CHALLENGE_TIMEOUT]   n_turns limite: {n_turns}")
             print(f"DEBUG: [CHALLENGE_TIMEOUT]   turnos decorridos: {turns_elapsed}")
             
-            # Se atingiu o limite, adicionar à lista para completion obrigatório
+            # Se atingiu o limite, registrar para informação (mas NÃO processar automaticamente)
             if turns_elapsed >= n_turns:
-                print(f"DEBUG: [CHALLENGE_TIMEOUT] WARNING:  LIMITE ATINGIDO! Challenge deve ser completado obrigatoriamente")
-                cartas_para_completion_obrigatorio.append({
-                    'carta_path': carta_path,
-                    'carta_index': i,
-                    'dados_carta': dados_carta,
-                    'turns_elapsed': turns_elapsed,
-                    'n_turns': n_turns
-                })
+                print(f"DEBUG: [CHALLENGE_TIMEOUT] INFO: LIMITE ATINGIDO! Challenge pode ser completado via botão seta")
+                challenges_expirados.append(os.path.basename(carta_path))
             else:
                 turnos_restantes = n_turns - turns_elapsed
                 print(f"DEBUG: [CHALLENGE_TIMEOUT] SUCCESS: Ainda tem {turnos_restantes} turno(s) restante(s)")
         
-        # Processar cartas que atingiram o limite
-        if cartas_para_completion_obrigatorio:
-            print(f"DEBUG: [CHALLENGE_TIMEOUT] === {len(cartas_para_completion_obrigatorio)} CHALLENGE(S) ATINGIRAM LIMITE ===")
-            self._processar_challenges_tempo_limite_atingido(cartas_para_completion_obrigatorio)
+        # Relatório informativo apenas (sem processamento automático)
+        if challenges_expirados:
+            print(f"DEBUG: [CHALLENGE_TIMEOUT] === {len(challenges_expirados)} CHALLENGE(S) PODEM SER COMPLETADOS ===")
+            for nome in challenges_expirados:
+                print(f"DEBUG: [CHALLENGE_TIMEOUT]   - {nome}: Pronto para completion via botão seta")
         else:
             print("DEBUG: [CHALLENGE_TIMEOUT] SUCCESS: Nenhuma carta Challenge atingiu limite de turnos")
+        
+        # Retornar decisão final sobre continuidade da gestão
+        # Se gestao_deve_continuar não foi definido na lógica principal, usar valor padrão
+        if gestao_deve_continuar is None:
+            print("DEBUG: [COMPLETION] AVISO: gestao_deve_continuar não foi definido - usando valor padrão False")
+            gestao_deve_continuar = False
+        
+        print(f"DEBUG: [COMPLETION] === DECISÃO FINAL ===")
+        print(f"DEBUG: [COMPLETION] gestao_deve_continuar = {gestao_deve_continuar}")
+        return gestao_deve_continuar
+
     
-    def _processar_challenges_tempo_limite_atingido(self, cartas_lista):
-        """
-        Processa cartas Challenge que atingiram o limite de n_turns
-        Força completion obrigatório com os valores atuais das barras de progresso
-        """
-        print("DEBUG: [CHALLENGE_TIMEOUT] === PROCESSANDO COMPLETION OBRIGATÓRIO ===")
-        
-        # Mostrar mensagem informativa ao jogador
-        import tkinter.messagebox
-        nomes_cartas = [os.path.basename(carta['carta_path']) for carta in cartas_lista]
-        mensagem = f"As seguintes cartas Challenge atingiram o limite de turnos e devem ser completadas obrigatoriamente:\n\n"
-        mensagem += "\n".join([f"• {nome}" for nome in nomes_cartas])
-        mensagem += f"\n\nAs cartas serão processadas automaticamente com os valores atuais das barras de progresso."
-        
-        tkinter.messagebox.showwarning("Challenge - Tempo Limite Atingido", mensagem)
-        
-        # Processar cada carta individualmente
-        for carta_info in cartas_lista:
-            carta_path = carta_info['carta_path']
-            carta_index = carta_info['carta_index']
-            dados_carta = carta_info['dados_carta']
-            
-            print(f"DEBUG: [CHALLENGE_TIMEOUT] Processando completion obrigatório para: {os.path.basename(carta_path)}")
-            
-            # Obter valores atuais das barras de progresso para esta carta
-            stats = self.card_stats[carta_index] if carta_index < len(self.card_stats) else {"To send": 0, "Rxd": 0, "Lost": 0}
-            
-            print(f"DEBUG: [CHALLENGE_TIMEOUT] Valores finais da carta:")
-            print(f"DEBUG: [CHALLENGE_TIMEOUT]   To send: {stats['To send']}")
-            print(f"DEBUG: [CHALLENGE_TIMEOUT]   Rxd: {stats['Rxd']}")
-            print(f"DEBUG: [CHALLENGE_TIMEOUT]   Lost: {stats['Lost']}")
-            
-            # Calcular reward com os valores atuais
-            n_rxd = stats['Rxd']
-            n_lost = stats['Lost']
-            reward = self._calcular_reward_challenge(carta_path, dados_carta, n_rxd, n_lost)
-            
-            print(f"DEBUG: [CHALLENGE_TIMEOUT] Reward calculado: {reward} picoins")
-            
-            # Atualizar saldo
-            self.saldo += reward
-            print(f"DEBUG: [CHALLENGE_TIMEOUT] Saldo atualizado: {self.saldo} picoins")
-            
-            # Mostrar overlay de completion
-            self._mostrar_overlay_completion_tempo_limite(carta_path, dados_carta, carta_info, reward)
-            
-            # Remover carta do carrossel e limpar tracking
-            self._remover_carta_do_carrossel(carta_path)
-            self._cleanup_completed_challenge_tracking(carta_path)
-            
-            print(f"DEBUG: [CHALLENGE_TIMEOUT] SUCCESS: Challenge {os.path.basename(carta_path)} processado e removido")
+
+    
+
     
     def _mostrar_overlay_completion_tempo_limite(self, carta_path, dados_carta, carta_info, reward):
         """
         Mostra overlay específico para completion por tempo limite
+        CORREÇÃO CRÍTICA: Proteções máximas contra destruição da aplicação
         """
         print("DEBUG: [CHALLENGE_TIMEOUT] Mostrando overlay de completion por tempo limite")
         
-        # Criar overlay de fundo
-        overlay = tk.Toplevel(self)
-        overlay.title("")
-        overlay.configure(bg="black")
-        overlay.geometry(f"{self.screen_width}x{self.screen_height}+0+0")
-        overlay.overrideredirect(True)
-        overlay.attributes("-fullscreen", True)
-        overlay.lift()
-        overlay.focus_set()
+        # PROTEÇÃO CRÍTICA FASE 1: Verificações básicas de estado
+        try:
+            # Verificação 1: Estado do widget principal
+            if not hasattr(self, 'winfo_exists') or not self.winfo_exists():
+                print("DEBUG: [CHALLENGE_TIMEOUT] WARNING: Aplicação destruída (winfo_exists) - overlay não pode ser criado")
+                return
+                
+            # Verificação 2: Tentar acessar propriedades básicas
+            _ = self.winfo_width()
+            _ = self.winfo_height()
+            
+            # Verificação 3: Verificar se ainda temos acesso aos atributos necessários
+            if not hasattr(self, 'screen_width') or not hasattr(self, 'screen_height'):
+                print("DEBUG: [CHALLENGE_TIMEOUT] WARNING: Atributos de tela não disponíveis - overlay não pode ser criado")
+                return
+                
+        except tk.TclError as e:
+            print(f"DEBUG: [CHALLENGE_TIMEOUT] WARNING: TclError fase 1 - aplicação destruída: {e}")
+            return
+        except Exception as e:
+            print(f"DEBUG: [CHALLENGE_TIMEOUT] WARNING: Erro inesperado fase 1: {e}")
+            return
         
-        # Título do overlay
-        title_label = tk.Label(
-            overlay, 
-            text="CHALLENGE - TEMPO LIMITE ATINGIDO!", 
-            font=("Helvetica", 28, "bold"),
-            bg="black", 
-            fg="red"
-        )
-        title_label.place(relx=0.5, rely=0.15, anchor="center")
+        # PROTEÇÃO CRÍTICA FASE 2: Tentar criar overlay com fallback completo
+        overlay = None
+        try:
+            # Verificação adicional antes de criar overlay
+            if not self.winfo_exists():
+                print("DEBUG: [CHALLENGE_TIMEOUT] WARNING: Aplicação destruída antes de criar overlay")
+                return
+                
+            # Criar overlay de fundo
+            overlay = tk.Toplevel(self)
+            overlay.title("")
+            overlay.configure(bg="black")
+            overlay.geometry(f"{self.screen_width}x{self.screen_height}+0+0")
+            overlay.overrideredirect(True)
+            overlay.attributes("-fullscreen", True)
+            overlay.lift()
+            overlay.focus_set()
+            
+        except tk.TclError as e:
+            print(f"DEBUG: [CHALLENGE_TIMEOUT] WARNING: TclError fase 2 - aplicação destruída durante criação overlay: {e}")
+            if overlay:
+                try:
+                    overlay.destroy()
+                except:
+                    pass
+            return
+        except Exception as e:
+            print(f"DEBUG: [CHALLENGE_TIMEOUT] ERROR: Erro inesperado ao criar overlay: {e}")
+            if overlay:
+                try:
+                    overlay.destroy()
+                except:
+                    pass
+            return
         
-        # Informações da carta
-        carta_nome = os.path.basename(carta_path)
-        info_text = f"Carta: {carta_nome}\n"
-        info_text += f"Limite de turnos: {carta_info['n_turns']}\n"
-        info_text += f"Turnos decorridos: {carta_info['turns_elapsed']}\n\n"
-        info_text += f"Valores finais:\n"
-        
-        carta_index = carta_info['carta_index']
-        if carta_index < len(self.card_stats):
-            stats = self.card_stats[carta_index]
-            info_text += f"Packets Received: {stats['Rxd']}\n"
-            info_text += f"Packets Lost: {stats['Lost']}\n"
-        
-        info_text += f"\nReward obtido: {reward} picoins"
-        
-        info_label = tk.Label(
-            overlay,
-            text=info_text,
-            font=("Helvetica", 18),
-            bg="black",
-            fg="white",
-            justify="center"
-        )
-        info_label.place(relx=0.5, rely=0.5, anchor="center")
-        
-        # Botão OK
-        ok_button = tk.Button(
-            overlay,
-            text="OK",
-            font=("Helvetica", 16, "bold"),
-            bg=self.bar_color,
-            fg="black",
-            width=10,
-            command=overlay.destroy
-        )
-        ok_button.place(relx=0.5, rely=0.8, anchor="center")
-        
-        print("DEBUG: [CHALLENGE_TIMEOUT] Overlay de completion por tempo limite criado")
+        # PROTEÇÃO CRÍTICA FASE 3: Criar conteúdo do overlay com proteções adicionais
+        try:
+            # Verificação contínua de estado durante criação de widgets
+            if not self.winfo_exists() or not overlay.winfo_exists():
+                print("DEBUG: [CHALLENGE_TIMEOUT] WARNING: Widget destruído durante criação de conteúdo")
+                return
+            
+            # Título do overlay
+            title_label = tk.Label(
+                overlay, 
+                text="CHALLENGE - TEMPO LIMITE ATINGIDO!", 
+                font=("Helvetica", 28, "bold"),
+                bg="black", 
+                fg="red"
+            )
+            title_label.place(relx=0.5, rely=0.15, anchor="center")
+            
+            # Informações da carta
+            carta_nome = os.path.basename(carta_path)
+            info_text = f"Carta: {carta_nome}\n"
+            info_text += f"Limite de turnos: {carta_info['n_turns']}\n"
+            info_text += f"Turnos decorridos: {carta_info['turns_elapsed']}\n\n"
+            info_text += f"Valores finais:\n"
+            
+            carta_index = carta_info['carta_index']
+            if carta_index < len(self.card_stats):
+                stats = self.card_stats[carta_index]
+                info_text += f"Packets Received: {stats['Rxd']}\n"
+                info_text += f"Packets Lost: {stats['Lost']}\n"
+            
+            info_text += f"\nReward obtido: {reward} picoins"
+            
+            info_label = tk.Label(
+                overlay,
+                text=info_text,
+                font=("Helvetica", 18),
+                bg="black",
+                fg="white",
+                justify="center"
+            )
+            info_label.place(relx=0.5, rely=0.5, anchor="center")
+            
+            # Botão OK com comando seguro
+            def safe_close_overlay():
+                try:
+                    # CORREÇÃO: Limpar tracking de Challenge completado
+                    if "challenge" in os.path.basename(carta_path).lower():
+                        self._cleanup_completed_challenge_tracking(carta_path)
+                        print(f"DEBUG: [COMPLETION_TIMEOUT] Challenge tracking limpo para: {os.path.basename(carta_path)}")
+                    
+                    if overlay.winfo_exists():
+                        overlay.destroy()
+                except:
+                    pass
+            
+            ok_button = tk.Button(
+                overlay,
+                text="OK",
+                font=("Helvetica", 16, "bold"),
+                bg=self.bar_color if hasattr(self, 'bar_color') else "#AAAAAA",
+                fg="black",
+                width=10,
+                command=safe_close_overlay
+            )
+            ok_button.place(relx=0.5, rely=0.8, anchor="center")
+            
+            print("DEBUG: [CHALLENGE_TIMEOUT] SUCCESS: Overlay de completion por tempo limite criado com sucesso")
+            
+        except tk.TclError as e:
+            print(f"DEBUG: [CHALLENGE_TIMEOUT] WARNING: TclError fase 3 - aplicação destruída durante criação de conteúdo: {e}")
+            try:
+                overlay.destroy()
+            except:
+                pass
+            print("DEBUG: [CHALLENGE_TIMEOUT] WARNING: Não foi possível criar overlay - Challenge permanece ativo")
+            return
+        except Exception as e:
+            print(f"DEBUG: [CHALLENGE_TIMEOUT] ERROR: Erro inesperado ao criar conteúdo do overlay: {e}")
+            try:
+                overlay.destroy()
+            except:
+                pass
+            print("DEBUG: [CHALLENGE_TIMEOUT] WARNING: Não foi possível criar overlay - Challenge permanece ativo")
+            return
 
     def _increment_turn_counter(self):
         """
         Incrementa TODOS os contadores de turnos (chamado no end_turn)
         CORREÇÃO CRÍTICA: Sincronizar todos os sistemas de contagem
         """
-        # 1. Contador principal para Challenges
-        old_turn_challenges = self._current_turn_number
+        # Detectar ambiente para debug específico
+        universal_paths = get_universal_paths()
+        ambiente = "RASPBERRY PI" if universal_paths['environment'] == 'raspberry_pi' else "DESENVOLVIMENTO"
+        
+        print(f"DEBUG: [TIME_TRACKING] === INCREMENTANDO CONTADORES DE TURNO ===")
+        print(f"DEBUG: [TIME_TRACKING] AMBIENTE: {ambiente}")
+        print(f"DEBUG: [TIME_TRACKING] Contadores ANTES do incremento:")
+        print(f"DEBUG: [TIME_TRACKING]   _current_turn_number (Challenges): {self._current_turn_number}")
+        print(f"DEBUG: [TIME_TRACKING]   _current_turn (Events): {self._current_turn}")
+        print(f"DEBUG: [TIME_TRACKING]   _current_turn_id (Processing): {self._current_turn_id}")
+        
+        # CORREÇÃO CRÍTICA: Incrementar TODOS os contadores de forma sincronizada
         self._current_turn_number += 1
-        
-        # 2. Contador para Events
-        old_turn_events = self._current_turn
         self._current_turn += 1
+        self._current_turn_id += 1
         
-        # 3. O _current_turn_id já é incrementado no _reset_turn_processing_counters
-        # mas vamos garantir que está sincronizado
-        expected_turn_id = self._current_turn_number
-        if self._current_turn_id != expected_turn_id:
-            print(f"DEBUG: [TIME_TRACKING] WARNING: DESSINCRONIZAÇÃO DETECTADA!")
-            print(f"DEBUG: [TIME_TRACKING] _current_turn_id: {self._current_turn_id} ≠ expected: {expected_turn_id}")
-            self._current_turn_id = expected_turn_id
-            print(f"DEBUG: [TIME_TRACKING] SUCCESS: _current_turn_id corrigido para: {self._current_turn_id}")
-        
-        print(f"DEBUG: [TIME_TRACKING] SUCCESS: CONTADORES SINCRONIZADOS:")
-        print(f"DEBUG: [TIME_TRACKING]   Challenges: {old_turn_challenges} → {self._current_turn_number}")
-        print(f"DEBUG: [TIME_TRACKING]   Events: {old_turn_events} → {self._current_turn}")
-        print(f"DEBUG: [TIME_TRACKING]   Processing ID: {self._current_turn_id}")
+        print(f"DEBUG: [TIME_TRACKING] Contadores APÓS incremento (SINCRONIZADOS):")
+        print(f"DEBUG: [TIME_TRACKING]   _current_turn_number: {self._current_turn_number}")
+        print(f"DEBUG: [TIME_TRACKING]   _current_turn: {self._current_turn}")
+        print(f"DEBUG: [TIME_TRACKING]   _current_turn_id: {self._current_turn_id}")
         print(f"DEBUG: [TIME_TRACKING] SUCCESS: TODOS OS SISTEMAS AGORA NO TURNO {self._current_turn_number}")
+        print(f"DEBUG: [TIME_TRACKING] === FIM INCREMENTO DE CONTADORES ===")
+        
+        # CRÍTICO: Verificar Challenges que atingiram o tempo limite após incremento
+        try:
+            self._verificar_challenges_tempo_limite()
+            print(f"DEBUG: [TIME_TRACKING] SUCCESS: Verificação de tempo limite executada")
+        except Exception as e:
+            print(f"DEBUG: [TIME_TRACKING] ERROR: Erro na verificação de tempo limite: {e}")
     
     def _cleanup_completed_challenge_tracking(self, carta_path):
         """
@@ -7590,6 +9493,583 @@ class PlayerDashboard(tk.Toplevel):
             del self._challenge_start_turns[carta_path]
             print(f"DEBUG: [TIME_TRACKING] Tracking removido para Challenge completado: {os.path.basename(carta_path)}")
     
+    def _cleanup_orphaned_challenge_tracking(self):
+        """
+        Remove tracking de Challenges órfãos que não estão mais no carrossel.
+        Chamado no início de cada turno para limpar tracking de Challenges antigos.
+        CORREÇÃO CRÍTICA: Também limpa todos os backups para evitar restauração.
+        """
+        print("DEBUG: [ORPHAN_CLEANUP] === LIMPEZA DE TRACKING ÓRFÃO ===")
+        
+        if not hasattr(self, '_challenge_start_turns') or not self._challenge_start_turns:
+            print("DEBUG: [ORPHAN_CLEANUP] Nenhum tracking de Challenges para limpar")
+            return
+        
+        # Obter Challenges atualmente no carrossel
+        challenges_no_carrossel = set()
+        if hasattr(self, 'cards') and self.cards:
+            for carta in self.cards:
+                if carta and 'challenge' in carta.lower():
+                    challenges_no_carrossel.add(carta)
+                    print(f"DEBUG: [ORPHAN_CLEANUP] Challenge encontrado no carrossel: {os.path.basename(carta)}")
+        
+        # Identificar tracking órfão
+        tracking_orfao = []
+        for carta_path in list(self._challenge_start_turns.keys()):
+            if carta_path not in challenges_no_carrossel:
+                tracking_orfao.append(carta_path)
+                print(f"DEBUG: [ORPHAN_CLEANUP] Challenge órfão identificado: {os.path.basename(carta_path)}")
+        
+        # Remover tracking órfão
+        challenges_removidos = 0
+        for carta_path in tracking_orfao:
+            if carta_path in self._challenge_start_turns:
+                del self._challenge_start_turns[carta_path]
+                challenges_removidos += 1
+                print(f"DEBUG: [ORPHAN_CLEANUP] ✅ Tracking órfão removido: {os.path.basename(carta_path)}")
+        
+        # CORREÇÃO CRÍTICA: Limpar tracking órfão de TODOS os backups também
+        backup_locations = []
+        
+        # 1. Backup no master
+        if hasattr(self, 'master') and hasattr(self.master, '_backup_challenge_tracking'):
+            master_backup = self.master._backup_challenge_tracking
+            backup_locations.append((master_backup, 'master._backup_challenge_tracking'))
+        
+        # 2. Backup no root - tentar múltiplas formas de acesso
+        root_found = False
+        root = None
+        if hasattr(self, 'master'):
+            # Tentar acessar via self.master.master (normal para Toplevel)
+            if hasattr(self.master, 'master'):
+                root = self.master.master
+                root_found = True
+            # Se não funcionar, tentar acessar diretamente via self.master (para root direto)
+            elif hasattr(self.master, '_backup_challenge_tracking'):
+                root = self.master
+                root_found = True
+            
+            if root_found and hasattr(root, '_backup_challenge_tracking'):
+                root_backup = root._backup_challenge_tracking
+                backup_locations.append((root_backup, 'root._backup_challenge_tracking'))
+        
+        # 3. Super backup no master
+        if hasattr(self, 'master') and hasattr(self.master, '_super_challenge_backup'):
+            super_backup = self.master._super_challenge_backup
+            backup_locations.append((super_backup, 'master._super_challenge_backup'))
+        
+        # 4. Super backup no root
+        if root_found and root and hasattr(root, '_super_challenge_backup'):
+            root_super_backup = root._super_challenge_backup
+            backup_locations.append((root_super_backup, 'root._super_challenge_backup'))
+        
+        # Limpar tracking órfão de todos os backups
+        backups_limpos = 0
+        for backup_dict, backup_name in backup_locations:
+            backup_removidos = 0
+            for carta_path in tracking_orfao:
+                if carta_path in backup_dict:
+                    del backup_dict[carta_path]
+                    backup_removidos += 1
+                    print(f"DEBUG: [ORPHAN_CLEANUP] ✅ Backup órfão removido de {backup_name}: {os.path.basename(carta_path)}")
+            
+            if backup_removidos > 0:
+                backups_limpos += 1
+                print(f"DEBUG: [ORPHAN_CLEANUP] Backup limpo: {backup_name} ({backup_removidos} entradas removidas)")
+        
+        print(f"DEBUG: [ORPHAN_CLEANUP] === RESULTADO ===")
+        print(f"DEBUG: [ORPHAN_CLEANUP] Challenges no carrossel: {len(challenges_no_carrossel)}")
+        print(f"DEBUG: [ORPHAN_CLEANUP] Tracking órfão removido: {challenges_removidos}")
+        print(f"DEBUG: [ORPHAN_CLEANUP] Backups limpos: {backups_limpos}")
+        print(f"DEBUG: [ORPHAN_CLEANUP] Tracking final: {len(self._challenge_start_turns)} entradas")
+        
+        if challenges_removidos > 0:
+            print(f"DEBUG: [ORPHAN_CLEANUP] ✅ SUCCESS: {challenges_removidos} Challenge(s) órfão(s) removido(s) do tracking")
+            # Mostrar tracking final limpo
+            if self._challenge_start_turns:
+                print("DEBUG: [ORPHAN_CLEANUP] Tracking restante:")
+                for carta_path, turno in self._challenge_start_turns.items():
+                    print(f"DEBUG: [ORPHAN_CLEANUP]   - {os.path.basename(carta_path)}: turno {turno}")
+            else:
+                print("DEBUG: [ORPHAN_CLEANUP] Tracking completamente limpo")
+        else:
+            print("DEBUG: [ORPHAN_CLEANUP] Nenhum tracking órfão encontrado")
+        
+        print("DEBUG: [ORPHAN_CLEANUP] === FIM LIMPEZA ===")
+    
+    def _reset_card_values_on_activation(self, carta_path, posicao_carrossel):
+        """
+        Reset dos valores das barras de progresso quando uma carta é ativada no carrossel.
+        Sempre começa com: To send = message_size, Rxd = 0, Lost = 0
+        """
+        try:
+            print(f"DEBUG: [RESET_VALUES] Resetando valores para carta: {os.path.basename(carta_path)} na posição {posicao_carrossel}")
+            
+            # Obter message_size da carta
+            message_size = self._get_card_message_size(carta_path)
+            if message_size is None:
+                print(f"DEBUG: [RESET_VALUES] ERROR: Não foi possível obter message_size para {os.path.basename(carta_path)}")
+                return
+            
+            # Reset dos valores: To send = message_size, Rxd = 0, Lost = 0
+            valores_reset = {
+                'To send': message_size,
+                'Rxd': 0,
+                'Lost': 0
+            }
+            
+            # Atualizar card_stats se existir
+            if not hasattr(self, 'card_stats'):
+                self.card_stats = {}
+            
+            self.card_stats[posicao_carrossel] = valores_reset.copy()
+            
+            print(f"DEBUG: [RESET_VALUES] SUCCESS: Valores resetados para posição {posicao_carrossel}")
+            print(f"DEBUG: [RESET_VALUES]   To send: {message_size} (= message_size)")
+            print(f"DEBUG: [RESET_VALUES]   Rxd: 0")
+            print(f"DEBUG: [RESET_VALUES]   Lost: 0")
+            print(f"DEBUG: [RESET_VALUES]   card_stats[{posicao_carrossel}] = {valores_reset}")
+            
+        except Exception as e:
+            print(f"DEBUG: [RESET_VALUES] ERRO ao resetar valores: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    def _backup_turn_counters_before_reconstruction(self):
+        """
+        Faz backup dos contadores de turno antes da reconstrução da interface.
+        CRITICAL: Garante que os contadores não voltam ao início quando há substituição.
+        """
+        print(f"DEBUG: [BACKUP_COUNTERS] === BACKUP CRÍTICO DOS CONTADORES ===")
+        print(f"DEBUG: [BACKUP_COUNTERS] Situação: Interface será reconstruída (substituição Challenge/Activity)")
+        print(f"DEBUG: [BACKUP_COUNTERS] PROBLEMA: Reconstrução pode resetar contadores para turno 1")
+        print(f"DEBUG: [BACKUP_COUNTERS] SOLUÇÃO: Backup dos valores atuais para restaurar após reconstrução")
+        
+        # CORREÇÃO CRÍTICA: Verificar se há Challenges recém-registados que podem estar apenas nos backups temporários
+        print(f"DEBUG: [BACKUP_COUNTERS] === VERIFICAÇÃO DE CHALLENGES TEMPORÁRIOS ===")
+        challenge_tracking_consolidado = getattr(self, '_challenge_start_turns', {}).copy()
+        
+        # Consolidar Challenges de todos os backups temporários para não perder nenhum
+        backup_sources = []
+        
+        # 1. Backup imediato do master
+        if hasattr(self, 'master') and hasattr(self.master, '_challenge_start_turns_backup_imediato'):
+            backup_sources.append(('master_imediato', self.master._challenge_start_turns_backup_imediato))
+        
+        # 2. Backup do master
+        if hasattr(self, 'master') and hasattr(self.master, '_challenge_start_turns_backup'):
+            backup_sources.append(('master_backup', self.master._challenge_start_turns_backup))
+        
+        # 3. Backup do root
+        if hasattr(self, 'winfo_toplevel'):
+            root = self.winfo_toplevel()
+            if root and hasattr(root, '_backup_challenge_tracking'):
+                backup_sources.append(('root_backup', root._backup_challenge_tracking))
+        
+        # 4. Backup da Store (específico para Challenges aceites)
+        if hasattr(self, 'master') and hasattr(self.master, '_backup_challenge_start_turns'):
+            backup_sources.append(('store_backup', self.master._backup_challenge_start_turns))
+        
+        print(f"DEBUG: [BACKUP_COUNTERS] Fontes de backup encontradas: {len(backup_sources)}")
+        
+        # Consolidar todos os Challenges de todas as fontes
+        for source_name, backup_data in backup_sources:
+            if backup_data:
+                print(f"DEBUG: [BACKUP_COUNTERS] Processando fonte '{source_name}': {len(backup_data)} itens")
+                for challenge_path, turno in backup_data.items():
+                    challenge_name = os.path.basename(challenge_path)
+                    if challenge_path not in challenge_tracking_consolidado:
+                        challenge_tracking_consolidado[challenge_path] = turno
+                        print(f"DEBUG: [BACKUP_COUNTERS] ✅ {challenge_name} consolidado de '{source_name}': turno {turno}")
+                    else:
+                        print(f"DEBUG: [BACKUP_COUNTERS] {challenge_name} já existe no consolidado: turno {challenge_tracking_consolidado[challenge_path]}")
+        
+        print(f"DEBUG: [BACKUP_COUNTERS] Challenge tracking consolidado: {len(challenge_tracking_consolidado)} itens total")
+        for path, turno in challenge_tracking_consolidado.items():
+            print(f"DEBUG: [BACKUP_COUNTERS]   - {os.path.basename(path)}: turno {turno}")
+        
+        # Capturar valores atuais de todos os contadores USANDO tracking consolidado
+        current_counters = {
+            '_current_turn_number': getattr(self, '_current_turn_number', 1),
+            '_current_turn': getattr(self, '_current_turn', 1), 
+            '_current_turn_id': getattr(self, '_current_turn_id', 1),
+            '_challenge_start_turns': challenge_tracking_consolidado,  # CORREÇÃO: Usar consolidado
+            '_event_start_turns': getattr(self, '_event_start_turns', {}).copy(),
+            '_service_start_turns': getattr(self, '_service_start_turns', {}).copy(),
+            '_event_duration_tracking': getattr(self, '_event_duration_tracking', {}).copy(),
+            '_service_duration_tracking': getattr(self, '_service_duration_tracking', {}).copy(),
+            '_service_real_activation_turns': getattr(self, '_service_real_activation_turns', {}).copy()  # NOVO: preservar turnos reais
+        }
+        
+        print(f"DEBUG: [BACKUP_COUNTERS] Valores atuais sendo salvos:")
+        print(f"DEBUG: [BACKUP_COUNTERS]   _current_turn_number: {current_counters['_current_turn_number']}")
+        print(f"DEBUG: [BACKUP_COUNTERS]   _current_turn: {current_counters['_current_turn']}")
+        print(f"DEBUG: [BACKUP_COUNTERS]   _current_turn_id: {current_counters['_current_turn_id']}")
+        print(f"DEBUG: [BACKUP_COUNTERS]   Challenge tracking: {len(current_counters['_challenge_start_turns'])} itens")
+        print(f"DEBUG: [BACKUP_COUNTERS]   Event tracking: {len(current_counters['_event_start_turns'])} itens")
+        print(f"DEBUG: [BACKUP_COUNTERS]   Service tracking: {len(current_counters['_service_start_turns'])} itens")
+        print(f"DEBUG: [BACKUP_COUNTERS]   Service real activation: {len(current_counters['_service_real_activation_turns'])} itens")
+        
+        # Salvar no root para sobreviver à reconstrução
+        if hasattr(self, 'master') and self.master:
+            self.master._backup_turn_counters = current_counters
+            print(f"DEBUG: [BACKUP_COUNTERS] SUCCESS: Backup salvo no master (janela pai)")
+        elif hasattr(self, 'winfo_toplevel'):
+            root = self.winfo_toplevel()
+            if root:
+                root._backup_turn_counters = current_counters  
+                print(f"DEBUG: [BACKUP_COUNTERS] SUCCESS: Backup salvo no toplevel root")
+        
+        # Backup adicional como atributo da classe (fallback)
+        self._backup_counters_reconstruction = current_counters
+        print(f"DEBUG: [BACKUP_COUNTERS] SUCCESS: Backup adicional salvo na instância (fallback)")
+        print(f"DEBUG: [BACKUP_COUNTERS] === BACKUP COMPLETO ===")
+    
+    def _restore_turn_counters_after_reconstruction(self):
+        """
+        Restaura os contadores de turno após a reconstrução da interface.
+        CORREÇÃO CRÍTICA: Verificar Challenges no carrossel após restauração
+        """
+        print(f"DEBUG: [RESTORE_COUNTERS] === RESTAURAÇÃO DOS CONTADORES ===")
+        
+        # Tentar restaurar do root primeiro
+        backup_counters = None
+        
+        if hasattr(self, 'master') and self.master and hasattr(self.master, '_backup_turn_counters'):
+            backup_counters = self.master._backup_turn_counters
+            print(f"DEBUG: [RESTORE_COUNTERS] Backup encontrado no master")
+        elif hasattr(self, 'winfo_toplevel'):
+            root = self.winfo_toplevel()
+            if root and hasattr(root, '_backup_turn_counters'):
+                backup_counters = root._backup_turn_counters
+                print(f"DEBUG: [RESTORE_COUNTERS] Backup encontrado no toplevel root")
+        elif hasattr(self, '_backup_counters_reconstruction'):
+            backup_counters = self._backup_counters_reconstruction
+            print(f"DEBUG: [RESTORE_COUNTERS] Backup encontrado no fallback da instância")
+        
+        if not backup_counters:
+            print(f"DEBUG: [RESTORE_COUNTERS] WARNING: Nenhum backup encontrado - verificando Challenges do carrossel")
+            self._ensure_challenge_tracking_integrity()
+            return
+        
+        # Restaurar todos os contadores
+        self._current_turn_number = backup_counters.get('_current_turn_number', 1)
+        self._current_turn = backup_counters.get('_current_turn', 1)
+        self._current_turn_id = backup_counters.get('_current_turn_id', 1)
+        self._challenge_start_turns = backup_counters.get('_challenge_start_turns', {}).copy()
+        self._event_start_turns = backup_counters.get('_event_start_turns', {}).copy()
+        self._service_start_turns = backup_counters.get('_service_start_turns', {}).copy()
+        self._event_duration_tracking = backup_counters.get('_event_duration_tracking', {}).copy()
+        self._service_duration_tracking = backup_counters.get('_service_duration_tracking', {}).copy()
+        self._service_real_activation_turns = backup_counters.get('_service_real_activation_turns', {}).copy()  # NOVO: restaurar turnos reais
+        
+        # SUPER RESTORATION SYSTEM: Consolidar de múltiplas fontes de backup
+        root = None
+        try:
+            root = self.master if hasattr(self, 'master') else self.winfo_toplevel()
+        except:
+            pass
+        
+        if root:
+            # Restaurar Services tracking com consolidação múltipla
+            if hasattr(root, '_backup_service_tracking_super'):
+                consolidated_services = root._backup_service_tracking_super
+                self._service_real_activation_turns.update(consolidated_services)
+                print(f"DEBUG: [RESTORE_COUNTERS] Services super backup restaurado: {len(consolidated_services)} entries")
+            
+            # Consolidar de todas as fontes disponíveis
+            if hasattr(root, '_backup_service_tracking'):
+                self._service_real_activation_turns.update(root._backup_service_tracking)
+            if hasattr(root, '_service_tracking_backup_imediato'):
+                self._service_real_activation_turns.update(root._service_tracking_backup_imediato)
+            if hasattr(root, '_backup_service_tracking_end_turn'):
+                self._service_real_activation_turns.update(root._backup_service_tracking_end_turn)
+            
+            # Restaurar Events tracking com consolidação múltipla
+            if hasattr(root, '_backup_event_tracking_super'):
+                consolidated_events = root._backup_event_tracking_super
+                self._event_duration_tracking.update(consolidated_events)
+                print(f"DEBUG: [RESTORE_COUNTERS] Events super backup restaurado: {len(consolidated_events)} entries")
+            
+            if hasattr(root, '_backup_event_start_turns_super'):
+                consolidated_event_starts = root._backup_event_start_turns_super
+                self._event_start_turns.update(consolidated_event_starts)
+                print(f"DEBUG: [RESTORE_COUNTERS] Events start turns super backup restaurado: {len(consolidated_event_starts)} entries")
+            
+            # Consolidar de todas as fontes disponíveis para Events
+            if hasattr(root, '_backup_event_tracking'):
+                self._event_duration_tracking.update(root._backup_event_tracking)
+            if hasattr(root, '_event_tracking_backup_imediato'):
+                self._event_duration_tracking.update(root._event_tracking_backup_imediato)
+            if hasattr(root, '_backup_event_tracking_end_turn'):
+                self._event_duration_tracking.update(root._backup_event_tracking_end_turn)
+            
+            if hasattr(root, '_backup_event_start_turns'):
+                self._event_start_turns.update(root._backup_event_start_turns)
+            if hasattr(root, '_backup_event_start_turns_end_turn'):
+                self._event_start_turns.update(root._backup_event_start_turns_end_turn)
+        
+        # CORREÇÃO CRÍTICA: Verificar se o backup principal tem o _challenge_start_turns atualizado
+        print(f"DEBUG: [RESTORE_COUNTERS] Challenge tracking restaurado do backup principal: {len(self._challenge_start_turns)} itens")
+        for path, turn in self._challenge_start_turns.items():
+            print(f"DEBUG: [RESTORE_COUNTERS]   - {os.path.basename(path)}: turno {turn}")
+        
+        print(f"DEBUG: [RESTORE_COUNTERS] SUCCESS: Contadores restaurados:")
+        print(f"DEBUG: [RESTORE_COUNTERS]   _current_turn_number: {self._current_turn_number}")
+        print(f"DEBUG: [RESTORE_COUNTERS]   _current_turn: {self._current_turn}")
+        print(f"DEBUG: [RESTORE_COUNTERS]   _current_turn_id: {self._current_turn_id}")
+        print(f"DEBUG: [RESTORE_COUNTERS]   Challenge tracking: {len(self._challenge_start_turns)} itens")
+        print(f"DEBUG: [RESTORE_COUNTERS]   Event tracking: {len(self._event_start_turns)} itens")
+        print(f"DEBUG: [RESTORE_COUNTERS]   Service tracking: {len(self._service_start_turns)} itens")
+        print(f"DEBUG: [RESTORE_COUNTERS]   Service real activation: {len(self._service_real_activation_turns)} itens")
+        
+        # Debug detalhado dos Services restaurados
+        if self._service_real_activation_turns:
+            print(f"DEBUG: [RESTORE_COUNTERS] Services com turnos reais preservados:")
+            for path, turn in self._service_real_activation_turns.items():
+                print(f"DEBUG: [RESTORE_COUNTERS]   - {os.path.basename(path)}: turno real {turn}")
+        
+        # CORREÇÃO CRÍTICA: NÃO chamar _ensure_challenge_tracking_integrity() após restore
+        # pois irá sobrescrever os turnos originais restaurados com o turno atual!
+        print(f"DEBUG: [RESTORE_COUNTERS] TRACKING PRESERVADO: Challenges restaurados mantêm turnos originais")
+        
+        # CORREÇÃO CRÍTICA CHALLENGE_13: Sistema de restauração múltiplas camadas
+        print(f"DEBUG: [RESTORE_COUNTERS] === RESTAURAÇÃO MÚLTIPLAS CAMADAS ===")
+        backup_encontrado = False
+        
+        try:
+            # CAMADA 1: Emergency backup (prioridade máxima)
+            if hasattr(self, 'master') and self.master and hasattr(self.master, '_challenge_tracking_emergency_backup'):
+                emergency_backup = self.master._challenge_tracking_emergency_backup
+                print(f"DEBUG: [RESTORE_COUNTERS] CAMADA 1: Emergency backup encontrado: {emergency_backup}")
+                
+                for carta_path, turno in emergency_backup.items():
+                    self._challenge_start_turns[carta_path] = turno
+                    print(f"DEBUG: [RESTORE_COUNTERS] 🚨 CAMADA 1: Challenge {os.path.basename(carta_path)} restaurado: turno {turno}")
+                    backup_encontrado = True
+                
+                delattr(self.master, '_challenge_tracking_emergency_backup')
+                print(f"DEBUG: [RESTORE_COUNTERS] CAMADA 1: Emergency backup limpo")
+            
+            # CAMADA 2: Super backup no master  
+            if hasattr(self, 'master') and hasattr(self.master, '_super_challenge_backup'):
+                super_backup = self.master._super_challenge_backup
+                if super_backup:
+                    print(f"DEBUG: [RESTORE_COUNTERS] CAMADA 2: Super backup master encontrado: {super_backup}")
+                    
+                    for carta_path, turno in super_backup.items():
+                        if carta_path not in self._challenge_start_turns:  # Não sobrescrever se já restaurado
+                            self._challenge_start_turns[carta_path] = turno
+                            print(f"DEBUG: [RESTORE_COUNTERS] � CAMADA 2: Challenge {os.path.basename(carta_path)} restaurado: turno {turno}")
+                            backup_encontrado = True
+            
+            # CAMADA 3: Super backup no root
+            try:
+                if hasattr(self.master.master, '_super_challenge_backup'):
+                    root_backup = self.master.master._super_challenge_backup
+                    if root_backup:
+                        print(f"DEBUG: [RESTORE_COUNTERS] CAMADA 3: Super backup root encontrado: {root_backup}")
+                        
+                        for carta_path, turno in root_backup.items():
+                            if carta_path not in self._challenge_start_turns:
+                                self._challenge_start_turns[carta_path] = turno
+                                print(f"DEBUG: [RESTORE_COUNTERS] 🌐 CAMADA 3: Challenge {os.path.basename(carta_path)} restaurado: turno {turno}")
+                                backup_encontrado = True
+            except:
+                print("DEBUG: [RESTORE_COUNTERS] CAMADA 3: Root não acessível")
+            
+            # CAMADA 4: Backup registry na instância
+            if hasattr(self, '_challenge_backup_registry') and self._challenge_backup_registry:
+                print(f"DEBUG: [RESTORE_COUNTERS] CAMADA 4: Backup registry encontrado: {self._challenge_backup_registry}")
+                
+                for carta_path, turno in self._challenge_backup_registry.items():
+                    if carta_path not in self._challenge_start_turns:
+                        self._challenge_start_turns[carta_path] = turno
+                        print(f"DEBUG: [RESTORE_COUNTERS] 📋 CAMADA 4: Challenge {os.path.basename(carta_path)} restaurado: turno {turno}")
+                        backup_encontrado = True
+            
+            # CAMADA 5: Backup global (último recurso)
+            import builtins
+            if hasattr(builtins, '_global_challenge_backup') and builtins._global_challenge_backup:
+                print(f"DEBUG: [RESTORE_COUNTERS] CAMADA 5: Backup global encontrado: {builtins._global_challenge_backup}")
+                
+                for carta_path, turno in builtins._global_challenge_backup.items():
+                    if carta_path not in self._challenge_start_turns:
+                        self._challenge_start_turns[carta_path] = turno
+                        print(f"DEBUG: [RESTORE_COUNTERS] 🌍 CAMADA 5: Challenge {os.path.basename(carta_path)} restaurado: turno {turno}")
+                        backup_encontrado = True
+                
+                # Limpar backup global após uso
+                builtins._global_challenge_backup = {}
+                print("DEBUG: [RESTORE_COUNTERS] CAMADA 5: Backup global limpo")
+        
+        except Exception as e:
+            print(f"DEBUG: [RESTORE_COUNTERS] WARNING: Erro ao processar backups múltiplas camadas: {e}")
+        
+        # CORREÇÃO CRÍTICA: Inicializar variável para backup imediato
+        backup_imediato_encontrado = False
+        
+        try:
+            # Verificar backup imediato no master
+            if hasattr(self, 'master') and self.master and hasattr(self.master, '_challenge_start_turns_backup_imediato'):
+                backup_imediato = self.master._challenge_start_turns_backup_imediato
+                print(f"DEBUG: [RESTORE_COUNTERS] Backup imediato encontrado no master: {backup_imediato}")
+                
+                # Integrar backup imediato no tracking restaurado
+                for carta_path, turno in backup_imediato.items():
+                    self._challenge_start_turns[carta_path] = turno
+                    print(f"DEBUG: [RESTORE_COUNTERS] ✅ Challenge {os.path.basename(carta_path)} restaurado do backup imediato: turno {turno}")
+                    backup_imediato_encontrado = True
+                
+                # Limpar backup imediato
+                delattr(self.master, '_challenge_start_turns_backup_imediato')
+                print(f"DEBUG: [RESTORE_COUNTERS] Backup imediato do master limpo")
+            
+            # CORREÇÃO CRÍTICA CHALLENGE_8: Verificar backup da Store também
+            if hasattr(self, 'master') and self.master and hasattr(self.master, '_backup_challenge_start_turns'):
+                backup_store = self.master._backup_challenge_start_turns
+                print(f"DEBUG: [RESTORE_COUNTERS] Backup da Store encontrado no master: {backup_store}")
+                
+                # CORREÇÃO CRÍTICA: Integrar backup da Store usando caminho completo
+                for challenge_path, turno in backup_store.items():
+                    self._challenge_start_turns[challenge_path] = turno
+                    print(f"DEBUG: [RESTORE_COUNTERS] ✅ Challenge {os.path.basename(challenge_path)} (caminho: {challenge_path}) restaurado do backup da Store: turno {turno}")
+                    backup_imediato_encontrado = True
+                
+                # Limpar backup da Store
+                delattr(self.master, '_backup_challenge_start_turns')
+                print(f"DEBUG: [RESTORE_COUNTERS] Backup da Store limpo")
+            
+            # Verificar também no root
+            if hasattr(self, 'winfo_toplevel'):
+                root = self.winfo_toplevel()
+                if root and hasattr(root, '_challenge_start_turns_backup_imediato'):
+                    backup_imediato = root._challenge_start_turns_backup_imediato
+                    print(f"DEBUG: [RESTORE_COUNTERS] Backup imediato encontrado no root: {backup_imediato}")
+                    
+                    # Integrar backup imediato no tracking restaurado  
+                    for carta_path, turno in backup_imediato.items():
+                        self._challenge_start_turns[carta_path] = turno
+                        print(f"DEBUG: [RESTORE_COUNTERS] ✅ Challenge {os.path.basename(carta_path)} restaurado do backup imediato: turno {turno}")
+                        backup_imediato_encontrado = True
+                    
+                    # Limpar backup imediato
+                    delattr(root, '_challenge_start_turns_backup_imediato')
+                    print(f"DEBUG: [RESTORE_COUNTERS] Backup imediato do root limpo")
+                
+                # Verificar também backup da Store no root
+                if root and hasattr(root, '_backup_challenge_start_turns'):
+                    backup_store = root._backup_challenge_start_turns
+                    print(f"DEBUG: [RESTORE_COUNTERS] Backup da Store encontrado no root: {backup_store}")
+                    
+                    # CORREÇÃO CRÍTICA: Integrar backup da Store usando caminho completo
+                    for challenge_path, turno in backup_store.items():
+                        self._challenge_start_turns[challenge_path] = turno
+                        print(f"DEBUG: [RESTORE_COUNTERS] ✅ Challenge {os.path.basename(challenge_path)} (caminho: {challenge_path}) restaurado do backup da Store: turno {turno}")
+                        backup_imediato_encontrado = True
+                    
+                    # Limpar backup da Store do root
+                    delattr(root, '_backup_challenge_start_turns')
+                    print(f"DEBUG: [RESTORE_COUNTERS] Backup da Store do root limpo")
+        
+        except Exception as e:
+            print(f"DEBUG: [RESTORE_COUNTERS] WARNING: Erro ao processar backup imediato: {e}")
+        
+        if backup_imediato_encontrado:
+            print(f"DEBUG: [RESTORE_COUNTERS] ✅ BACKUP IMEDIATO INTEGRADO COM SUCESSO!")
+            print(f"DEBUG: [RESTORE_COUNTERS] Tracking final com backup imediato: {self._challenge_start_turns}")
+        else:
+            print(f"DEBUG: [RESTORE_COUNTERS] Nenhum backup imediato encontrado")
+        
+        # CORREÇÃO CRÍTICA ADICIONAL: Sincronizar _backup_challenge_tracking no root
+        # Isto garante que futuras inicializações encontrem o tracking correto
+        try:
+            if hasattr(self, 'winfo_toplevel'):
+                root = self.winfo_toplevel()
+                if root and self._challenge_start_turns:
+                    root._backup_challenge_tracking = self._challenge_start_turns.copy()
+                    print(f"DEBUG: [RESTORE_COUNTERS] SYNC: _backup_challenge_tracking atualizado no root: {self._challenge_start_turns}")
+        except Exception as e:
+            print(f"DEBUG: [RESTORE_COUNTERS] WARNING: Erro ao sincronizar _backup_challenge_tracking: {e}")
+        
+        print(f"DEBUG: [RESTORE_COUNTERS] === RESTAURAÇÃO COMPLETA ===")
+        
+        # Limpar backup após restaurar
+        if hasattr(self, 'master') and self.master and hasattr(self.master, '_backup_turn_counters'):
+            delattr(self.master, '_backup_turn_counters')
+        if hasattr(self, 'winfo_toplevel'):
+            root = self.winfo_toplevel()
+            if root and hasattr(root, '_backup_turn_counters'):
+                delattr(root, '_backup_turn_counters')
+        if hasattr(self, '_backup_counters_reconstruction'):
+            delattr(self, '_backup_counters_reconstruction')
+    
+    def _ensure_challenge_tracking_integrity(self):
+        """
+        Assegura que todos os Challenges no carrossel têm tracking adequado.
+        Esta é uma medida de segurança para prevenir perda de tracking.
+        """
+        print(f"DEBUG: [CHALLENGE_INTEGRITY] === VERIFICANDO INTEGRIDADE DO TRACKING ===")
+        
+        if not hasattr(self, 'cards') or not self.cards:
+            print(f"DEBUG: [CHALLENGE_INTEGRITY] Sem cartas no carrossel - nada a verificar")
+            return
+        
+        if not hasattr(self, '_challenge_start_turns'):
+            self._challenge_start_turns = {}
+            print(f"DEBUG: [CHALLENGE_INTEGRITY] _challenge_start_turns inicializado")
+        
+        challenges_found = 0
+        challenges_without_tracking = 0
+        
+        for i, carta_path in enumerate(self.cards):
+            if not carta_path or "back_card_" in carta_path:
+                continue
+                
+            carta_basename = os.path.basename(carta_path).lower()
+            if not carta_basename.startswith('challenge_'):
+                continue
+                
+            challenges_found += 1
+            print(f"DEBUG: [CHALLENGE_INTEGRITY] Challenge encontrado na posição {i}: {os.path.basename(carta_path)}")
+            
+            # Verificar se tem tracking (por caminho exato ou basename)
+            has_tracking = False
+            if carta_path in self._challenge_start_turns:
+                has_tracking = True
+                print(f"DEBUG: [CHALLENGE_INTEGRITY]   ✅ Tracking por caminho exato: turno {self._challenge_start_turns[carta_path]}")
+            else:
+                # Procurar por basename
+                for tracked_path, turno in self._challenge_start_turns.items():
+                    if os.path.basename(tracked_path) == os.path.basename(carta_path):
+                        has_tracking = True
+                        print(f"DEBUG: [CHALLENGE_INTEGRITY]   ✅ Tracking por basename: turno {turno} (migrar chave)")
+                        # Migrar chave para o caminho correto
+                        del self._challenge_start_turns[tracked_path]
+                        self._challenge_start_turns[carta_path] = turno
+                        break
+            
+            if not has_tracking:
+                challenges_without_tracking += 1
+                print(f"DEBUG: [CHALLENGE_INTEGRITY]   ❌ SEM TRACKING para {os.path.basename(carta_path)}")
+                
+                # CORREÇÃO CRÍTICA: Se _current_turn_number é 1 (valor padrão), NÃO registar automaticamente
+                # Isto evita sobrescrever tracking correto com valores incorretos durante reconstruções
+                if self._current_turn_number == 1:
+                    print(f"DEBUG: [CHALLENGE_INTEGRITY]   PROTEÇÃO: Turno atual é 1 (possivelmente incorreto)")
+                    print(f"DEBUG: [CHALLENGE_INTEGRITY]   NÃO registando automaticamente - aguardar registo manual correto")
+                    print(f"DEBUG: [CHALLENGE_INTEGRITY]   Challenge permanecerá sem tracking até correção")
+                else:
+                    print(f"DEBUG: [CHALLENGE_INTEGRITY]   Registando com turno atual: {self._current_turn_number}")
+                    # Usar a função com lógica de preservação
+                    self._register_challenge_start_turn(carta_path, turno_especifico=self._current_turn_number)
+        
+        print(f"DEBUG: [CHALLENGE_INTEGRITY] RESULTADO:")
+        print(f"DEBUG: [CHALLENGE_INTEGRITY]   Challenges encontrados: {challenges_found}")
+        print(f"DEBUG: [CHALLENGE_INTEGRITY]   Challenges sem tracking: {challenges_without_tracking}")
+        print(f"DEBUG: [CHALLENGE_INTEGRITY]   Tracking final: {self._challenge_start_turns}")
+        print(f"DEBUG: [CHALLENGE_INTEGRITY] === INTEGRIDADE VERIFICADA ===")
+    
     # ===============================
     # SISTEMA DE TRACKING DE SERVIÇOS TEMPORARY
     # ===============================
@@ -7597,17 +10077,44 @@ class PlayerDashboard(tk.Toplevel):
     def _register_service_start_turn(self, carta_path):
         """
         Regista o turno em que uma carta Service TEMPORARY foi ativada
+        CORREÇÃO: Preservar o turno REAL de ativação, não sobrescrever durante reconstruções
         """
         # Verificar se é um serviço TEMPORARY usando a base de dados
         try:
             service_data = self._get_service_data_from_path(carta_path)
             if service_data and service_data.service_type.value == 'temporary' and service_data.service_turns:
-                self._service_start_turns[carta_path] = self._current_turn_number
+                
+                # CORREÇÃO CRÍTICA: Se já existe tracking do turno real, PRESERVAR
+                if carta_path in self._service_real_activation_turns:
+                    turno_real_ativacao = self._service_real_activation_turns[carta_path]
+                    print(f"DEBUG: [SERVICE_TRACKING] Service {os.path.basename(carta_path)} JÁ TINHA tracking do turno real: {turno_real_ativacao}")
+                    print(f"DEBUG: [SERVICE_TRACKING] PRESERVANDO turno real em vez de usar turno atual ({self._current_turn_number})")
+                else:
+                    # Primeira vez a ser ativado - registar turno atual como turno real
+                    turno_real_ativacao = self._current_turn_number
+                    self._service_real_activation_turns[carta_path] = turno_real_ativacao
+                    print(f"DEBUG: [SERVICE_TRACKING] Service {os.path.basename(carta_path)} PRIMEIRA ATIVAÇÃO no turno {turno_real_ativacao}")
+                
+                # Usar o turno real (preservado) em vez do turno atual
+                self._service_start_turns[carta_path] = turno_real_ativacao
                 self._service_duration_tracking[carta_path] = {
                     'duration_turns': service_data.service_turns,
-                    'start_turn': self._current_turn_number
+                    'start_turn': turno_real_ativacao  # CORREÇÃO: usar turno real
                 }
-                print(f"DEBUG: [SERVICE_TRACKING] Service TEMPORARY {os.path.basename(carta_path)} registado no turno {self._current_turn_number} (duração: {service_data.service_turns} turnos)")
+                
+                turnos_decorridos = self._current_turn_number - turno_real_ativacao
+                print(f"DEBUG: [SERVICE_TRACKING] Service TEMPORARY {os.path.basename(carta_path)}:")
+                print(f"DEBUG: [SERVICE_TRACKING]   Turno real de ativação: {turno_real_ativacao}")
+                print(f"DEBUG: [SERVICE_TRACKING]   Turno atual: {self._current_turn_number}")
+                print(f"DEBUG: [SERVICE_TRACKING]   Turnos decorridos: {turnos_decorridos}")
+                print(f"DEBUG: [SERVICE_TRACKING]   Duração total: {service_data.service_turns} turnos")
+                
+                # Verificar se já expirou
+                if turnos_decorridos >= service_data.service_turns:
+                    print(f"DEBUG: [SERVICE_TRACKING] WARNING: Service {os.path.basename(carta_path)} JÁ EXPIROU!")
+                else:
+                    print(f"DEBUG: [SERVICE_TRACKING] Service ainda ativo por mais {service_data.service_turns - turnos_decorridos} turnos")
+                
             else:
                 print(f"DEBUG: [SERVICE_TRACKING] Service {os.path.basename(carta_path)} não é TEMPORARY - tracking ignorado")
         except Exception as e:
@@ -7677,14 +10184,101 @@ class PlayerDashboard(tk.Toplevel):
         else:
             print("DEBUG: [SERVICE_EXPIRY] Nenhum serviço expirou neste turno")
     
+    def _encontrar_todos_services_expirados(self):
+        """
+        Encontra TODOS os serviços expirados no inventário do jogador
+        Retorna uma lista com os caminhos das cartas expiradas ou lista vazia
+        """
+        print("DEBUG: [SERVICE_BUTTON] === PROCURANDO TODOS OS SERVIÇOS EXPIRADOS ===")
+        
+        services_expirados = []
+        services_inventory = self.inventario.get("services", [])
+        
+        for carta_path in services_inventory:
+            if self._is_service_expired(carta_path):
+                print(f"DEBUG: [SERVICE_BUTTON] Service expirado encontrado: {os.path.basename(carta_path)}")
+                services_expirados.append(carta_path)
+        
+        print(f"DEBUG: [SERVICE_BUTTON] Total de serviços expirados encontrados: {len(services_expirados)}")
+        return services_expirados
+    
+    def _encontrar_primeiro_service_expirado(self):
+        """
+        Encontra o primeiro serviço expirado no inventário do jogador
+        Retorna o caminho da carta ou None se não houver serviços expirados
+        MANTIDO PARA COMPATIBILIDADE - mas agora usa o método _encontrar_todos_services_expirados
+        """
+        print("DEBUG: [SERVICE_BUTTON] === PROCURANDO PRIMEIRO SERVIÇO EXPIRADO (COMPATIBILIDADE) ===")
+        
+        todos_expirados = self._encontrar_todos_services_expirados()
+        
+        if todos_expirados:
+            primeiro = todos_expirados[0]
+            print(f"DEBUG: [SERVICE_BUTTON] Primeiro service expirado: {os.path.basename(primeiro)}")
+            return primeiro
+        
+        print("DEBUG: [SERVICE_BUTTON] Nenhum serviço expirado encontrado no inventário")
+        return None
+    
+    def _encontrar_todos_events_expirados(self):
+        """
+        Encontra TODOS os events expirados no inventário do jogador
+        Retorna uma lista com os caminhos das cartas expiradas ou lista vazia
+        """
+        print("DEBUG: [EVENT_BUTTON] === PROCURANDO TODOS OS EVENTS EXPIRADOS ===")
+        
+        events_expirados = []
+        events_inventory = self.inventario.get("events", [])
+        
+        for carta_path in events_inventory:
+            if self._is_event_expired(carta_path):
+                print(f"DEBUG: [EVENT_BUTTON] Event expirado encontrado: {os.path.basename(carta_path)}")
+                events_expirados.append(carta_path)
+        
+        print(f"DEBUG: [EVENT_BUTTON] Total de events expirados encontrados: {len(events_expirados)}")
+        return events_expirados
+    
     def _is_service_expired(self, carta_path):
         """
         Verifica se um serviço específico expirou
+        CORREÇÃO: Usar turno real de ativação em vez de tracking que pode ter sido recriado
         """
         print(f"DEBUG: [SERVICE_EXPIRY_CHECK] Verificando se Service expirou: {os.path.basename(carta_path)}")
         print(f"DEBUG: [SERVICE_EXPIRY_CHECK] Turno atual: {self._current_turn_number}")
         print(f"DEBUG: [SERVICE_EXPIRY_CHECK] Services com tracking: {list(self._service_duration_tracking.keys())}")
+        print(f"DEBUG: [SERVICE_EXPIRY_CHECK] Services com turno real: {list(self._service_real_activation_turns.keys())}")
         
+        # CORREÇÃO CRÍTICA: Priorizar o turno real de ativação se disponível
+        if carta_path in self._service_real_activation_turns:
+            turno_real_ativacao = self._service_real_activation_turns[carta_path]
+            print(f"DEBUG: [SERVICE_EXPIRY_CHECK] USANDO TURNO REAL de ativação: {turno_real_ativacao}")
+            
+            # Obter duração do Service da base de dados
+            try:
+                service_data = self._get_service_data_from_path(carta_path)
+                if service_data and service_data.service_type.value == 'temporary' and service_data.service_turns:
+                    duration_turns = service_data.service_turns
+                    
+                    turnos_decorridos = self._current_turn_number - turno_real_ativacao
+                    expirou = turnos_decorridos >= duration_turns
+                    
+                    print(f"DEBUG: [SERVICE_EXPIRY_CHECK] Service {os.path.basename(carta_path)}:")
+                    print(f"DEBUG: [SERVICE_EXPIRY_CHECK]   Turno real ativação: {turno_real_ativacao}")
+                    print(f"DEBUG: [SERVICE_EXPIRY_CHECK]   Duração: {duration_turns} turnos")
+                    print(f"DEBUG: [SERVICE_EXPIRY_CHECK]   Turnos decorridos: {turnos_decorridos}")
+                    print(f"DEBUG: [SERVICE_EXPIRY_CHECK]   EXPIROU: {expirou}")
+                    
+                    return expirou
+                    
+                else:
+                    print(f"DEBUG: [SERVICE_EXPIRY_CHECK] Service não é TEMPORARY - considerado não expirado")
+                    return False
+                    
+            except Exception as e:
+                print(f"DEBUG: [SERVICE_EXPIRY_CHECK] ERRO ao obter dados do Service: {e}")
+                return False
+        
+        # FALLBACK: Usar tracking antigo se turno real não disponível
         if carta_path not in self._service_duration_tracking:
             print(f"DEBUG: [SERVICE_EXPIRY_CHECK] Service {os.path.basename(carta_path)} NÃO está no tracking - considerado não expirado")
             # CORREÇÃO: Verificar se o Service está ativo mas sem tracking - recriar tracking se necessário
@@ -7707,6 +10301,12 @@ class PlayerDashboard(tk.Toplevel):
         turnos_decorridos = self._current_turn_number - start_turn
         expirou = turnos_decorridos >= duration_turns
         
+        print(f"DEBUG: [SERVICE_EXPIRY_CHECK] FALLBACK - Service {os.path.basename(carta_path)}:")
+        print(f"DEBUG: [SERVICE_EXPIRY_CHECK]   Turno início (tracking): {start_turn}")
+        print(f"DEBUG: [SERVICE_EXPIRY_CHECK]   Duração: {duration_turns} turnos")
+        print(f"DEBUG: [SERVICE_EXPIRY_CHECK]   Turnos decorridos: {turnos_decorridos}")
+        print(f"DEBUG: [SERVICE_EXPIRY_CHECK]   EXPIROU: {expirou}")
+        
         print(f"DEBUG: [SERVICE_EXPIRY_CHECK] Service {os.path.basename(carta_path)}:")
         print(f"DEBUG: [SERVICE_EXPIRY_CHECK]   Turno início: {start_turn}")
         print(f"DEBUG: [SERVICE_EXPIRY_CHECK]   Duração: {duration_turns} turnos")
@@ -7718,6 +10318,7 @@ class PlayerDashboard(tk.Toplevel):
     def _is_event_expired(self, carta_path):
         """
         Verifica se um event específico expirou
+        CORREÇÃO: Usar expires_turn quando disponível (Events com duração variável)
         """
         print(f"DEBUG: [EVENT_EXPIRY_CHECK] Verificando se Event expirou: {os.path.basename(carta_path)}")
         print(f"DEBUG: [EVENT_EXPIRY_CHECK] Turno atual: {self._current_turn}")
@@ -7730,44 +10331,86 @@ class PlayerDashboard(tk.Toplevel):
         tracking_data = self._event_duration_tracking[carta_path]
         duration_turns = tracking_data.get('duration_turns')
         start_turn = tracking_data.get('start_turn')
+        expires_turn = tracking_data.get('expires_turn')
         is_active = tracking_data.get('is_active', False)
-        
-        # Só verificar expiração se o Event estiver ativo
-        if not is_active:
-            print(f"DEBUG: [EVENT_EXPIRY_CHECK] Event {os.path.basename(carta_path)} está INATIVO - considerado não expirado")
-            return False
-        
-        if duration_turns is None or start_turn is None:
-            print(f"DEBUG: [EVENT_EXPIRY_CHECK] Dados de tracking incompletos para Event {os.path.basename(carta_path)} - considerado não expirado")
-            return False
-        
-        turnos_decorridos = self._current_turn - start_turn
-        expirou = turnos_decorridos >= duration_turns
         
         print(f"DEBUG: [EVENT_EXPIRY_CHECK] Event {os.path.basename(carta_path)}:")
         print(f"DEBUG: [EVENT_EXPIRY_CHECK]   Turno início: {start_turn}")
         print(f"DEBUG: [EVENT_EXPIRY_CHECK]   Duração: {duration_turns} turnos")
-        print(f"DEBUG: [EVENT_EXPIRY_CHECK]   Turnos decorridos: {turnos_decorridos}")
+        print(f"DEBUG: [EVENT_EXPIRY_CHECK]   Expires turn: {expires_turn}")
         print(f"DEBUG: [EVENT_EXPIRY_CHECK]   Ativo: {is_active}")
-        print(f"DEBUG: [EVENT_EXPIRY_CHECK]   EXPIROU: {expirou}")
         
-        return expirou
+        # NOVA LÓGICA: Se expires_turn está definido (dado foi lançado), usar isso
+        if expires_turn is not None and start_turn is not None:
+            expirou = self._current_turn >= expires_turn
+            print(f"DEBUG: [EVENT_EXPIRY_CHECK]   USANDO expires_turn: {expires_turn}")
+            print(f"DEBUG: [EVENT_EXPIRY_CHECK]   EXPIROU: {expirou} (turno {self._current_turn} >= {expires_turn})")
+            return expirou
+        
+        # LÓGICA LEGADA: Para Events com duração fixa
+        elif is_active and duration_turns is not None and start_turn is not None:
+            # Verificar se duration_turns é numérico antes de calcular
+            if duration_turns == "variable":
+                print(f"DEBUG: [EVENT_EXPIRY_CHECK]   Event com duração variável sem expires_turn - não expirado ainda")
+                return False
+                
+            try:
+                duration_turns_int = int(duration_turns)
+                turnos_decorridos = self._current_turn - start_turn
+                expirou = turnos_decorridos >= duration_turns_int
+                
+                print(f"DEBUG: [EVENT_EXPIRY_CHECK]   USANDO duração fixa: {duration_turns_int}")
+                print(f"DEBUG: [EVENT_EXPIRY_CHECK]   Turnos decorridos: {turnos_decorridos}")
+                print(f"DEBUG: [EVENT_EXPIRY_CHECK]   EXPIROU: {expirou}")
+                return expirou
+            except (ValueError, TypeError) as e:
+                print(f"DEBUG: [EVENT_EXPIRY_CHECK]   ERRO: duration_turns inválido: {duration_turns} - {e}")
+                return False
+        else:
+            print(f"DEBUG: [EVENT_EXPIRY_CHECK]   Event inativo ou dados insuficientes - não expirado")
+            return False
     
     def _cleanup_expired_service_tracking(self, carta_path):
         """
         Remove tracking de um serviço que expirou
+        CORREÇÃO: Limpar também o turno real de ativação
         """
         if carta_path in self._service_start_turns:
             del self._service_start_turns[carta_path]
         if carta_path in self._service_duration_tracking:
             del self._service_duration_tracking[carta_path]
+        if carta_path in self._service_real_activation_turns:
+            del self._service_real_activation_turns[carta_path]
+            print(f"DEBUG: [SERVICE_TRACKING] Turno real de ativação removido para Service expirado: {os.path.basename(carta_path)}")
         print(f"DEBUG: [SERVICE_TRACKING] Tracking removido para Service expirado: {os.path.basename(carta_path)}")
     
-    def _mostrar_overlay_service_expirado(self, carta_path):
+    def _mostrar_overlays_services_expirados_sequencial(self, services_expirados, index=0):
         """
-        Mostra overlay de serviço expirado com a carta em fullscreen de fundo
+        Mostra overlays sequenciais para todos os serviços expirados
+        
+        Args:
+            services_expirados (list): Lista de caminhos dos serviços expirados
+            index (int): Índice atual na lista de serviços expirados
         """
-        print(f"DEBUG: [SERVICE_EXPIRY] Mostrando overlay de expiração para {os.path.basename(carta_path)}")
+        print(f"DEBUG: [SERVICE_SEQUENTIAL] === OVERLAY SEQUENCIAL {index+1}/{len(services_expirados)} ===")
+        
+        if index >= len(services_expirados):
+            print("DEBUG: [SERVICE_SEQUENTIAL] Todos os overlays de serviços expirados foram mostrados")
+            # Após mostrar todos os overlays, abrir inventário normal de Services
+            self.show_inventory_matrix(["services"])
+            return
+        
+        carta_path = services_expirados[index]
+        print(f"DEBUG: [SERVICE_SEQUENTIAL] Mostrando overlay para Service {index+1}: {os.path.basename(carta_path)}")
+        
+        # Mostrar overlay individual para este serviço
+        self._mostrar_overlay_service_expirado_sequencial(carta_path, services_expirados, index)
+    
+    def _mostrar_overlay_service_expirado_sequencial(self, carta_path, services_expirados, index):
+        """
+        Mostra overlay de serviço expirado individual como parte de uma sequência
+        """
+        print(f"DEBUG: [SERVICE_EXPIRY] Mostrando overlay de expiração para {os.path.basename(carta_path)} ({index+1}/{len(services_expirados)})")
         
         # Criar overlay de fundo
         overlay = tk.Toplevel(self)
@@ -7802,24 +10445,25 @@ class PlayerDashboard(tk.Toplevel):
         content_frame = tk.Frame(overlay, bg="black")
         content_frame.pack(expand=True)
         
-        # Título "Expired Service" em vermelho
+        # Título "Expired Service" em vermelho com contador
+        titulo_contador = f"Expired Service ({index+1}/{len(services_expirados)})" if len(services_expirados) > 1 else "Expired Service"
         title_label = tk.Label(
             content_frame, 
-            text="   Expired Service    ", 
+            text=f"   {titulo_contador}    ", 
             font=("Helvetica", 24, "bold"),
             bg="black", 
             fg="red"
         )
         title_label.pack(pady=(80, 20))
         
-        # Texto "Service_x has expired"
+        # Texto "Temporary Service has expired"
         service_name = os.path.basename(carta_path).replace('.png', '')
-        message_text = f"{service_name} has expired"
+        message_text = "Temporary Service has expired for \n1 Residential User"
         
         message_label = tk.Label(
             content_frame, 
             text=message_text,
-            font=("Helvetica", 18),
+            font=("Helvetica", 15),
             bg="black", 
             fg="white",
             justify="center"
@@ -7831,19 +10475,52 @@ class PlayerDashboard(tk.Toplevel):
             content_frame,
             text="Ok",
             font=("Helvetica", 16, "bold"),
-            bg="#4CAF50",
+            bg="#8A2BE2",
             fg="white",
             width=10,
             height=2,
-            command=lambda: self._processar_service_expirado(overlay, carta_path)
+            command=lambda: self._processar_service_expirado_sequencial(overlay, carta_path, services_expirados, index)
         )
         ok_button.pack(pady=20)
     
-    def _processar_service_expirado(self, overlay, carta_path):
+    def _mostrar_overlay_service_expirado(self, carta_path):
         """
-        Processa a expiração do serviço: remove das cartas ativas, do inventário do jogador e devolve para a Store
+        Mostra overlay de serviço expirado com a carta em fullscreen de fundo
+        MANTIDO PARA COMPATIBILIDADE - mas agora chama o sistema sequencial
         """
-        print(f"DEBUG: [SERVICE_EXPIRY] Processando expiração de {os.path.basename(carta_path)}")
+        print(f"DEBUG: [SERVICE_EXPIRY] Método legado chamado - redirecionando para sistema sequencial")
+        
+        # Usar o novo sistema sequencial mesmo para um único serviço
+        self._mostrar_overlays_services_expirados_sequencial([carta_path], 0)
+    
+    def _processar_service_expirado_sequencial(self, overlay, carta_path, services_expirados, index):
+        """
+        Processa a expiração do serviço sequencialmente e mostra o próximo overlay se houver
+        """
+        print(f"DEBUG: [SERVICE_SEQUENTIAL] Processando expiração sequencial de {os.path.basename(carta_path)} ({index+1}/{len(services_expirados)})")
+        
+        # Processar a expiração deste serviço
+        self._processar_service_expirado_individual(carta_path)
+        
+        # Fechar o overlay atual
+        overlay.destroy()
+        
+        # Mostrar o próximo overlay se houver mais serviços expirados
+        proximo_index = index + 1
+        if proximo_index < len(services_expirados):
+            print(f"DEBUG: [SERVICE_SEQUENTIAL] Passando para próximo serviço: {proximo_index+1}/{len(services_expirados)}")
+            # Usar after() para dar tempo ao overlay fechar antes de mostrar o próximo
+            self.after(100, lambda: self._mostrar_overlays_services_expirados_sequencial(services_expirados, proximo_index))
+        else:
+            print("DEBUG: [SERVICE_SEQUENTIAL] Todos os serviços expirados foram processados")
+            # Após processar todos, abrir inventário normal de Services
+            self.after(100, lambda: self.show_inventory_matrix(["services"]))
+    
+    def _processar_service_expirado_individual(self, carta_path):
+        """
+        Processa a expiração de um serviço individual
+        """
+        print(f"DEBUG: [SERVICE_EXPIRY] Processando expiração individual de {os.path.basename(carta_path)}")
         
         # Remover da lista de serviços ativos
         if carta_path in self.active_services:
@@ -7864,7 +10541,24 @@ class PlayerDashboard(tk.Toplevel):
         except Exception as e:
             print(f"DEBUG: [SERVICE_EXPIRY] Erro ao devolver carta para Store: {e}")
         
-        # Limpar tracking
+        # Limpar tracking do serviço expirado
+        self._cleanup_expired_service_tracking(carta_path)
+    
+    def _processar_service_expirado(self, overlay, carta_path):
+        """
+        Processa a expiração do serviço: remove das cartas ativas, do inventário do jogador e devolve para a Store
+        MANTIDO PARA COMPATIBILIDADE
+        """
+        print(f"DEBUG: [SERVICE_EXPIRY] Método legado de processamento chamado")
+        
+        # Processar individualmente
+        self._processar_service_expirado_individual(carta_path)
+        
+        # Fechar overlay
+        overlay.destroy()
+        
+        # Voltar ao dashboard
+        self.playerdashboard_interface(self.player_name, self.saldo, self.other_players)
         self._cleanup_expired_service_tracking(carta_path)
         
         # Fechar overlay
@@ -7894,11 +10588,33 @@ class PlayerDashboard(tk.Toplevel):
                 print(f"DEBUG: [SERVICE_EXPIRY] Erro no fallback: {fallback_error}")
                 print(f"DEBUG: [SERVICE_EXPIRY] Serviço {os.path.basename(carta_path)} retornou para o inventário da Store")
     
-    def _mostrar_overlay_event_expirado(self, carta_path):
+    def _mostrar_overlays_events_expirados_sequencial(self, events_expirados, index=0):
         """
-        Mostra overlay de event expirado com a carta em fullscreen de fundo (similar ao Service)
+        Mostra overlays sequenciais para todos os events expirados
+        
+        Args:
+            events_expirados (list): Lista de caminhos dos events expirados
+            index (int): Índice atual na lista de events expirados
         """
-        print(f"DEBUG: [EVENT_EXPIRY] Mostrando overlay de expiração para {os.path.basename(carta_path)}")
+        print(f"DEBUG: [EVENT_SEQUENTIAL] === OVERLAY SEQUENCIAL {index+1}/{len(events_expirados)} ===")
+        
+        if index >= len(events_expirados):
+            print("DEBUG: [EVENT_SEQUENTIAL] Todos os overlays de events expirados foram mostrados")
+            # Após mostrar todos os overlays, abrir inventário normal de Actions/Events
+            self.show_inventory_matrix(["actions", "events"])
+            return
+        
+        carta_path = events_expirados[index]
+        print(f"DEBUG: [EVENT_SEQUENTIAL] Mostrando overlay para Event {index+1}: {os.path.basename(carta_path)}")
+        
+        # Mostrar overlay individual para este event
+        self._mostrar_overlay_event_expirado_sequencial(carta_path, events_expirados, index)
+    
+    def _mostrar_overlay_event_expirado_sequencial(self, carta_path, events_expirados, index):
+        """
+        Mostra overlay de event expirado individual como parte de uma sequência
+        """
+        print(f"DEBUG: [EVENT_EXPIRY] Mostrando overlay de expiração para {os.path.basename(carta_path)} ({index+1}/{len(events_expirados)})")
         
         # Criar overlay de fundo
         overlay = tk.Toplevel(self)
@@ -7933,42 +10649,182 @@ class PlayerDashboard(tk.Toplevel):
         content_frame = tk.Frame(overlay, bg="black")
         content_frame.pack(expand=True)
         
-        # Título "Expired Event" em vermelho
+        # Título "Expired Event" em vermelho com contador
+        titulo_contador = f"Expired Event ({index+1}/{len(events_expirados)})" if len(events_expirados) > 1 else "Expired Event"
         title_label = tk.Label(
             content_frame, 
-            text="   Expired Event    ", 
+            text=f"   {titulo_contador}    ", 
             font=("Helvetica", 24, "bold"),
             bg="black", 
             fg="red"
         )
         title_label.pack(pady=(80, 20))
         
-        # Texto "Event_x has expired"
-        event_name = os.path.basename(carta_path).replace('.png', '')
-        message_text = f"{event_name} has expired"
+        # Obter texto específico do tipo de Event
+        event_type_text = self._get_event_type_text(carta_path)
+        message_text = f"{event_type_text} \nhas expired"
         
         message_label = tk.Label(
             content_frame, 
             text=message_text,
-            font=("Helvetica", 18),
+            font=("Helvetica", 15),
             bg="black", 
             fg="white",
             justify="center"
         )
         message_label.pack(pady=(0, 30))
         
-        # Botão OK
+        # Botão OK roxo
         ok_button = tk.Button(
             content_frame,
             text="Ok",
             font=("Helvetica", 16, "bold"),
-            bg="#4CAF50",
+            bg="#8A2BE2",  # Cor roxa
             fg="white",
             width=10,
             height=2,
-            command=lambda: self._processar_event_expirado(overlay, carta_path)
+            command=lambda: self._processar_event_expirado_sequencial(overlay, carta_path, events_expirados, index)
         )
         ok_button.pack(pady=20)
+    
+    def _processar_event_expirado_sequencial(self, overlay, carta_path, events_expirados, index):
+        """
+        Processa a expiração do event sequencialmente e mostra o próximo overlay se houver
+        """
+        print(f"DEBUG: [EVENT_SEQUENTIAL] Processando expiração sequencial de {os.path.basename(carta_path)} ({index+1}/{len(events_expirados)})")
+        
+        # Processar a expiração deste event
+        self._processar_event_expirado_individual(carta_path)
+        
+        # Fechar o overlay atual
+        overlay.destroy()
+        
+        # Mostrar o próximo overlay se houver mais events expirados
+        proximo_index = index + 1
+        if proximo_index < len(events_expirados):
+            print(f"DEBUG: [EVENT_SEQUENTIAL] Passando para próximo event: {proximo_index+1}/{len(events_expirados)}")
+            # Usar after() para dar tempo ao overlay fechar antes de mostrar o próximo
+            self.after(100, lambda: self._mostrar_overlays_events_expirados_sequencial(events_expirados, proximo_index))
+        else:
+            print("DEBUG: [EVENT_SEQUENTIAL] Todos os events expirados foram processados")
+            # Após processar todos, abrir inventário normal de Actions/Events
+            self.after(100, lambda: self.show_inventory_matrix(["actions", "events"]))
+    
+    def _processar_event_expirado_individual(self, carta_path):
+        """
+        Processa a expiração de um event individual
+        """
+        print(f"DEBUG: [EVENT_EXPIRY] Processando expiração individual de {os.path.basename(carta_path)}")
+        
+        # Remover da lista de eventos ativos (se houver)
+        if hasattr(self, 'active_events') and carta_path in self.active_events:
+            self.active_events.remove(carta_path)
+            print(f"DEBUG: [EVENT_EXPIRY] Event removido da lista ativa")
+        
+        # CORREÇÃO CRÍTICA: Remover carta do inventário do jogador
+        if carta_path in self.inventario.get("events", []):
+            self.inventario["events"].remove(carta_path)
+            print(f"DEBUG: [EVENT_EXPIRY] Event {os.path.basename(carta_path)} removido do inventário do jogador")
+        else:
+            print(f"DEBUG: [EVENT_EXPIRY] AVISO: Event {os.path.basename(carta_path)} não encontrado no inventário do jogador")
+        
+        # CORREÇÃO CRÍTICA: Devolver carta para a Store
+        try:
+            self._devolver_carta_para_store(carta_path, "events")
+            print(f"DEBUG: [EVENT_EXPIRY] Event {os.path.basename(carta_path)} devolvido para a Store")
+        except Exception as e:
+            print(f"DEBUG: [EVENT_EXPIRY] Erro ao devolver carta para Store: {e}")
+        
+        # Limpar tracking do event expirado
+        self._cleanup_expired_event_tracking(carta_path)
+    
+    def _cleanup_expired_event_tracking(self, carta_path):
+        """
+        Remove tracking de um event que expirou
+        """
+        if carta_path in self._event_start_turns:
+            del self._event_start_turns[carta_path]
+        if carta_path in self._event_duration_tracking:
+            del self._event_duration_tracking[carta_path]
+        print(f"DEBUG: [EVENT_TRACKING] Tracking removido para Event expirado: {os.path.basename(carta_path)}")
+    
+    def _mostrar_overlay_event_expirado(self, carta_path):
+        """
+        Mostra overlay de event expirado - agora usa o sistema sequencial
+        MANTIDO PARA COMPATIBILIDADE - mas agora chama o sistema sequencial
+        """
+        print(f"DEBUG: [EVENT_EXPIRY] Método legado chamado - redirecionando para sistema sequencial")
+        
+        # Usar o novo sistema sequencial mesmo para um único event
+        self._mostrar_overlays_events_expirados_sequencial([carta_path], 0)
+    
+    def _get_event_type_text(self, carta_path):
+        """
+        Obtém o texto do tipo de Event baseado no caminho da carta usando a base de dados
+        
+        Args:
+            carta_path: Caminho para a carta Event (ex: "/path/Event_55.png")
+            
+        Returns:
+            Texto do tipo do Event (ex: "Transmission Delay", "Link Failure", etc.)
+        """
+        try:
+            # Extrair ID do Event do caminho
+            filename = os.path.basename(carta_path)
+            match = re.match(r'Event_(\d+)', filename)
+            
+            if not match:
+                print(f"DEBUG: [EVENT_TYPE] Formato de arquivo inválido: {filename}")
+                return "Unknown"
+            
+            event_id = f"event_{match.group(1)}"
+            print(f"DEBUG: [EVENT_TYPE] Buscando Event na base de dados: {event_id}")
+            
+            # Obter Event da base de dados
+            if hasattr(self, 'card_database') and self.card_database:
+                event_card = self.card_database.get_event(event_id)
+                
+                if event_card:
+                    print(f"DEBUG: [EVENT_TYPE] Event encontrado: {event_card.title}")
+                    return event_card.title
+                else:
+                    print(f"DEBUG: [EVENT_TYPE] Event não encontrado na base de dados: {event_id}")
+            else:
+                print(f"DEBUG: [EVENT_TYPE] Base de dados não disponível")
+            
+            # Fallback baseado no ID do Event
+            event_number = int(match.group(1))
+            
+            # Mapear números para tipos baseado na base de dados
+            event_type_mapping = {
+                # TRANSMISSION_DELAY Events (1-50)
+                range(1, 51): "Transmission Delay",
+                # LINK_FAILURE Events (51-100)  
+                range(51, 101): "Link Failure",
+                # TRAFFIC_BURST Events (101-120)
+                range(101, 121): "Traffic Burst",
+                # QUEUE_CONGESTION Events (121-130)
+                range(121, 131): "Queue Congestion",
+                # QUEUE_FULL Events (131-140)
+                range(131, 141): "Queue Full",
+                # PACKET_DROP Events (141-150)
+                range(141, 151): "Packet Drop",
+                # EMPTY_QUEUE Events (151-175)
+                range(151, 176): "Empty Queue"
+            }
+            
+            # Encontrar tipo baseado no número
+            for event_range, event_type in event_type_mapping.items():
+                if event_number in event_range:
+                    print(f"DEBUG: [EVENT_TYPE] Tipo mapeado: {event_type}")
+                    return event_type
+            
+            print(f"DEBUG: [EVENT_TYPE] Tipo não mapeado para número: {event_number}")
+            return "Unknown Event"
+            
+        except Exception as e:
+            print(f"DEBUG: [EVENT_TYPE] Erro ao obter tipo do Event: {e}")
+            return "Unknown Event"
     
     def _processar_event_expirado(self, overlay, carta_path):
         """
@@ -8055,6 +10911,10 @@ class PlayerDashboard(tk.Toplevel):
             self._overlay_completion.destroy()
             self._overlay_completion = None
             
+            # CORREÇÃO: Remover flag de overlay ativo
+            self._completion_overlay_active = False
+            print(f"DEBUG: [COMPLETION] Flag _completion_overlay_active = False")
+            
             print(f"DEBUG: [COMPLETION] Overlay fechado")
     
     def _devolver_carta_para_store(self, carta_path, card_type):
@@ -8108,6 +10968,10 @@ class PlayerDashboard(tk.Toplevel):
         Devolve Challenge completado para o baralho da Store
         """
         try:
+            # CORREÇÃO: Limpar tracking do Challenge antes de devolver
+            self._cleanup_completed_challenge_tracking(carta_path)
+            print(f"DEBUG: [DEVOLVER_CHALLENGE] Challenge tracking limpo para: {os.path.basename(carta_path)}")
+            
             # Determinar cor da carta (geralmente neutral para Challenges)
             cor_carta = self._get_color_from_path(carta_path) or "neutral"
             
@@ -8215,6 +11079,11 @@ class PlayerDashboard(tk.Toplevel):
         Remove carta completada do carrossel e volta ao estado vazio
         """
         try:
+            # CORREÇÃO: Limpar tracking do Challenge se for Challenge
+            if "challenge" in os.path.basename(carta_path).lower():
+                self._cleanup_completed_challenge_tracking(carta_path)
+                print(f"DEBUG: [REMOVER_CARROSSEL] Challenge tracking limpo para: {os.path.basename(carta_path)}")
+            
             # Encontrar posição da carta no carrossel
             carta_removida_idx = None
             for i, card_path in enumerate(self.cards):
@@ -8615,20 +11484,87 @@ class PlayerDashboard(tk.Toplevel):
         
         print(f"DEBUG: [SETA_COMPLETION] Carta final a processar: {carta_basename}")
         
-        # CORREÇÃO: Verificar PRIMEIRO se é Challenge na Final Phase, independente da posição
+        # CORREÇÃO: Verificar PRIMEIRO se é Challenge que atingiu tempo limite
         is_challenge_card = "challenge" in carta_basename
         
         if is_challenge_card:
-            print(f"DEBUG: [SETA_COMPLETION] SUCCESS: Challenge detectado - verificando Final Phase")
+            print(f"DEBUG: [SETA_COMPLETION] SUCCESS: Challenge detectado - verificando tempo limite")
             
             # Obter dados da carta
             dados_carta = self._obter_dados_carta(carta_atual)
             
             if dados_carta and 'n_turns' in dados_carta:
                 n_turns = dados_carta['n_turns']
-                turns_elapsed = self._get_turns_elapsed_for_challenge(carta_atual)
                 
-                # CORREÇÃO CRÍTICA: Verificar também se já foi completado através das barras
+                # NOVA VERIFICAÇÃO: Usar a mesma lógica do end_turn() para verificar tempo limite
+                if n_turns > 0:
+                    print(f"DEBUG: [SETA_COMPLETION] Verificação de tempo limite:")
+                    print(f"DEBUG: [SETA_COMPLETION]   Challenge: {os.path.basename(carta_atual)}")
+                    print(f"DEBUG: [SETA_COMPLETION]   n_turns limite: {n_turns}")
+                    print(f"DEBUG: [SETA_COMPLETION]   Turno atual: {self._current_turn_number}")
+                    
+                    # CORREÇÃO CRÍTICA: Usar exatamente a mesma lógica que o end_turn() para verificar tempo limite
+                    # Isso garante consistência entre a gestão e o final do turno
+                    
+                    # Calcular turnos decorridos usando a função oficial
+                    turns_elapsed = self._get_turns_elapsed_for_challenge(carta_atual)
+                    
+                    print(f"DEBUG: [SETA_COMPLETION] ANÁLISE DETALHADA DO TEMPO LIMITE:")
+                    print(f"DEBUG: [SETA_COMPLETION]   Challenge: {os.path.basename(carta_atual)}")
+                    print(f"DEBUG: [SETA_COMPLETION]   n_turns limite: {n_turns}")
+                    print(f"DEBUG: [SETA_COMPLETION]   Turnos decorridos: {turns_elapsed}")
+                    print(f"DEBUG: [SETA_COMPLETION]   Comparação: {turns_elapsed} >= {n_turns}?")
+                    
+                    # LÓGICA UNIFICADA: Usar exatamente a mesma condição do end_turn()
+                    tempo_limite_atingido = (turns_elapsed >= n_turns) and (n_turns > 0)
+                    
+                    print(f"DEBUG: [SETA_COMPLETION]   RESULTADO: tempo_limite_atingido = {tempo_limite_atingido}")
+                    print(f"DEBUG: [SETA_COMPLETION]   VALIDAÇÃO: turns_elapsed({turns_elapsed}) >= n_turns({n_turns}) = {turns_elapsed >= n_turns}")
+                    print(f"DEBUG: [SETA_COMPLETION]   VALIDAÇÃO: n_turns({n_turns}) > 0 = {n_turns > 0}")
+                    print(f"DEBUG: [SETA_COMPLETION]   RESULTADO FINAL: {tempo_limite_atingido}")
+                    
+                    if tempo_limite_atingido:
+                        print(f"DEBUG: [SETA_COMPLETION] *** TEMPO LIMITE ATINGIDO! ***")
+                        print(f"DEBUG: [SETA_COMPLETION] *** Challenge esteve ativo por {turns_elapsed} turnos (limite: {n_turns}) ***")
+                        print(f"DEBUG: [SETA_COMPLETION] *** COMPLETION OBRIGATÓRIO NECESSÁRIO ***")
+                    else:
+                        print(f"DEBUG: [SETA_COMPLETION] Challenge ainda ativo: {turns_elapsed}/{n_turns} turnos")
+                    
+                    # CORREÇÃO CRÍTICA: Challenges que atingiram tempo limite DEVEM ser completados
+                    # quando o jogador clicar no botão seta, independente do estado dos pacotes
+                    if tempo_limite_atingido:
+                        print(f"DEBUG: [SETA_COMPLETION] *** TEMPO LIMITE ATINGIDO! ***")
+                        print(f"DEBUG: [SETA_COMPLETION] Challenge deve ser completado obrigatoriamente com valores atuais")
+                        
+                        # Obter valores atuais das barras para o completion
+                        carta_index_carrossel = getattr(self, 'selected_carousel_index', None)
+                        
+                        if carta_index_carrossel is None:
+                            for i, carta_carrossel in enumerate(self.cards):
+                                if carta_carrossel == carta_atual:
+                                    carta_index_carrossel = i
+                                    break
+                        
+                        if carta_index_carrossel is not None:
+                            stats = self.card_stats[carta_index_carrossel] if carta_index_carrossel < len(self.card_stats) else {"To send": 0, "Rxd": 0, "Lost": 0}
+                            
+                            print(f"DEBUG: [SETA_COMPLETION] COMPLETION OBRIGATÓRIO - Valores finais:")
+                            print(f"DEBUG: [SETA_COMPLETION]   To send: {stats['To send']}")
+                            print(f"DEBUG: [SETA_COMPLETION]   Rxd: {stats['Rxd']}")
+                            print(f"DEBUG: [SETA_COMPLETION]   Lost: {stats['Lost']}")
+                            print(f"DEBUG: [SETA_COMPLETION]   Motivo: Tempo limite atingido ({turns_elapsed}/{n_turns} turnos)")
+                            
+                            # Preservar valores antes de mostrar completion
+                            self._preservar_valores_atuais_barras()
+                            
+                            # Mostrar overlay de completion por tempo limite
+                            self._mostrar_overlay_completion(carta_atual, dados_carta, is_sequential=False, carta_index=carta_index_carrossel, tempo_limite_obrigatorio=True)
+                            return
+                        else:
+                            print(f"DEBUG: [SETA_COMPLETION] ERROR: Não foi possível encontrar carta no carrossel")
+                            return
+                
+                # Se não atingiu tempo limite, verificar completion normal por pacotes
                 message_size = dados_carta.get('message_size', 0)
                 
                 # Obter valores atuais das barras (posição atual do carrossel)
@@ -8637,63 +11573,97 @@ class PlayerDashboard(tk.Toplevel):
                 
                 try:
                     if hasattr(self, 'progress_labels'):
-                        current_to_send = int(self.progress_labels.get("To send", tk.Label()).cget("text") or "0")
-                        current_rxd = int(self.progress_labels.get("Rxd", tk.Label()).cget("text") or "0")
-                except:
+                        # CORREÇÃO: Usar formato correto para obter texto dos labels
+                        if "To send" in self.progress_labels:
+                            if hasattr(self.progress_labels["To send"], 'cget'):
+                                # É um objeto Label
+                                current_to_send = int(self.progress_labels["To send"].cget("text") or "0")
+                            else:
+                                # É um dicionário com chave 'text'
+                                current_to_send = int(self.progress_labels["To send"].get("text", "0"))
+                        
+                        if "Rxd" in self.progress_labels:
+                            if hasattr(self.progress_labels["Rxd"], 'cget'):
+                                # É um objeto Label
+                                current_rxd = int(self.progress_labels["Rxd"].cget("text") or "0")
+                            else:
+                                # É um dicionário com chave 'text'
+                                current_rxd = int(self.progress_labels["Rxd"].get("text", "0"))
+                except Exception as e:
+                    print(f"DEBUG: [SETA_COMPLETION] ERROR: Erro ao obter valores das barras: {e}")
                     current_to_send = 0
                     current_rxd = 0
                 
-                # CORREÇÃO: Challenge só mostra completion se:
-                # 1. Tempo limite atingido (turns_elapsed >= n_turns) OU
-                # 2. Recebeu todos os pacotes necessários (current_rxd >= message_size)
-                tempo_limite_atingido = (turns_elapsed >= n_turns) and (turns_elapsed > 1)
-                pacotes_completos = (current_rxd >= message_size) and (message_size > 0)
+                # CONDIÇÕES DE COMPLETION PARA CHALLENGES:
+                # REGRA: Challenge pode ser completado quando To send = 0 OU quando expira por tempo limite
+                # (o tempo limite já foi verificado acima)
                 
-                challenge_na_final_phase = tempo_limite_atingido or pacotes_completos
+                # Para completion por pacotes: apenas To send = 0 é necessário
+                pacotes_todos_enviados = (current_to_send == 0)
+                
+                # Challenge pode ser completado quando todos os pacotes foram enviados (To send = 0)
+                challenge_pode_ser_completado = pacotes_todos_enviados
                 
                 print(f"DEBUG: [SETA_COMPLETION] Challenge dados completos:")
-                print(f"DEBUG: [SETA_COMPLETION]   n_turns (da DB): {n_turns}")
-                print(f"DEBUG: [SETA_COMPLETION]   turns_elapsed (calculado): {turns_elapsed}")
                 print(f"DEBUG: [SETA_COMPLETION]   message_size: {message_size}")
                 print(f"DEBUG: [SETA_COMPLETION]   current_rxd: {current_rxd}")
                 print(f"DEBUG: [SETA_COMPLETION]   current_to_send: {current_to_send}")
                 print(f"DEBUG: [SETA_COMPLETION]   Turno atual: {self._current_turn_number}")
-                print(f"DEBUG: [SETA_COMPLETION]   Condição 1 (tempo limite): {tempo_limite_atingido}")
-                print(f"DEBUG: [SETA_COMPLETION]   Condição 2 (pacotes completos): {pacotes_completos}")
-                print(f"DEBUG: [SETA_COMPLETION]   challenge_na_final_phase: {challenge_na_final_phase}")
+                print(f"DEBUG: [SETA_COMPLETION]   Condição (todos enviados): {pacotes_todos_enviados}")
+                print(f"DEBUG: [SETA_COMPLETION]   challenge_pode_ser_completado: {challenge_pode_ser_completado}")
                 
-                if challenge_na_final_phase:
-                    print(f"DEBUG: [SETA_COMPLETION] SUCCESS: Challenge pode ser completado - mostrar overlay")
+                # DEBUG ESPECÍFICO: Se Challenge deveria estar expirado, fazer análise detalhada
+                if tempo_limite_atingido:
+                    print(f"DEBUG: [SETA_COMPLETION] ⚠️ CHALLENGE EXPIRADO DETECTADO!")
+                    print(f"DEBUG: [SETA_COMPLETION] Fazendo análise completa do tracking...")
+                    self._debug_challenge_tracking_state()
+                
+                if challenge_pode_ser_completado:
+                    completion_tipo = "To send = 0"
+                    print(f"DEBUG: [SETA_COMPLETION] SUCCESS: Challenge pode ser completado - {completion_tipo}")
                     
-                    # Preservar valores antes de mostrar completion
-                    self._preservar_valores_atuais_barras()
+                    # VALIDAÇÃO DUPLA: Confirmar que to_send é realmente 0
+                    if current_to_send != 0:
+                        print(f"DEBUG: [SETA_COMPLETION] ❌ ERRO CRÍTICO: Validation failed!")
+                        print(f"DEBUG: [SETA_COMPLETION] challenge_pode_ser_completado = {challenge_pode_ser_completado}")  
+                        print(f"DEBUG: [SETA_COMPLETION] Mas current_to_send = {current_to_send} (deveria ser 0)")
+                        print(f"DEBUG: [SETA_COMPLETION] CANCELANDO completion - condições inconsistentes")
+                        # Continuar gestão normal em case de inconsistência
+                        challenge_pode_ser_completado = False
                     
-                    # CORREÇÃO: Usar o índice correto da carta no carrossel, não o índice na gestão
-                    # O índice no carrossel é selected_carousel_index, não _carta_atual_gestao
-                    carta_index_carrossel = getattr(self, 'selected_carousel_index', None)
-                    
-                    # CORREÇÃO ADICIONAL: Se não há selected_carousel_index, procurar a carta no carrossel
-                    if carta_index_carrossel is None:
-                        for i, carta_carrossel in enumerate(self.cards):
-                            if carta_carrossel == carta_atual:
-                                carta_index_carrossel = i
-                                print(f"DEBUG: [SETA_COMPLETION] Carta encontrada no carrossel posição: {i}")
-                                break
-                    
-                    if carta_index_carrossel is None:
-                        print(f"DEBUG: [SETA_COMPLETION] ERROR: ERRO: Não foi possível encontrar carta no carrossel")
+                    if challenge_pode_ser_completado:
+                        # Preservar valores antes de mostrar completion
+                        self._preservar_valores_atuais_barras()
+                        
+                        # CORREÇÃO: Usar o índice correto da carta no carrossel, não o índice na gestão
+                        # O índice no carrossel é selected_carousel_index, não _carta_atual_gestao
+                        carta_index_carrossel = getattr(self, 'selected_carousel_index', None)
+                        
+                        # CORREÇÃO ADICIONAL: Se não há selected_carousel_index, procurar a carta no carrossel
+                        if carta_index_carrossel is None:
+                            for i, carta_carrossel in enumerate(self.cards):
+                                if carta_carrossel == carta_atual:
+                                    carta_index_carrossel = i
+                                    print(f"DEBUG: [SETA_COMPLETION] Carta encontrada no carrossel posição: {i}")
+                                    break
+                        
+                        if carta_index_carrossel is None:
+                            print(f"DEBUG: [SETA_COMPLETION] ERROR: ERRO: Não foi possível encontrar carta no carrossel")
+                            return
+                        
+                        print(f"DEBUG: [SETA_COMPLETION] Usando índice do carrossel: {carta_index_carrossel} (gestão: {self._carta_atual_gestao})")
+                        
+                        # Mostrar overlay de completion diretamente
+                        self._mostrar_overlay_completion(carta_atual, dados_carta, is_sequential=False, carta_index=carta_index_carrossel)
+                        
+                        print(f"DEBUG: [SETA_COMPLETION] SUCCESS: Overlay de completion mostrado para Challenge")
                         return
-                    
-                    print(f"DEBUG: [SETA_COMPLETION] Usando índice do carrossel: {carta_index_carrossel} (gestão: {self._carta_atual_gestao})")
-                    
-                    # Mostrar overlay de completion diretamente
-                    self._mostrar_overlay_completion(carta_atual, dados_carta, is_sequential=False, carta_index=carta_index_carrossel)
-                    
-                    print(f"DEBUG: [SETA_COMPLETION] SUCCESS: Overlay de completion mostrado para Challenge")
-                    return
+                
+                # Se chegou até aqui, Challenge não pode ser completado
                 else:
-                    print(f"DEBUG: [SETA_COMPLETION] ERROR: Challenge não pode ser completado ainda - continuar gestão normal")
-                    print(f"DEBUG: [SETA_COMPLETION]   Razão: tempo_limite={tempo_limite_atingido}, pacotes_completos={pacotes_completos}")
+                    print(f"DEBUG: [SETA_COMPLETION] Challenge não pode ser completado ainda - continuar gestão normal")
+                    print(f"DEBUG: [SETA_COMPLETION]   Razão: To send deve ser 0, atual: {current_to_send}")
+                    print(f"DEBUG: [SETA_COMPLETION]   Nota: Challenge só pode ser completado com To send = 0 ou tempo limite atingido")
             else:
                 print(f"DEBUG: [SETA_COMPLETION] ERROR: Dados da carta não encontrados")
         else:
@@ -8718,9 +11688,24 @@ class PlayerDashboard(tk.Toplevel):
                     
                     try:
                         if hasattr(self, 'progress_labels'):
-                            current_to_send = int(self.progress_labels.get("To send", tk.Label()).cget("text") or "0")
-                            current_rxd = int(self.progress_labels.get("Rxd", tk.Label()).cget("text") or "0")
-                    except:
+                            # CORREÇÃO: Usar formato correto para obter texto dos labels
+                            if "To send" in self.progress_labels:
+                                if hasattr(self.progress_labels["To send"], 'cget'):
+                                    # É um objeto Label
+                                    current_to_send = int(self.progress_labels["To send"].cget("text") or "0")
+                                else:
+                                    # É um dicionário com chave 'text'
+                                    current_to_send = int(self.progress_labels["To send"].get("text", "0"))
+                            
+                            if "Rxd" in self.progress_labels:
+                                if hasattr(self.progress_labels["Rxd"], 'cget'):
+                                    # É um objeto Label
+                                    current_rxd = int(self.progress_labels["Rxd"].cget("text") or "0")
+                                else:
+                                    # É um dicionário com chave 'text'
+                                    current_rxd = int(self.progress_labels["Rxd"].get("text", "0"))
+                    except Exception as e:
+                        print(f"DEBUG: [SETA_COMPLETION] ERROR: Erro ao obter valores das barras: {e}")
                         current_to_send = 0
                         current_rxd = 0
                     
@@ -8731,51 +11716,60 @@ class PlayerDashboard(tk.Toplevel):
                     print(f"DEBUG: [SETA_COMPLETION]   drops_allowed: {drops_allowed}")
                     
                     # CONDIÇÕES DE COMPLETION PARA ACTIVITIES:
-                    # 1. To send = 0 (todos os pacotes foram enviados) E
-                    # 2. Rxd >= message_size (todos os pacotes foram recebidos) E
-                    # 3. (drops_allowed = False OU completion forçada no botão seta)
+                    # REGRA SIMPLIFICADA: Activity só pode ser completada quando To send = 0
+                    # Não importa o valor de Rxd ou drops_allowed
                     
                     pacotes_todos_enviados = (current_to_send == 0)
-                    pacotes_todos_recebidos = (current_rxd >= message_size) and (message_size > 0)
                     
-                    # Activity é completada se TODOS os pacotes foram enviados E recebidos
-                    activity_completada = pacotes_todos_enviados and pacotes_todos_recebidos
+                    # Activity é completada APENAS quando todos os pacotes foram enviados (To send = 0)
+                    activity_completada = pacotes_todos_enviados
                     
-                    print(f"DEBUG: [SETA_COMPLETION]   Condição 1 (todos enviados): {pacotes_todos_enviados}")
-                    print(f"DEBUG: [SETA_COMPLETION]   Condição 2 (todos recebidos): {pacotes_todos_recebidos}")
+                    print(f"DEBUG: [SETA_COMPLETION]   Condição (todos enviados): {pacotes_todos_enviados}")
                     print(f"DEBUG: [SETA_COMPLETION]   activity_completada: {activity_completada}")
                     
                     if activity_completada:
                         print(f"DEBUG: [SETA_COMPLETION] SUCCESS: Activity pode ser completada - mostrar overlay")
                         
-                        # Preservar valores antes de mostrar completion
-                        self._preservar_valores_atuais_barras()
+                        # VALIDAÇÃO DUPLA: Confirmar que to_send é realmente 0
+                        if current_to_send != 0:
+                            print(f"DEBUG: [SETA_COMPLETION] ❌ ERRO CRÍTICO: Activity validation failed!")
+                            print(f"DEBUG: [SETA_COMPLETION] activity_completada = {activity_completada}")
+                            print(f"DEBUG: [SETA_COMPLETION] Mas current_to_send = {current_to_send} (deveria ser 0)")
+                            print(f"DEBUG: [SETA_COMPLETION] CANCELANDO completion - condições inconsistentes")
+                            # Continuar gestão normal em case de inconsistência
+                            activity_completada = False
                         
-                        # CORREÇÃO: Usar o índice correto da carta no carrossel, não o índice na gestão
-                        carta_index_carrossel = getattr(self, 'selected_carousel_index', None)
-                        
-                        # CORREÇÃO ADICIONAL: Se não há selected_carousel_index, procurar a carta no carrossel
-                        if carta_index_carrossel is None:
-                            for i, carta_carrossel in enumerate(self.cards):
-                                if carta_carrossel == carta_atual:
-                                    carta_index_carrossel = i
-                                    print(f"DEBUG: [SETA_COMPLETION] Carta encontrada no carrossel posição: {i}")
-                                    break
-                        
-                        if carta_index_carrossel is None:
-                            print(f"DEBUG: [SETA_COMPLETION] ERROR: ERRO: Não foi possível encontrar carta no carrossel")
+                        if activity_completada:
+                            # Preservar valores antes de mostrar completion
+                            self._preservar_valores_atuais_barras()
+                            
+                            # CORREÇÃO: Usar o índice correto da carta no carrossel, não o índice na gestão
+                            carta_index_carrossel = getattr(self, 'selected_carousel_index', None)
+                            
+                            # CORREÇÃO ADICIONAL: Se não há selected_carousel_index, procurar a carta no carrossel
+                            if carta_index_carrossel is None:
+                                for i, carta_carrossel in enumerate(self.cards):
+                                    if carta_carrossel == carta_atual:
+                                        carta_index_carrossel = i
+                                        print(f"DEBUG: [SETA_COMPLETION] Carta encontrada no carrossel posição: {i}")
+                                        break
+                            
+                            if carta_index_carrossel is None:
+                                print(f"DEBUG: [SETA_COMPLETION] ERROR: ERRO: Não foi possível encontrar carta no carrossel")
+                                return
+                            
+                            print(f"DEBUG: [SETA_COMPLETION] Usando índice do carrossel: {carta_index_carrossel} (gestão: {self._carta_atual_gestao})")
+                            
+                            # Mostrar overlay de completion diretamente
+                            self._mostrar_overlay_completion(carta_atual, dados_carta, is_sequential=False, carta_index=carta_index_carrossel)
+                            
+                            print(f"DEBUG: [SETA_COMPLETION] SUCCESS: Overlay de completion mostrado para Activity")
                             return
-                        
-                        print(f"DEBUG: [SETA_COMPLETION] Usando índice do carrossel: {carta_index_carrossel} (gestão: {self._carta_atual_gestao})")
-                        
-                        # Mostrar overlay de completion diretamente
-                        self._mostrar_overlay_completion(carta_atual, dados_carta, is_sequential=False, carta_index=carta_index_carrossel)
-                        
-                        print(f"DEBUG: [SETA_COMPLETION] SUCCESS: Overlay de completion mostrado para Activity")
-                        return
+                    
+                    # Se chegou até aqui, Activity não pode ser completada
                     else:
                         print(f"DEBUG: [SETA_COMPLETION] ERROR: Activity não pode ser completada ainda - continuar gestão normal")
-                        print(f"DEBUG: [SETA_COMPLETION]   Razão: enviados={pacotes_todos_enviados}, recebidos={pacotes_todos_recebidos}")
+                        print(f"DEBUG: [SETA_COMPLETION]   Razão: To send deve ser 0, atual: {current_to_send}")
                 else:
                     print(f"DEBUG: [SETA_COMPLETION] ERROR: Dados da Activity não encontrados")
             else:
@@ -8966,6 +11960,11 @@ class PlayerDashboard(tk.Toplevel):
         """Finaliza gestão de pacotes e ativa botão End Turn"""
         print("DEBUG: [GESTÃO_PACOTES] === FINALIZANDO GESTÃO DE PACOTES ===")
         
+        # PROTEÇÃO CRÍTICA: Evitar múltiplas chamadas quando gestão já foi finalizada
+        if not getattr(self, '_final_phase_gestao_ativa', False):
+            print("DEBUG: [GESTÃO_PACOTES] WARNING: Gestão já foi finalizada - ignorando chamada duplicada")
+            return
+        
         # CORREÇÃO CRÍTICA: Desativar gestão de pacotes PRIMEIRO
         self._final_phase_gestao_ativa = False
         print("DEBUG: [GESTÃO_PACOTES] SUCCESS: _final_phase_gestao_ativa = False")
@@ -8979,8 +11978,14 @@ class PlayerDashboard(tk.Toplevel):
         # CORREÇÃO: Remover botão seta quando gestão termina completamente
         if hasattr(self, '_btn_seta') and self._btn_seta:
             print("DEBUG: [GESTÃO_PACOTES] Removendo botão seta - gestão de pacotes finalizada")
-            self._btn_seta.destroy()
-            self._btn_seta = None
+            try:
+                self._btn_seta.destroy()
+                self._btn_seta = None
+            except tk.TclError:
+                self._btn_seta = None
+        
+        # CORREÇÃO CRÍTICA: Verificar completion ANTES de limpar variáveis de gestão
+        self._aplicar_valores_finais()
         
         # CORREÇÃO: Limpar todas as variáveis de gestão
         if hasattr(self, '_cartas_gestao'):
@@ -9004,9 +12009,6 @@ class PlayerDashboard(tk.Toplevel):
         self.selected_carousel_index = None
         print("DEBUG: [GESTÃO_PACOTES] SUCCESS: Seleção do carrossel limpa")
         
-        # Aplicar valores finais a todas as cartas
-        self._aplicar_valores_finais()
-        
         # CORREÇÃO CRÍTICA: Forçar limpeza completa de todos os destaques
         print("DEBUG: [GESTÃO_PACOTES] SUCCESS: Forçando limpeza completa de destaques")
         if hasattr(self, 'card_labels') and self.card_labels:
@@ -9020,94 +12022,100 @@ class PlayerDashboard(tk.Toplevel):
         self.after(25, lambda: self._update_carousel_selection_highlights())
         self.after(50, lambda: self._update_carousel_selection_highlights())
         
-        # CORREÇÃO: Ativar botão End Turn com delay para garantir que interface está pronta
-        self.after(75, self._ativar_botao_end_turn)
+        # CORREÇÃO: Ativar botão End Turn APENAS se não há overlays de completion pendentes
+        self.after(75, self._ativar_botao_end_turn_se_apropriado)
         
         print("DEBUG: [GESTÃO_PACOTES] === GESTÃO FINALIZADA COM SUCESSO ===")
     
     def _aplicar_valores_finais(self):
         """
-        CORREÇÃO: Verifica completion de TODAS as cartas após gestão de pacotes
-        Antes só verificava uma carta por vez, agora verifica todas
+        CORREÇÃO: Verifica completion de TODAS as cartas ativas no carrossel
+        Não depende de _cartas_gestao que pode estar vazia
         """
         print("DEBUG: [GESTÃO_PACOTES] === VERIFICAÇÃO FINAL DE COMPLETION DE TODAS AS CARTAS ===")
         
         cartas_completadas = []
         
-        for i, carta_path in enumerate(self._cartas_gestao):
-            valores = self._valores_pacotes[i]
-            print(f"DEBUG: [GESTÃO_PACOTES] Verificando carta {i+1}/{len(self._cartas_gestao)}: {os.path.basename(carta_path)}")
-            print(f"DEBUG: [GESTÃO_PACOTES] Valores aplicados: Enviados={valores['enviados']}, Perdidos={valores['perdidos']}")
+        # CORREÇÃO CRÍTICA: Verificar todas as cartas ativas no carrossel, não apenas _cartas_gestao
+        for carta_idx, carta_path in enumerate(self.cards):
+            if carta_idx >= len(self.card_stats) or not carta_path:
+                continue
             
-            # Encontrar a posição da carta no carrossel para verificar completion
+            # Verificar se é uma carta ativa (não é back_card)
             carta_name = os.path.basename(carta_path)
-            carta_idx = None
+            if "back_card" in carta_name.lower():
+                continue
             
-            for card_idx, card_path in enumerate(self.cards):
-                if card_path and os.path.basename(card_path) == carta_name:
-                    carta_idx = card_idx
-                    break
+            # Verificar se tem barras de progresso válidas
+            stats = self.card_stats[carta_idx]
             
-            if carta_idx is not None and carta_idx < len(self.card_stats):
-                stats = self.card_stats[carta_idx]
+            print(f"DEBUG: [COMPLETION_FINAL] Verificando carta {carta_idx}: {carta_name}")
+            print(f"DEBUG: [COMPLETION_FINAL] Estado final da carta {carta_idx}:")
+            print(f"DEBUG: [COMPLETION_FINAL]   To send: {stats['To send']}")
+            print(f"DEBUG: [COMPLETION_FINAL]   Rxd total: {stats['Rxd']}")
+            print(f"DEBUG: [COMPLETION_FINAL]   Lost total: {stats['Lost']}")
+            
+            # NOVA FUNCIONALIDADE: Verificar completion para cada carta
+            dados_carta = self._obter_dados_carta(carta_path)
+            if dados_carta:
+                message_size = dados_carta.get('message_size', 0)
+                drops_allowed = dados_carta.get('drops_allowed', True)
                 
-                print(f"DEBUG: [GESTÃO_PACOTES] Estado final da carta {carta_idx}:")
-                print(f"DEBUG: [GESTÃO_PACOTES]   To send: {stats['To send']}")
-                print(f"DEBUG: [GESTÃO_PACOTES]   Rxd total: {stats['Rxd']}")
-                print(f"DEBUG: [GESTÃO_PACOTES]   Lost total: {stats['Lost']}")
+                # Determinar tipo da carta
+                carta_basename = carta_name.lower()
+                is_challenge = "challenge" in carta_basename
+                is_activity = "activity" in carta_basename
                 
-                # NOVA FUNCIONALIDADE: Verificar completion para cada carta
-                dados_carta = self._obter_dados_carta(carta_path)
-                if dados_carta:
-                    message_size = dados_carta.get('message_size', 0)
-                    drops_allowed = dados_carta.get('drops_allowed', True)
+                print(f"DEBUG: [COMPLETION_FINAL] Carta: {carta_name}")
+                print(f"DEBUG: [COMPLETION_FINAL]   Tipo: {'Challenge' if is_challenge else 'Activity' if is_activity else 'Outro'}")
+                print(f"DEBUG: [COMPLETION_FINAL]   Message size: {message_size}")
+                print(f"DEBUG: [COMPLETION_FINAL]   Drops allowed: {drops_allowed}")
+                
+                # Aplicar regras de completion
+                completion_achieved = False
+                completion_reason = ""
+                
+                # Para Activities: só verificar se drops_allowed=False
+                # Para Challenges: sempre verificar
+                should_check_completion = is_challenge or (is_activity and not drops_allowed)
+                
+                if should_check_completion:
+                    to_send = stats['To send']
+                    rxd = stats['Rxd']
                     
-                    # Determinar tipo da carta
-                    carta_basename = os.path.basename(carta_path).lower()
-                    is_challenge = "challenge" in carta_basename
-                    is_activity = "activity" in carta_basename
+                    print(f"DEBUG: [COMPLETION_FINAL] Verificando completion para {carta_name}:")
+                    print(f"DEBUG: [COMPLETION_FINAL]   To send: {to_send}, Rxd: {rxd}, Message size: {message_size}")
                     
-                    # Aplicar regras de completion
-                    completion_achieved = False
-                    completion_reason = ""
-                    
-                    # Para Activities: só verificar se drops_allowed=False
-                    # Para Challenges: sempre verificar
-                    should_check_completion = is_challenge or (is_activity and not drops_allowed)
-                    
-                    if should_check_completion:
-                        to_send = stats['To send']
-                        rxd = stats['Rxd']
-                        
-                        if is_challenge:
-                            # Challenges: mais flexível
-                            completion_achieved = (to_send == 0) or (rxd >= message_size)
-                            if to_send == 0:
-                                completion_reason = "todos os pacotes foram enviados"
-                            elif rxd >= message_size:
-                                completion_reason = f"todos os pacotes foram recebidos ({rxd}/{message_size})"
-                        else:
-                            # Activities: mais restritivo
-                            completion_achieved = (to_send == 0) and (rxd >= message_size)
-                            if completion_achieved:
-                                completion_reason = f"todos os pacotes foram enviados e recebidos ({rxd}/{message_size})"
-                        
-                        if completion_achieved:
-                            print(f"DEBUG: [COMPLETION_FINAL] *** {'Challenge' if is_challenge else 'Activity'} {carta_name} COMPLETADA! ***")
-                            print(f"DEBUG: [COMPLETION_FINAL] Motivo: {completion_reason}")
-                            cartas_completadas.append({
-                                'path': carta_path,
-                                'name': carta_name,
-                                'type': 'Challenge' if is_challenge else 'Activity',
-                                'reason': completion_reason,
-                                'dados': dados_carta,
-                                'index': carta_idx  # CORREÇÃO: Adicionar índice da carta
-                            })
-                        else:
-                            print(f"DEBUG: [COMPLETION_FINAL] Carta {carta_name} não completada:")
-                            print(f"DEBUG: [COMPLETION_FINAL]   To send: {to_send}, Rxd: {rxd}, Message size: {message_size}")
+                    if is_challenge:
+                        # Challenges: mais flexível - considera completado se To send = 0 OU Rxd >= message_size
+                        completion_achieved = (to_send == 0) or (rxd >= message_size)
+                        if to_send == 0:
+                            completion_reason = "todos os pacotes foram enviados"
+                        elif rxd >= message_size:
+                            completion_reason = f"todos os pacotes foram recebidos ({rxd}/{message_size})"
                     else:
-                        print(f"DEBUG: [COMPLETION_FINAL] Carta {carta_name} não verifica completion (Activity com drops_allowed=True)")
+                        # Activities: mais restritivo - precisa To send = 0 E Rxd >= message_size
+                        completion_achieved = (to_send == 0) and (rxd >= message_size)
+                        if completion_achieved:
+                            completion_reason = f"todos os pacotes foram enviados e recebidos ({rxd}/{message_size})"
+                    
+                    # Verificar se carta foi completada
+                    if completion_achieved:
+                        print(f"DEBUG: [COMPLETION_FINAL] *** {'Challenge' if is_challenge else 'Activity'} {carta_name} COMPLETADA! ***")
+                        print(f"DEBUG: [COMPLETION_FINAL] Motivo: {completion_reason}")
+                        cartas_completadas.append({
+                            'path': carta_path,
+                            'name': carta_name,
+                            'type': 'Challenge' if is_challenge else 'Activity',
+                            'reason': completion_reason,
+                            'dados': dados_carta,
+                            'index': carta_idx  # CORREÇÃO: Adicionar índice da carta
+                        })
+                    else:
+                        print(f"DEBUG: [COMPLETION_FINAL] Carta {carta_name} não completada:")
+                        print(f"DEBUG: [COMPLETION_FINAL]   To send: {to_send}, Rxd: {rxd}, Message size: {message_size}")
+                else:
+                    print(f"DEBUG: [COMPLETION_FINAL] Carta {carta_name} não verifica completion (Activity com drops_allowed=True)")
         
         # NOVA FUNCIONALIDADE: Mostrar overlays para TODAS as cartas completadas
         if cartas_completadas:
@@ -9420,6 +12428,37 @@ class PlayerDashboard(tk.Toplevel):
         
         print(f"DEBUG: [SWITCH_CONFIRM] Overlay de confirmação de troca criado")
     
+    def _ativar_botao_end_turn_se_apropriado(self):
+        """
+        Ativa o botão End Turn apenas se não há overlays de completion pendentes.
+        """
+        print("DEBUG: [END_TURN] === VERIFICANDO SE É APROPRIADO ATIVAR END TURN ===")
+        
+        # Verificar se há overlays de completion ativos
+        overlay_completion_ativo = False
+        
+        # Verificar se há atributos que indicam overlay ativo
+        if hasattr(self, '_completion_overlay_active') and self._completion_overlay_active:
+            overlay_completion_ativo = True
+            print("DEBUG: [END_TURN] Overlay de completion detectado via flag _completion_overlay_active")
+        
+        # Verificar se há widgets de overlay na interface
+        for widget in self.winfo_children():
+            widget_name = str(widget).lower()
+            if 'overlay' in widget_name or 'completion' in widget_name:
+                overlay_completion_ativo = True
+                print(f"DEBUG: [END_TURN] Overlay de completion detectado via widget: {widget}")
+                break
+        
+        if overlay_completion_ativo:
+            print("DEBUG: [END_TURN] WARNING: Overlay de completion ativo - adiando ativação do End Turn")
+            # Tentar novamente em 500ms
+            self.after(500, self._ativar_botao_end_turn_se_apropriado)
+            return
+        
+        print("DEBUG: [END_TURN] SUCCESS: Nenhum overlay de completion ativo - procedendo com ativação")
+        self._ativar_botao_end_turn()
+
     def _ativar_botao_end_turn(self):
         """Ativa o botão End Turn e muda sua aparência"""
         print("DEBUG: [END_TURN] === TENTANDO ATIVAR BOTÃO END TURN ===")
@@ -9586,10 +12625,11 @@ class PlayerDashboard(tk.Toplevel):
         # CORREÇÃO CRÍTICA: Preservar estatísticas das cartas antes de terminar turno
         print("DEBUG: End Turn clicado - preservando estatísticas das cartas")
         
-        # Salvar estatísticas atuais das cartas para preservação entre turnos
+        # SUPER BACKUP SYSTEM: Garantir backup completo de todos os trackings críticos
+        root = self.master
+        
+        # 1. Backup das estatísticas das cartas
         if hasattr(self, 'card_stats') and hasattr(self, 'cards'):
-            # Salvar no root para que persista quando PlayerDashboard for recriado
-            root = self.master
             root._backup_card_stats = []
             root._backup_cards = []
             
@@ -9623,31 +12663,85 @@ class PlayerDashboard(tk.Toplevel):
         print(f"DEBUG: [END_TURN]   _current_turn: {self._current_turn}")
         print(f"DEBUG: [END_TURN]   _current_turn_id: {self._current_turn_id}")
         
-        # INCREMENTO TEMPORAL: Incrementar contador de turnos para tracking de Challenge time_limit
-        self._increment_turn_counter()
-        
-        print(f"DEBUG: [END_TURN] Contadores APÓS incremento:")
+        # CORREÇÃO CRÍTICA: NÃO incrementar contadores aqui - isso só deve acontecer no próximo dice roll
+        # Os contadores permanecem no turno atual até o jogador lançar o dado para o próximo turno
+        print(f"DEBUG: [END_TURN] Contadores PERMANECEM NO TURNO ATUAL (não incrementados):")
         print(f"DEBUG: [END_TURN]   _current_turn_number: {self._current_turn_number}")
         print(f"DEBUG: [END_TURN]   _current_turn: {self._current_turn}")
         print(f"DEBUG: [END_TURN]   _current_turn_id: {self._current_turn_id}")
+        print(f"DEBUG: [END_TURN] IMPORTANTE: Incremento só acontece no próximo dice roll!")
         
         # CRÍTICO: SALVAR OS CONTADORES JÁ INCREMENTADOS para preservação
         root = self.master
+        # CORREÇÃO CRÍTICA: Salvar valores INCREMENTADOS em vez dos atuais
+        next_turn_number = self._current_turn_number + 1
+        next_turn = self._current_turn + 1
+        next_turn_id = self._current_turn_id + 1
+        
         root._backup_turn_counters = {
-            '_current_turn_number': self._current_turn_number,
-            '_current_turn': self._current_turn,
-            '_current_turn_id': self._current_turn_id
+            '_current_turn_number': next_turn_number,
+            '_current_turn': next_turn,
+            '_current_turn_id': next_turn_id,
+            '_challenge_start_turns': self._challenge_start_turns.copy(),  # CORREÇÃO CRÍTICA: Adicionar tracking
+            '_service_real_activation_turns': getattr(self, '_service_real_activation_turns', {}).copy(),  # CORREÇÃO CRÍTICA: Preservar turnos reais de Services
+            '_event_duration_tracking': getattr(self, '_event_duration_tracking', {}).copy(),  # CORREÇÃO CRÍTICA: Salvar tracking de Events
+            '_event_start_turns': getattr(self, '_event_start_turns', {}).copy()  # CORREÇÃO CRÍTICA: Salvar start turns de Events
         }
+        
+        print(f"DEBUG: [END_TURN] Valores INCREMENTADOS a serem salvos:")
+        print(f"DEBUG: [END_TURN]   Atual -> Próximo turno:")
+        print(f"DEBUG: [END_TURN]   _current_turn_number: {self._current_turn_number} -> {next_turn_number}")
+        print(f"DEBUG: [END_TURN]   _current_turn: {self._current_turn} -> {next_turn}")
+        print(f"DEBUG: [END_TURN]   _current_turn_id: {self._current_turn_id} -> {next_turn_id}")
+        
+        # SUPER BACKUP SYSTEM: Backup completo de todos os trackings críticos
+        root._backup_challenge_tracking = self._challenge_start_turns.copy()
+        
+        # 2. Backup robusto de Services tracking (consolidação múltipla)
+        if hasattr(self, '_service_real_activation_turns'):
+            root._backup_service_tracking_end_turn = self._service_real_activation_turns.copy()
+        else:
+            root._backup_service_tracking_end_turn = {}
+        
+        # Consolidar de múltiplas fontes para máxima preservação
+        consolidated_services = getattr(root, '_backup_service_tracking', {}).copy()
+        consolidated_services.update(getattr(root, '_service_tracking_backup_imediato', {}))
+        consolidated_services.update(root._backup_service_tracking_end_turn)
+        root._backup_service_tracking_super = consolidated_services
+        
+        # 3. Backup robusto de Events tracking (consolidação múltipla)
+        if hasattr(self, '_event_duration_tracking'):
+            root._backup_event_tracking_end_turn = self._event_duration_tracking.copy()
+        else:
+            root._backup_event_tracking_end_turn = {}
+            
+        if hasattr(self, '_event_start_turns'):
+            root._backup_event_start_turns_end_turn = self._event_start_turns.copy()
+        else:
+            root._backup_event_start_turns_end_turn = {}
+        
+        # Consolidar de múltiplas fontes para máxima preservação
+        consolidated_events = getattr(root, '_backup_event_tracking', {}).copy()
+        consolidated_events.update(getattr(root, '_event_tracking_backup_imediato', {}))
+        consolidated_events.update(root._backup_event_tracking_end_turn)
+        root._backup_event_tracking_super = consolidated_events
+        
+        consolidated_event_starts = getattr(root, '_backup_event_start_turns', {}).copy()
+        consolidated_event_starts.update(root._backup_event_start_turns_end_turn)
+        root._backup_event_start_turns_super = consolidated_event_starts
+        
         print(f"DEBUG: [END_TURN] ======= CONTADORES PRESERVADOS =======")
         print(f"DEBUG: [END_TURN] Root object: {root}")
         print(f"DEBUG: [END_TURN] Backup salvo (INCREMENTADOS): {root._backup_turn_counters}")
-        print(f"DEBUG: [END_TURN] SUCCESS: PRÓXIMO TURNO TERÁ OS VALORES CORRETOS!")
+        print(f"DEBUG: [END_TURN] Challenge tracking salvo: {root._backup_challenge_tracking}")
+        print(f"DEBUG: [END_TURN] Services super backup: {len(root._backup_service_tracking_super)} entries")
+        print(f"DEBUG: [END_TURN] Events super backup: {len(root._backup_event_tracking_super)} entries")
+        print(f"DEBUG: [END_TURN] SUCCESS: PRÓXIMO DICE ROLL RESTAURARÁ OS VALORES INCREMENTADOS!")
         print(f"DEBUG: [END_TURN] ======= FIM PRESERVAÇÃO CONTADORES =======")
         
-        # TEMPORARIAMENTE DESABILITADO: Verificar cartas Challenge que atingiram n_turns obrigatoriamente
-        # FIXME: Problema com messagebox durante destruição da interface
-        # self._verificar_challenges_tempo_limite()
-        print("DEBUG: [END_TURN] SUCCESS: Verificação de tempo limite desabilitada temporariamente")
+        # CORREÇÃO CRÍTICA: Verificação de Challenges tempo limite removida do end_turn
+        # Agora acontece no próximo dice roll quando os contadores são realmente incrementados
+        print("DEBUG: [END_TURN] Verificação de Challenges tempo limite adiada para próximo dice roll")
         
         # NOVO: Verificar serviços TEMPORARY que expiraram
         self._verificar_services_expirados()
@@ -9716,6 +12810,24 @@ class PlayerDashboard(tk.Toplevel):
         # import tkinter.messagebox
         # tkinter.messagebox.showinfo("End Turn", "Turno terminado! Próximo jogador...")
         # Exemplo: pode-se limpar a interface ou chamar uma função para o próximo jogador
+        # CORREÇÃO CRÍTICA: Definir flag para indicar que vamos para o próximo turno
+        # Detectar ambiente para debug específico
+        universal_paths = get_universal_paths()
+        ambiente = "RASPBERRY PI" if universal_paths['environment'] == 'raspberry_pi' else "DESENVOLVIMENTO"
+        
+        self._coming_from_end_turn = True
+        print(f"DEBUG: [END_TURN] AMBIENTE: {ambiente}")
+        print(f"DEBUG: [END_TURN] Flag _coming_from_end_turn definida - próximo dice roll irá incrementar contadores")
+        print(f"DEBUG: [END_TURN] Estado atual dos contadores:")
+        print(f"DEBUG: [END_TURN]   _current_turn_number: {self._current_turn_number}")
+        print(f"DEBUG: [END_TURN]   _current_turn: {self._current_turn}")
+        print(f"DEBUG: [END_TURN]   _current_turn_id: {self._current_turn_id}")
+        
+        # CORREÇÃO FINAL: Limpeza órfã no final do turno para garantir limpeza completa
+        print("DEBUG: [END_TURN] === LIMPEZA ÓRFÃ FINAL ===")
+        self._cleanup_orphaned_challenge_tracking()
+        print("DEBUG: [END_TURN] === FIM LIMPEZA ÓRFÃ FINAL ===")
+        
         print("DEBUG: [END_TURN] SUCCESS: Método end_turn() terminado com sucesso - retornando controle para _criar_botao_end_turn()")
 
     def _aplicar_router_upgrade(self, router_id):
@@ -9776,30 +12888,1458 @@ class PlayerDashboard(tk.Toplevel):
                 print(f"DEBUG: [ROUTER_UPGRADE]   - {os.path.basename(equipment_path)}")
 
     def _show_equipment_inventory_for_router_upgrade(self):
-        """Abre inventário de equipamentos especificamente para ROUTER UPGRADE"""
-        print("DEBUG: [ROUTER_UPGRADE_INVENTORY] Criando inventário específico para ROUTER UPGRADE")
+        """Cria página especializada para ROUTER UPGRADE com equipamentos Small Router filtrados"""
+        print("DEBUG: [ROUTER_UPGRADE_INVENTORY] Criando página especializada ROUTER UPGRADE")
         
         # Definir contexto específico
         self._in_router_upgrade_context = True
         
-        # Chamar inventário de equipamentos usando show_inventory_matrix
-        print("DEBUG: [ROUTER_UPGRADE_INVENTORY] Chamando show_inventory_matrix para equipments")
-        self.show_inventory_matrix(["equipments"])
+        # Obter router_id da Action card ativa
+        router_id = getattr(self, '_router_upgrade_target_id', None)
+        print(f"DEBUG: [ROUTER_UPGRADE_INVENTORY] Router ID da Action: {router_id}")
         
-        print("DEBUG: [ROUTER_UPGRADE_INVENTORY] SUCCESS: Inventário específico para ROUTER UPGRADE criado")
+        if router_id is None:
+            print("DEBUG: [ROUTER_UPGRADE_INVENTORY] ERRO: Router ID não definido")
+            return
+        
+        # Salvar estado da interface
+        self._save_dashboard_state()
+        
+        # Limpar widgets (exceto TopBar)
+        for widget in self.winfo_children():
+            if hasattr(self, 'topbar_label') and widget == self.topbar_label:
+                continue
+            widget.destroy()
+        
+        screen_width = self.winfo_screenwidth()
+        screen_height = self.winfo_screenheight()
+        
+        # Criar TopBar se necessário
+        if not hasattr(self, 'topbar_label') or not self.topbar_label.winfo_exists():
+            try:
+                topbar_img_path = os.path.join(IMG_DIR, f"TopBar_{self.player_color.lower()}.png")
+                print(f"DEBUG: [ROUTER_UPGRADE_INVENTORY] Criando TopBar: {topbar_img_path}")
+                
+                if os.path.exists(topbar_img_path):
+                    img = Image.open(topbar_img_path).convert("RGBA")
+                    img = img.resize((screen_width, 60), Image.Resampling.LANCZOS)
+                    topbar_img = ImageTk.PhotoImage(img)
+                    self.topbar_label = tk.Label(self, image=topbar_img, bg="black", borderwidth=0, highlightthickness=0)
+                    self.topbar_label.image = topbar_img
+                    self.topbar_label.pack(side="top", fill="x")
+                    print("DEBUG: [ROUTER_UPGRADE_INVENTORY] TopBar criada com sucesso!")
+                else:
+                    print(f"DEBUG: [ROUTER_UPGRADE_INVENTORY] TopBar não encontrada, criando fallback")
+                    topbar_frame = tk.Frame(self, bg=self.bar_color, height=60)
+                    topbar_frame.pack(side="top", fill="x")
+                    topbar_frame.pack_propagate(False)
+                    self.topbar_label = topbar_frame
+            except Exception as e:
+                print(f"DEBUG: [ROUTER_UPGRADE_INVENTORY] ERRO ao criar TopBar: {e}")
+                topbar_frame = tk.Frame(self, bg=self.bar_color, height=60)
+                topbar_frame.pack(side="top", fill="x")
+                topbar_frame.pack_propagate(False)
+                self.topbar_label = topbar_frame
+        
+        # Nome do jogador
+        name_lbl = tk.Label(self, text=self.player_name, font=("Helvetica", 18, "bold"), bg=self.bar_color, fg="black", borderwidth=0)
+        name_lbl.place(relx=0.5, y=25, anchor="n")
+        
+        # Título
+        title = tk.Label(self, text="ROUTER UPGRADE", font=("Helvetica", 22, "bold"), fg="white", bg="black")
+        title.place(relx=0.5, y=65, anchor="n")
+        
+        # Filtrar equipamentos Small Router com specific_id igual ao router_id
+        equipamentos_filtrados = []
+        all_equipments = self.inventario.get("equipments", [])
+        
+        for equipment_path in all_equipments:
+            try:
+                # Extrair número do equipamento do nome do arquivo (Equipment_X.png)
+                filename = os.path.basename(equipment_path)
+                if filename.startswith("Equipment_") and filename.endswith(".png"):
+                    equipment_num = int(filename.replace("Equipment_", "").replace(".png", ""))
+                    
+                    # Small Router são Equipment_1, Equipment_2, Equipment_3
+                    if 1 <= equipment_num <= 3 and equipment_num == router_id:
+                        equipamentos_filtrados.append(equipment_path)
+                        print(f"DEBUG: [ROUTER_UPGRADE_INVENTORY] Equipment filtrado: {filename} (router_id={router_id})")
+            except Exception as e:
+                print(f"DEBUG: [ROUTER_UPGRADE_INVENTORY] Erro ao processar equipamento {equipment_path}: {e}")
+                continue
+        
+        print(f"DEBUG: [ROUTER_UPGRADE_INVENTORY] Total equipamentos filtrados: {len(equipamentos_filtrados)}")
+        
+        # Layout baseado no número de equipamentos
+        matriz_frame = tk.Frame(self, bg="black")
+        matriz_frame.place(relx=0.5, rely=0.5, anchor="center")
+        
+        card_w, card_h = 85, 120
+        total_equipments = len(equipamentos_filtrados)
+        
+        if total_equipments == 1:
+            # Carta única - layout centralizado
+            print(f"DEBUG: [ROUTER_UPGRADE_INVENTORY] Carta única detectada - usando layout centralizado")
+            matriz_frame.grid_columnconfigure(0, weight=1, minsize=card_w + 16)
+        else:
+            # Múltiplas cartas - grid 2xn
+            print(f"DEBUG: [ROUTER_UPGRADE_INVENTORY] Múltiplas cartas detectadas - usando grid 2xn")
+            matriz_frame.grid_columnconfigure(0, weight=1, minsize=card_w + 16)
+            matriz_frame.grid_columnconfigure(1, weight=1, minsize=card_w + 16)
+        
+        # Colocar equipamentos em layout apropriado
+        for idx, equipment_path in enumerate(equipamentos_filtrados):
+            try:
+                if total_equipments == 1:
+                    # Carta única - centralizar na posição (0,0)
+                    row, col = 0, 0
+                else:
+                    # Múltiplas cartas - grid 2xn
+                    row = idx // 2
+                    col = idx % 2
+                
+                # Verificar se equipamento está ativo
+                is_active = self.is_card_active(equipment_path, "equipments")
+                
+                if is_active:
+                    # Equipamento ativo: mostrar virado para cima
+                    img = ImageTk.PhotoImage(Image.open(equipment_path).resize((card_w, card_h)))
+                    print(f"DEBUG: [ROUTER_UPGRADE_INVENTORY] Equipment ATIVO: {os.path.basename(equipment_path)}")
+                else:
+                    # Equipamento inativo: mostrar virado para baixo
+                    back_card_colored = os.path.join(IMG_DIR, "cartas", f"back_card_{self.player_color.lower()}.png")
+                    img = ImageTk.PhotoImage(Image.open(back_card_colored).resize((card_w, card_h)))
+                    print(f"DEBUG: [ROUTER_UPGRADE_INVENTORY] Equipment INATIVO: {os.path.basename(equipment_path)}")
+                
+                carta_lbl = tk.Label(matriz_frame, image=img, bg="black", cursor="hand2")
+                carta_lbl.image = img
+                carta_lbl.grid(row=row, column=col, padx=8, pady=8)
+                
+                # Click handler para fullscreen
+                def make_click_handler(path):
+                    return lambda e: self._show_equipment_fullscreen_router_upgrade(path)
+                
+                carta_lbl.bind("<Button-1>", make_click_handler(equipment_path))
+                
+            except Exception as e:
+                print(f"DEBUG: [ROUTER_UPGRADE_INVENTORY] Erro ao carregar equipment: {e}")
+                continue
+        
+        # Barra inferior
+        try:
+            bottombar_img_path = os.path.join(IMG_DIR, f"BelowBar_{self.player_color.lower()}.png")
+            bottombar_img = ImageTk.PhotoImage(Image.open(bottombar_img_path).resize((screen_width, 50)))
+            bottombar_label = tk.Label(self, image=bottombar_img, bg="black")
+            bottombar_label.image = bottombar_img
+            bottombar_label.pack(side="bottom", fill="x")
+            print(f"DEBUG: [ROUTER_UPGRADE_INVENTORY] Barra inferior carregada")
+        except Exception as e:
+            print(f"DEBUG: [ROUTER_UPGRADE_INVENTORY] Erro ao carregar barra inferior: {e}")
+            bottombar_frame = tk.Frame(self, bg=self.bar_color, height=50)
+            bottombar_frame.pack(side="bottom", fill="x")
+            bottombar_frame.pack_propagate(False)
+        
+        print("DEBUG: [ROUTER_UPGRADE_INVENTORY] SUCCESS: Página ROUTER UPGRADE criada")
+
+    def _show_equipment_fullscreen_router_upgrade(self, equipment_path):
+        """Mostra equipamento em fullscreen para ROUTER UPGRADE com botões de confirmação"""
+        print(f"DEBUG: [ROUTER_UPGRADE_FULLSCREEN] Mostrando fullscreen: {os.path.basename(equipment_path)}")
+        
+        # Verificar se equipamento está ativo
+        is_active = self.is_card_active(equipment_path, "equipments")
+        print(f"DEBUG: [ROUTER_UPGRADE_FULLSCREEN] Equipment {os.path.basename(equipment_path)} ativo: {is_active}")
+        print(f"DEBUG: [ROUTER_UPGRADE_FULLSCREEN] active_equipments: {[os.path.basename(p) for p in self.active_equipments]}")
+        
+        if not is_active:
+            print("DEBUG: [ROUTER_UPGRADE_FULLSCREEN] Equipamento inativo - não permitindo upgrade")
+            return
+        
+        # Usar o mesmo padrão do fullscreen normal: limpar widgets e usar janela principal
+        # Limpa widgets (menos barra superior)
+        for widget in self.winfo_children():
+            if widget == getattr(self, 'topbar_label', None):
+                continue
+            widget.destroy()
+        
+        # Carregar e exibir imagem do equipamento
+        try:
+            pil_img = Image.open(equipment_path)
+            img_w, img_h = pil_img.size
+            max_w, max_h = self.winfo_screenwidth(), self.winfo_screenheight()
+            ratio = min(max_w/img_w, max_h/img_h)
+            new_w, new_h = int(img_w*ratio), int(img_h*ratio)
+            pil_img = pil_img.resize((new_w, new_h), Image.Resampling.LANCZOS)
+            carta_img = ImageTk.PhotoImage(pil_img)
+            
+            carta_real_lbl = tk.Label(self, image=carta_img, bg="black", borderwidth=0, highlightthickness=0)
+            carta_real_lbl.image = carta_img
+            carta_real_lbl.place(relx=0.5, rely=0.5, anchor="center", relwidth=1, relheight=1)
+            
+        except Exception as e:
+            print(f"DEBUG: [ROUTER_UPGRADE_FULLSCREEN] Erro ao carregar imagem: {e}")
+            # Fallback: mostrar placeholder
+            placeholder = tk.Label(self, text="Equipment Image", font=("Helvetica", 24), fg="white", bg="black")
+            placeholder.place(relx=0.5, rely=0.5, anchor="center")
+        
+        # Botão X (cinzento, canto superior esquerdo) - volta para página ROUTER UPGRADE
+        def close_fullscreen():
+            print("DEBUG: [ROUTER_UPGRADE_FULLSCREEN] Fechando fullscreen - voltando para página ROUTER UPGRADE")
+            self._show_equipment_inventory_for_router_upgrade()
+        
+        x_btn = tk.Button(
+            self, 
+            text="✖", 
+            font=("Helvetica", 24, "bold"), 
+            bg="#AAAAAA", 
+            fg="white", 
+            width=2, 
+            height=1, 
+            borderwidth=0, 
+            highlightthickness=0, 
+            command=close_fullscreen, 
+            cursor="hand2", 
+            activebackground="#CCCCCC"
+        )
+        x_btn.place(relx=0.02, rely=0, anchor="nw")
+        
+        # Botão de confirmação (roxo, canto superior direito)
+        def confirm_upgrade():
+            print(f"DEBUG: [ROUTER_UPGRADE_FULLSCREEN] Confirmando upgrade: {os.path.basename(equipment_path)}")
+            self._executar_router_upgrade(equipment_path)
+        
+        confirm_btn = tk.Button(
+            self,
+            text="✓",
+            font=("Helvetica", 24, "bold"),
+            bg="#800080",  # Roxo
+            fg="white",
+            width=2,
+            height=1,
+            borderwidth=0,
+            highlightthickness=0,
+            command=confirm_upgrade,
+            cursor="hand2",
+            activebackground="#9900AA"
+        )
+        confirm_btn.place(relx=0.98, rely=0, anchor="ne")
+        
+        print("DEBUG: [ROUTER_UPGRADE_FULLSCREEN] ===== FULLSCREEN CRIADO COM SUCESSO =====")
+        print("DEBUG: [ROUTER_UPGRADE_FULLSCREEN] Usando padrão normal de fullscreen (sem Toplevel)")
+        print("DEBUG: [ROUTER_UPGRADE_FULLSCREEN] ===== FIM DEBUG FULLSCREEN =====")
+
+    def _executar_router_upgrade(self, small_router_path):
+        """Mostra overlay de confirmação para ROUTER UPGRADE"""
+        print(f"DEBUG: [ROUTER_UPGRADE_CONFIRM] Mostrando overlay de confirmação: {os.path.basename(small_router_path)}")
+        
+        try:
+            # Extrair router_id do nome do arquivo
+            filename = os.path.basename(small_router_path)
+            router_id = int(filename.replace("Equipment_", "").replace(".png", ""))
+            
+            print(f"DEBUG: [ROUTER_UPGRADE_CONFIRM] Router ID: {router_id}")
+            
+            # Mostrar overlay de confirmação (como na ativação normal)
+            self._mostrar_overlay_confirmacao_router_upgrade(small_router_path, router_id)
+            
+        except Exception as e:
+            print(f"DEBUG: [ROUTER_UPGRADE_CONFIRM] ERRO: {e}")
+
+    def _mostrar_overlay_confirmacao_router_upgrade(self, small_router_path, router_id):
+        """Mostra overlay de confirmação para ROUTER UPGRADE (igual ao de ativação normal)"""
+        print(f"DEBUG: [ROUTER_UPGRADE_OVERLAY] Criando overlay: Router ID {router_id}")
+        
+        # Obter specific_id da carta Equipment através da base de dados
+        specific_id = router_id  # Fallback para o router_id caso não encontre na base de dados
+        if self.card_database:
+            try:
+                # Extrair filename da carta
+                filename = os.path.basename(small_router_path)
+                
+                # Determinar cor baseada no diretório
+                color = None
+                if "/red/" in small_router_path.lower():
+                    color = "red"
+                elif "/green/" in small_router_path.lower():
+                    color = "green"
+                elif "/blue/" in small_router_path.lower():
+                    color = "blue"
+                elif "/yellow/" in small_router_path.lower():
+                    color = "yellow"
+                
+                if color:
+                    # Construir equipment_id baseado no filename e cor
+                    equipment_id = f"small_router_{router_id}_{color}"
+                    equipment_card = self.card_database.get_equipment(equipment_id)
+                    
+                    if equipment_card:
+                        specific_id = equipment_card.specific_id
+                        print(f"DEBUG: [ROUTER_UPGRADE_OVERLAY] Specific ID encontrado: {specific_id}")
+                    else:
+                        print(f"DEBUG: [ROUTER_UPGRADE_OVERLAY] Equipment não encontrado: {equipment_id}")
+                else:
+                    print(f"DEBUG: [ROUTER_UPGRADE_OVERLAY] Cor não detectada no path: {small_router_path}")
+                    
+            except Exception as e:
+                print(f"DEBUG: [ROUTER_UPGRADE_OVERLAY] Erro ao obter specific_id: {e}")
+        
+        # Limpar TODOS os widgets (igual à ativação normal)
+        for widget in self.winfo_children():
+            widget.destroy()
+        
+        # Definir fundo preto para a janela
+        self.config(bg="black")
+        
+        # Carregar a imagem da carta como fundo (igual à ativação normal)
+        try:
+            carta_img = Image.open(small_router_path)
+            screen_width, screen_height = self.winfo_screenwidth(), self.winfo_screenheight()
+            
+            # Calcular o ratio para ocupar o máximo possível da tela
+            ratio = min(screen_width/carta_img.width, screen_height/carta_img.height)
+            new_w, new_h = int(carta_img.width * ratio), int(carta_img.height * ratio)
+            carta_resized = carta_img.resize((new_w, new_h), Image.LANCZOS)
+            carta_photo = ImageTk.PhotoImage(carta_resized)
+            
+            # Label com a imagem da carta como fundo
+            carta_label = tk.Label(self, image=carta_photo, bg="black", borderwidth=0, highlightthickness=0)
+            carta_label.image = carta_photo  # Manter referência
+            carta_label.place(relx=0.5, rely=0.5, anchor="center")
+            
+        except Exception as e:
+            print(f"DEBUG: [ROUTER_UPGRADE_OVERLAY] Erro ao carregar imagem: {e}")
+            self.config(bg="black")
+        
+        # Frame para a dialog de confirmação (igual à ativação normal)
+        confirm_frame = tk.Frame(self, bg="black")
+        confirm_frame.pack(expand=True)
+        
+        # Título (igual à ativação normal)
+        tk.Label(confirm_frame, text="Router Upgrade Confirmation", 
+                font=("Helvetica", 16, "bold"), fg="yellow", bg="black").pack(pady=(40, 20))
+        
+        # Mensagem de confirmação com specific_id
+        tk.Label(confirm_frame, text=f"Router {specific_id} is going to be upgraded", 
+                font=("Helvetica", 16), fg="white", bg="black").pack(pady=(0, 10))
+        
+        # Frame para o botão (só botão Ok)
+        btns_frame = tk.Frame(confirm_frame, bg="black")
+        btns_frame.pack(pady=30)
+        
+        # Botão Ok (roxo - sem botão No)
+        def confirmar_upgrade():
+            print(f"DEBUG: [ROUTER_UPGRADE_OVERLAY] Ok clicado - executando upgrade")
+            self._processar_router_upgrade_completo(small_router_path, router_id)
+        
+        ok_btn = tk.Button(
+            btns_frame,
+            text="Ok",
+            font=("Helvetica", 16, "bold"),
+            bg="#8A2BE2",  # Roxo (purple)
+            fg="white",
+            width=8,
+            height=2,
+            command=confirmar_upgrade,
+            cursor="hand2"
+        )
+        ok_btn.pack(padx=20)
+        
+        print(f"DEBUG: [ROUTER_UPGRADE_OVERLAY] SUCCESS: Overlay criado - aguardando confirmação")
+
+    def _execute_detection_for_router_upgrade(self, object_name, loading_window):
+        """
+        Executa detecção YOLO específica para ROUTER UPGRADE que volta para PlayerDashboard principal.
+        
+        Args:
+            object_name: Nome do objeto para deteção
+            loading_window: Loading screen já criado
+            
+        Returns:
+            True se o script executou com sucesso, False caso contrário
+        """
+        try:
+            # Usar os utilitários universais para detectar ambiente e caminhos
+            universal_paths = get_universal_paths()
+            
+            if universal_paths['environment'] != 'raspberry_pi':
+                print(f"DEBUG: [ROUTER_UPGRADE_DETECTION] Simulando execução do script (ambiente: {universal_paths['environment']}): ./detection_fullscreen.sh {object_name}")
+                # Simular delay e voltar para PlayerDashboard principal
+                if loading_window:
+                    def close_loading_and_return_to_dashboard():
+                        loading_window.destroy()
+                        # CORREÇÃO: Voltar para PlayerDashboard principal, não inventário
+                        self.playerdashboard_interface(self.player_name, self.saldo, self.other_players)
+                    self.after(3000, close_loading_and_return_to_dashboard)
+                return True
+            
+            # Usar o caminho do script detectado automaticamente
+            script_path = universal_paths['detection_script']
+            
+            # Verificar se existe
+            if not os.path.exists(script_path):
+                alternative_paths = get_possible_raspberry_pi_paths("object_detection/detection_fullscreen.sh")
+                alternative_paths.extend(get_possible_raspberry_pi_paths("detection_fullscreen.sh"))
+                
+                script_path = None
+                for path in alternative_paths:
+                    if os.path.exists(path):
+                        script_path = path
+                        break
+                
+                if not script_path:
+                    print(f"DEBUG: [ROUTER_UPGRADE_DETECTION] Script não encontrado")
+                    return False
+            
+            print(f"DEBUG: [ROUTER_UPGRADE_DETECTION] Executando: {script_path} {object_name}")
+            
+            # Tornar o script executável
+            subprocess.run(['chmod', '+x', script_path], check=True)
+            
+            # Executar script em background
+            process = subprocess.Popen([script_path, object_name])
+            
+            print(f"DEBUG: [ROUTER_UPGRADE_DETECTION] Script iniciado (PID: {process.pid})")
+            
+            # Monitorar script com loading screen existente
+            if loading_window:
+                def check_yolo_initialization():
+                    poll_result = process.poll()
+                    if poll_result is None:
+                        # YOLO deve estar inicializado - fechar loading screen
+                        print(f"DEBUG: [ROUTER_UPGRADE_DETECTION] Fechando loading screen - YOLO inicializando")
+                        loading_window.destroy()
+                        self.withdraw()  # Esconder interface Python
+                        
+                        # Monitorar conclusão
+                        def check_script_completion():
+                            poll_result = process.poll()
+                            if poll_result is None:
+                                self.after(1000, check_script_completion)
+                            else:
+                                print(f"DEBUG: [ROUTER_UPGRADE_DETECTION] YOLO terminou - voltando para PlayerDashboard principal")
+                                self.deiconify()
+                                # CORREÇÃO: Voltar para PlayerDashboard principal, não inventário
+                                self.playerdashboard_interface(self.player_name, self.saldo, self.other_players)
+                        
+                        self.after(1000, check_script_completion)
+                    else:
+                        # Script terminou antes de inicializar
+                        loading_window.destroy()
+                        # CORREÇÃO: Voltar para PlayerDashboard principal, não inventário
+                        self.playerdashboard_interface(self.player_name, self.saldo, self.other_players)
+                
+                # Aguardar 4.5 segundos para YOLO inicializar
+                self.after(4500, check_yolo_initialization)
+            
+            return True
+            
+        except Exception as e:
+            print(f"DEBUG: [ROUTER_UPGRADE_DETECTION] Erro: {e}")
+            if loading_window:
+                loading_window.destroy()
+            return False
+
+    def _execute_two_phase_detection_for_router_upgrade(self, old_object_name, new_object_name, loading_window, old_equipment_name, new_equipment_name):
+        """
+        Executa detecção YOLO em duas fases para ROUTER UPGRADE:
+        1. Primeira fase: Detectar objeto antigo (Small Router)
+        2. Segunda fase: Detectar objeto novo (Medium Router)  
+        3. Finalização: Voltar ao PlayerDashboard principal
+        
+        Args:
+            old_object_name: Nome do objeto antigo para primeira detecção
+            new_object_name: Nome do objeto novo para segunda detecção
+            loading_window: Loading screen já criado
+            old_equipment_name: Nome do equipamento antigo (ex: "Equipment_1.png")
+            new_equipment_name: Nome do equipamento novo (ex: "Equipment_4.png")
+            
+        Returns:
+            True se o processo foi iniciado com sucesso, False caso contrário
+        """
+        try:
+            print(f"DEBUG: [TWO_PHASE_DETECTION] === INICIANDO DETECÇÃO EM DUAS FASES ===")
+            print(f"DEBUG: [TWO_PHASE_DETECTION] Fase 1: {old_equipment_name} -> {old_object_name}")
+            print(f"DEBUG: [TWO_PHASE_DETECTION] Fase 2: {new_equipment_name} -> {new_object_name}")
+            
+            # Usar os utilitários universais para detectar ambiente e caminhos
+            universal_paths = get_universal_paths()
+            
+            if universal_paths['environment'] != 'raspberry_pi':
+                print(f"DEBUG: [TWO_PHASE_DETECTION] Simulando detecção em duas fases (ambiente: {universal_paths['environment']})")
+                # Simular sequência completa e voltar para PlayerDashboard principal
+                if loading_window:
+                    def simulate_two_phase_detection():
+                        # Simular primeira fase (3 segundos)
+                        print(f"DEBUG: [TWO_PHASE_DETECTION] Simulando Fase 1: {old_object_name}")
+                        
+                        def start_phase_2():
+                            loading_window.destroy()
+                            # Criar loading screen para segunda fase
+                            phase_2_loading = create_yolo_loading_screen(self, new_object_name)
+                            if phase_2_loading:
+                                print(f"DEBUG: [TWO_PHASE_DETECTION] Simulando Fase 2: {new_object_name}")
+                                
+                                def finish_detection():
+                                    phase_2_loading.destroy()
+                                    print(f"DEBUG: [TWO_PHASE_DETECTION] Simulação completa - voltando ao PlayerDashboard")
+                                    self.playerdashboard_interface(self.player_name, self.saldo, self.other_players)
+                                
+                                self.after(3000, finish_detection)
+                        
+                        self.after(3000, start_phase_2)
+                    
+                    self.after(100, simulate_two_phase_detection)
+                return True
+            
+            # Usar o caminho do script detectado automaticamente
+            script_path = universal_paths['detection_script']
+            
+            # Verificar se existe
+            if not os.path.exists(script_path):
+                alternative_paths = get_possible_raspberry_pi_paths("object_detection/detection_fullscreen.sh")
+                alternative_paths.extend(get_possible_raspberry_pi_paths("detection_fullscreen.sh"))
+                
+                script_path = None
+                for path in alternative_paths:
+                    if os.path.exists(path):
+                        script_path = path
+                        break
+                
+                if not script_path:
+                    print(f"DEBUG: [TWO_PHASE_DETECTION] Script não encontrado")
+                    return False
+            
+            print(f"DEBUG: [TWO_PHASE_DETECTION] Script encontrado: {script_path}")
+            
+            # Tornar o script executável
+            subprocess.run(['chmod', '+x', script_path], check=True)
+            
+            # Iniciar primeira fase da detecção
+            self._start_phase_1_detection(script_path, old_object_name, new_object_name, loading_window, old_equipment_name, new_equipment_name)
+            
+            return True
+            
+        except Exception as e:
+            print(f"DEBUG: [TWO_PHASE_DETECTION] Erro: {e}")
+            if loading_window:
+                loading_window.destroy()
+            return False
+    
+    def _start_phase_1_detection(self, script_path, old_object_name, new_object_name, loading_window, old_equipment_name, new_equipment_name):
+        """Inicia a primeira fase da detecção (objeto antigo)"""
+        try:
+            print(f"DEBUG: [PHASE_1] === INICIANDO FASE 1: {old_equipment_name} ===")
+            print(f"DEBUG: [PHASE_1] Executando: {script_path} {old_object_name}")
+            
+            # Executar script para primeira detecção
+            process = subprocess.Popen([script_path, old_object_name])
+            
+            print(f"DEBUG: [PHASE_1] Script Fase 1 iniciado (PID: {process.pid})")
+            
+            # Monitorar primeira fase
+            if loading_window:
+                def check_phase_1_initialization():
+                    poll_result = process.poll()
+                    if poll_result is None:
+                        # YOLO Fase 1 inicializado - fechar loading screen atual
+                        print(f"DEBUG: [PHASE_1] Fechando loading screen Fase 1 - YOLO inicializando")
+                        loading_window.destroy()
+                        self.withdraw()  # Esconder interface Python
+                        
+                        # Monitorar conclusão da Fase 1
+                        def check_phase_1_completion():
+                            poll_result = process.poll()
+                            if poll_result is None:
+                                self.after(1000, check_phase_1_completion)
+                            else:
+                                print(f"DEBUG: [PHASE_1] Fase 1 completa - iniciando Fase 2")
+                                self.deiconify()
+                                # Iniciar segunda fase
+                                self._start_phase_2_detection(script_path, new_object_name, new_equipment_name)
+                        
+                        self.after(1000, check_phase_1_completion)
+                    else:
+                        # Script terminou antes de inicializar
+                        print(f"DEBUG: [PHASE_1] Fase 1 terminou inesperadamente")
+                        loading_window.destroy()
+                        self.playerdashboard_interface(self.player_name, self.saldo, self.other_players)
+                
+                # Aguardar 4.5 segundos para YOLO inicializar
+                self.after(4500, check_phase_1_initialization)
+                
+        except Exception as e:
+            print(f"DEBUG: [PHASE_1] Erro na Fase 1: {e}")
+            if loading_window:
+                loading_window.destroy()
+            self.playerdashboard_interface(self.player_name, self.saldo, self.other_players)
+    
+    def _start_phase_2_detection(self, script_path, new_object_name, new_equipment_name):
+        """Inicia a segunda fase da detecção (objeto novo)"""
+        try:
+            print(f"DEBUG: [PHASE_2] === INICIANDO FASE 2: {new_equipment_name} ===")
+            
+            # Criar novo loading screen para segunda fase
+            phase_2_loading = create_yolo_loading_screen(self, new_object_name)
+            
+            if not phase_2_loading:
+                print(f"DEBUG: [PHASE_2] ERRO: Não foi possível criar loading screen Fase 2")
+                self.playerdashboard_interface(self.player_name, self.saldo, self.other_players)
+                return
+                
+            print(f"DEBUG: [PHASE_2] Loading screen Fase 2 criado para: {new_object_name}")
+            print(f"DEBUG: [PHASE_2] Executando: {script_path} {new_object_name}")
+            
+            # Executar script para segunda detecção
+            process = subprocess.Popen([script_path, new_object_name])
+            
+            print(f"DEBUG: [PHASE_2] Script Fase 2 iniciado (PID: {process.pid})")
+            
+            # Monitorar segunda fase
+            def check_phase_2_initialization():
+                poll_result = process.poll()
+                if poll_result is None:
+                    # YOLO Fase 2 inicializado - fechar loading screen
+                    print(f"DEBUG: [PHASE_2] Fechando loading screen Fase 2 - YOLO inicializando")
+                    phase_2_loading.destroy()
+                    self.withdraw()  # Esconder interface Python
+                    
+                    # Monitorar conclusão da Fase 2
+                    def check_phase_2_completion():
+                        poll_result = process.poll()
+                        if poll_result is None:
+                            self.after(1000, check_phase_2_completion)
+                        else:
+                            print(f"DEBUG: [PHASE_2] === DETECÇÃO COMPLETA - VOLTANDO AO PLAYERDASHBOARD ===")
+                            self.deiconify()
+                            # Voltar ao PlayerDashboard principal
+                            self.playerdashboard_interface(self.player_name, self.saldo, self.other_players)
+                    
+                    self.after(1000, check_phase_2_completion)
+                else:
+                    # Script terminou antes de inicializar
+                    print(f"DEBUG: [PHASE_2] Fase 2 terminou inesperadamente")
+                    phase_2_loading.destroy()
+                    self.playerdashboard_interface(self.player_name, self.saldo, self.other_players)
+            
+            # Aguardar 4.5 segundos para YOLO inicializar
+            self.after(4500, check_phase_2_initialization)
+                
+        except Exception as e:
+            print(f"DEBUG: [PHASE_2] Erro na Fase 2: {e}")
+            self.playerdashboard_interface(self.player_name, self.saldo, self.other_players)
+
+    def _processar_router_upgrade_completo(self, small_router_path, router_id):
+        """Processa o upgrade completo: troca de equipamento + YOLO detection (igual à ativação normal)"""
+        print(f"DEBUG: [ROUTER_UPGRADE_PROCESS] Processando upgrade completo: Router {router_id}")
+        
+        try:
+            # Obter object_name da carta (igual à ativação normal)
+            object_name = get_equipment_object_name(small_router_path, self.card_database)
+            
+            if object_name:
+                print(f"DEBUG: [ROUTER_UPGRADE_PROCESS] Criando loading screen para object: {object_name}")
+                
+                # CRIAR LOADING SCREEN IMEDIATAMENTE (igual à ativação normal)
+                loading_window = create_yolo_loading_screen(self, object_name)
+                
+                if loading_window:
+                    print(f"DEBUG: [ROUTER_UPGRADE_PROCESS] Loading screen criado - processando upgrade em background")
+                    
+                    # Função para processar upgrade depois do loading screen estar ativo
+                    def processar_upgrade_com_yolo():
+                        try:
+                            # Mapeamento Small Router -> Medium Router
+                            equipment_mapping = {
+                                1: ("Equipment_1.png", "Equipment_4.png"),  # Small Router 1 -> Medium Router 1
+                                2: ("Equipment_2.png", "Equipment_5.png"),  # Small Router 2 -> Medium Router 2
+                                3: ("Equipment_3.png", "Equipment_6.png"),  # Small Router 3 -> Medium Router 3
+                            }
+                            
+                            small_router_file, medium_router_file = equipment_mapping[router_id]
+                            
+                            # Construir caminhos completos
+                            print(f"DEBUG: [ROUTER_UPGRADE_PATH] Path original Small Router: {small_router_path}")
+                            print(f"DEBUG: [ROUTER_UPGRADE_PATH] dirname(small_router_path): {os.path.dirname(small_router_path)}")
+                            print(f"DEBUG: [ROUTER_UPGRADE_PATH] dirname(dirname(small_router_path)): {os.path.dirname(os.path.dirname(small_router_path))}")
+                            
+                            # CORREÇÃO: Usar o mesmo diretório do Small Router para construir path do Medium Router
+                            # Se Small Router está em: /path/color/Equipment_1.png
+                            # Medium Router deve estar em: /path/color/Equipment_4.png
+                            small_router_dir = os.path.dirname(small_router_path)
+                            medium_router_path = os.path.join(small_router_dir, medium_router_file)
+                            
+                            print(f"DEBUG: [ROUTER_UPGRADE_PROCESS] Upgrade: {small_router_file} -> {medium_router_file}")
+                            print(f"DEBUG: [ROUTER_UPGRADE_PROCESS] Small Router directory: {small_router_dir}")
+                            print(f"DEBUG: [ROUTER_UPGRADE_PROCESS] Caminho Medium Router CORRIGIDO: {medium_router_path}")
+                            print(f"DEBUG: [ROUTER_UPGRADE_PROCESS] Verificando se arquivo existe: {os.path.exists(medium_router_path)}")
+                            
+                            # CORREÇÃO: Remover Small Router do inventário
+                            if small_router_path in self.inventario.get("equipments", []):
+                                self.inventario["equipments"].remove(small_router_path)
+                                print(f"DEBUG: [ROUTER_UPGRADE_PROCESS] Small Router removido do inventário")
+                            
+                            # Verificar se Medium Router existe no inventário
+                            if medium_router_path not in self.inventario.get("equipments", []):
+                                print(f"DEBUG: [ROUTER_UPGRADE_PROCESS] ADICIONANDO Medium Router ao inventário")
+                                self.inventario["equipments"].append(medium_router_path)
+                            
+                            # Remover Small Router dos ativos
+                            if small_router_path in self.active_equipments:
+                                self.active_equipments.remove(small_router_path)
+                                print(f"DEBUG: [ROUTER_UPGRADE_PROCESS] Small Router removido dos ativos")
+                            
+                            # Adicionar Medium Router aos ativos
+                            if medium_router_path not in self.active_equipments:
+                                self.active_equipments.append(medium_router_path)
+                                print(f"DEBUG: [ROUTER_UPGRADE_PROCESS] Medium Router adicionado aos ativos")
+                            
+                            print(f"DEBUG: [ROUTER_UPGRADE_PROCESS] Upgrade executado - iniciando detecção em duas fases")
+                            
+                            # Obter object_name do Medium Router para segunda detecção
+                            medium_router_object_name = get_equipment_object_name(medium_router_path, self.card_database)
+                            
+                            # Executar detecção em duas fases: Small Router primeiro, depois Medium Router
+                            detection_success = self._execute_two_phase_detection_for_router_upgrade(
+                                object_name, medium_router_object_name, loading_window, small_router_file, medium_router_file
+                            )
+                            
+                            if detection_success:
+                                print(f"DEBUG: [ROUTER_UPGRADE_PROCESS] Detecção em duas fases iniciada com sucesso")
+                                # O processo irá gerir automaticamente as duas detecções e voltar ao PlayerDashboard
+                            else:
+                                print(f"DEBUG: [ROUTER_UPGRADE_PROCESS] AVISO: Detecção falhou - fechando loading screen")
+                                if loading_window:
+                                    loading_window.destroy()
+                                # Voltar ao PlayerDashboard em caso de erro
+                                self.playerdashboard_interface(self.player_name, self.saldo, self.other_players)
+                                
+                        except Exception as e:
+                            print(f"DEBUG: [ROUTER_UPGRADE_PROCESS] ERRO no upgrade: {e}")
+                            if loading_window:
+                                loading_window.destroy()
+                            # Voltar ao PlayerDashboard em caso de erro
+                            self.playerdashboard_interface(self.player_name, self.saldo, self.other_players)
+                    
+                    # Executar upgrade após 100ms (loading screen já está visível)
+                    self.after(100, processar_upgrade_com_yolo)
+                    
+                else:
+                    print(f"DEBUG: [ROUTER_UPGRADE_PROCESS] ERRO: Loading screen não foi criado - voltando para dashboard")
+                    self.playerdashboard_interface(self.player_name, self.saldo, self.other_players)
+            else:
+                print(f"DEBUG: [ROUTER_UPGRADE_PROCESS] AVISO: Object name não encontrado - voltando para dashboard")
+                self.playerdashboard_interface(self.player_name, self.saldo, self.other_players)
+            
+            print("DEBUG: [ROUTER_UPGRADE_PROCESS] SUCCESS: Router upgrade iniciado")
+            
+        except Exception as e:
+            print(f"DEBUG: [ROUTER_UPGRADE_PROCESS] ERRO durante upgrade: {e}")
+            # Voltar ao PlayerDashboard em caso de erro
+            self.playerdashboard_interface(self.player_name, self.saldo, self.other_players)
+
+
 
     def _show_equipment_inventory_for_router_downgrade(self):
-        """Abre inventário de equipamentos especificamente para ROUTER DOWNGRADE"""
-        print("DEBUG: [ROUTER_DOWNGRADE_INVENTORY] Criando inventário específico para ROUTER DOWNGRADE")
+        """Cria página especializada para ROUTER DOWNGRADE com equipamentos Medium Router filtrados"""
+        print("DEBUG: [ROUTER_DOWNGRADE_INVENTORY] Criando página especializada ROUTER DOWNGRADE")
         
         # Definir contexto específico
         self._in_router_downgrade_context = True
         
-        # Chamar inventário de equipamentos usando show_inventory_matrix
-        print("DEBUG: [ROUTER_DOWNGRADE_INVENTORY] Chamando show_inventory_matrix para equipments")
-        self.show_inventory_matrix(["equipments"])
+        # Obter router_id da Action card ativa
+        router_id = getattr(self, '_router_downgrade_target_id', None)
+        print(f"DEBUG: [ROUTER_DOWNGRADE_INVENTORY] Router ID da Action: {router_id}")
         
-        print("DEBUG: [ROUTER_DOWNGRADE_INVENTORY] SUCCESS: Inventário específico para ROUTER DOWNGRADE criado")
+        if router_id is None:
+            print("DEBUG: [ROUTER_DOWNGRADE_INVENTORY] ERRO: Router ID não definido")
+            return
+        
+        # Salvar estado da interface
+        self._save_dashboard_state()
+        
+        # Limpar widgets (exceto TopBar)
+        for widget in self.winfo_children():
+            if hasattr(self, 'topbar_label') and widget == self.topbar_label:
+                continue
+            widget.destroy()
+        
+        screen_width = self.winfo_screenwidth()
+        screen_height = self.winfo_screenheight()
+        
+        # Criar TopBar se necessário
+        if not hasattr(self, 'topbar_label') or not self.topbar_label.winfo_exists():
+            try:
+                topbar_img_path = os.path.join(IMG_DIR, f"TopBar_{self.player_color.lower()}.png")
+                print(f"DEBUG: [ROUTER_DOWNGRADE_INVENTORY] Criando TopBar: {topbar_img_path}")
+                
+                if os.path.exists(topbar_img_path):
+                    img = Image.open(topbar_img_path).convert("RGBA")
+                    img = img.resize((screen_width, 60), Image.Resampling.LANCZOS)
+                    topbar_img = ImageTk.PhotoImage(img)
+                    self.topbar_label = tk.Label(self, image=topbar_img, bg="black", borderwidth=0, highlightthickness=0)
+                    self.topbar_label.image = topbar_img
+                    self.topbar_label.pack(side="top", fill="x")
+                    print("DEBUG: [ROUTER_DOWNGRADE_INVENTORY] TopBar criada com sucesso!")
+                else:
+                    print(f"DEBUG: [ROUTER_DOWNGRADE_INVENTORY] TopBar não encontrada, criando fallback")
+                    topbar_frame = tk.Frame(self, bg=self.bar_color, height=60)
+                    topbar_frame.pack(side="top", fill="x")
+                    topbar_frame.pack_propagate(False)
+                    self.topbar_label = topbar_frame
+            except Exception as e:
+                print(f"DEBUG: [ROUTER_DOWNGRADE_INVENTORY] ERRO ao criar TopBar: {e}")
+                topbar_frame = tk.Frame(self, bg=self.bar_color, height=60)
+                topbar_frame.pack(side="top", fill="x")
+                topbar_frame.pack_propagate(False)
+                self.topbar_label = topbar_frame
+        
+        # Nome do jogador
+        name_lbl = tk.Label(self, text=self.player_name, font=("Helvetica", 18, "bold"), bg=self.bar_color, fg="black", borderwidth=0)
+        name_lbl.place(relx=0.5, y=25, anchor="n")
+        
+        # Título
+        title = tk.Label(self, text="ROUTER DOWNGRADE", font=("Helvetica", 22, "bold"), fg="white", bg="black")
+        title.place(relx=0.5, y=65, anchor="n")
+        
+        # Filtrar equipamentos Medium Router com specific_id igual ao router_id
+        equipamentos_filtrados = []
+        all_equipments = self.inventario.get("equipments", [])
+        
+        for equipment_path in all_equipments:
+            try:
+                # Extrair número do equipamento do nome do arquivo (Equipment_X.png)
+                filename = os.path.basename(equipment_path)
+                if filename.startswith("Equipment_") and filename.endswith(".png"):
+                    equipment_num = int(filename.replace("Equipment_", "").replace(".png", ""))
+                    
+                    # Medium Router são Equipment_4, Equipment_5, Equipment_6
+                    # Equipment_4 = Medium Router 1, Equipment_5 = Medium Router 2, Equipment_6 = Medium Router 3
+                    if 4 <= equipment_num <= 6:
+                        medium_router_id = equipment_num - 3  # Equipment_4 -> 1, Equipment_5 -> 2, Equipment_6 -> 3
+                        if medium_router_id == router_id:
+                            equipamentos_filtrados.append(equipment_path)
+                            print(f"DEBUG: [ROUTER_DOWNGRADE_INVENTORY] Equipment filtrado: {filename} (router_id={router_id})")
+            except Exception as e:
+                print(f"DEBUG: [ROUTER_DOWNGRADE_INVENTORY] Erro ao processar equipamento {equipment_path}: {e}")
+                continue
+        
+        print(f"DEBUG: [ROUTER_DOWNGRADE_INVENTORY] Total equipamentos filtrados: {len(equipamentos_filtrados)}")
+        
+        # Layout baseado no número de equipamentos
+        matriz_frame = tk.Frame(self, bg="black")
+        matriz_frame.place(relx=0.5, rely=0.5, anchor="center")
+        
+        card_w, card_h = 85, 120
+        total_equipments = len(equipamentos_filtrados)
+        
+        if total_equipments == 1:
+            # Carta única - layout centralizado
+            print(f"DEBUG: [ROUTER_DOWNGRADE_INVENTORY] Carta única detectada - usando layout centralizado")
+            matriz_frame.grid_columnconfigure(0, weight=1, minsize=card_w + 16)
+        else:
+            # Múltiplas cartas - grid 2xn
+            print(f"DEBUG: [ROUTER_DOWNGRADE_INVENTORY] Múltiplas cartas detectadas - usando grid 2xn")
+            matriz_frame.grid_columnconfigure(0, weight=1, minsize=card_w + 16)
+            matriz_frame.grid_columnconfigure(1, weight=1, minsize=card_w + 16)
+        
+        # Colocar equipamentos em layout apropriado
+        for idx, equipment_path in enumerate(equipamentos_filtrados):
+            try:
+                if total_equipments == 1:
+                    # Carta única - centralizar na posição (0,0)
+                    row, col = 0, 0
+                else:
+                    # Múltiplas cartas - grid 2xn
+                    row = idx // 2
+                    col = idx % 2
+                
+                # Verificar se equipamento está ativo
+                is_active = self.is_card_active(equipment_path, "equipments")
+                
+                if is_active:
+                    # Equipamento ativo: mostrar virado para cima
+                    img = ImageTk.PhotoImage(Image.open(equipment_path).resize((card_w, card_h)))
+                    print(f"DEBUG: [ROUTER_DOWNGRADE_INVENTORY] Equipment ATIVO: {os.path.basename(equipment_path)}")
+                else:
+                    # Equipamento inativo: mostrar virado para baixo
+                    back_card_colored = os.path.join(IMG_DIR, "cartas", f"back_card_{self.player_color.lower()}.png")
+                    img = ImageTk.PhotoImage(Image.open(back_card_colored).resize((card_w, card_h)))
+                    print(f"DEBUG: [ROUTER_DOWNGRADE_INVENTORY] Equipment INATIVO: {os.path.basename(equipment_path)}")
+                
+                carta_lbl = tk.Label(matriz_frame, image=img, bg="black", cursor="hand2")
+                carta_lbl.image = img
+                carta_lbl.grid(row=row, column=col, padx=8, pady=8)
+                
+                # Click handler para fullscreen
+                def make_click_handler(path):
+                    return lambda e: self._show_equipment_fullscreen_router_downgrade(path)
+                
+                carta_lbl.bind("<Button-1>", make_click_handler(equipment_path))
+                
+            except Exception as e:
+                print(f"DEBUG: [ROUTER_DOWNGRADE_INVENTORY] Erro ao carregar equipment: {e}")
+                continue
+        
+        # Barra inferior
+        try:
+            bottombar_img_path = os.path.join(IMG_DIR, f"BelowBar_{self.player_color.lower()}.png")
+            bottombar_img = ImageTk.PhotoImage(Image.open(bottombar_img_path).resize((screen_width, 50)))
+            bottombar_label = tk.Label(self, image=bottombar_img, bg="black")
+            bottombar_label.image = bottombar_img
+            bottombar_label.pack(side="bottom", fill="x")
+            print(f"DEBUG: [ROUTER_DOWNGRADE_INVENTORY] Barra inferior carregada")
+        except Exception as e:
+            print(f"DEBUG: [ROUTER_DOWNGRADE_INVENTORY] Erro ao carregar barra inferior: {e}")
+            bottombar_frame = tk.Frame(self, bg=self.bar_color, height=50)
+            bottombar_frame.pack(side="bottom", fill="x")
+            bottombar_frame.pack_propagate(False)
+        
+        print("DEBUG: [ROUTER_DOWNGRADE_INVENTORY] SUCCESS: Página ROUTER DOWNGRADE criada")
+
+    def _show_equipment_fullscreen_router_downgrade(self, equipment_path):
+        """Mostra equipamento em fullscreen para ROUTER DOWNGRADE com botões de confirmação"""
+        print(f"DEBUG: [ROUTER_DOWNGRADE_FULLSCREEN] Mostrando fullscreen: {os.path.basename(equipment_path)}")
+        
+        # Verificar se equipamento está ativo
+        is_active = self.is_card_active(equipment_path, "equipments")
+        print(f"DEBUG: [ROUTER_DOWNGRADE_FULLSCREEN] Equipment {os.path.basename(equipment_path)} ativo: {is_active}")
+        print(f"DEBUG: [ROUTER_DOWNGRADE_FULLSCREEN] active_equipments: {[os.path.basename(p) for p in self.active_equipments]}")
+        
+        if not is_active:
+            print("DEBUG: [ROUTER_DOWNGRADE_FULLSCREEN] Equipamento inativo - não permitindo downgrade")
+            return
+        
+        # Usar o mesmo padrão do fullscreen normal: limpar widgets e usar janela principal
+        # Limpa widgets (menos barra superior)
+        for widget in self.winfo_children():
+            if widget == getattr(self, 'topbar_label', None):
+                continue
+            widget.destroy()
+        
+        # Carregar e exibir imagem do equipamento
+        try:
+            pil_img = Image.open(equipment_path)
+            img_w, img_h = pil_img.size
+            max_w, max_h = self.winfo_screenwidth(), self.winfo_screenheight()
+            ratio = min(max_w/img_w, max_h/img_h)
+            new_w, new_h = int(img_w*ratio), int(img_h*ratio)
+            pil_img = pil_img.resize((new_w, new_h), Image.Resampling.LANCZOS)
+            carta_img = ImageTk.PhotoImage(pil_img)
+            
+            carta_real_lbl = tk.Label(self, image=carta_img, bg="black", borderwidth=0, highlightthickness=0)
+            carta_real_lbl.image = carta_img
+            carta_real_lbl.place(relx=0.5, rely=0.5, anchor="center", relwidth=1, relheight=1)
+            
+        except Exception as e:
+            print(f"DEBUG: [ROUTER_DOWNGRADE_FULLSCREEN] Erro ao carregar imagem: {e}")
+            # Fallback: mostrar placeholder
+            placeholder = tk.Label(self, text="Equipment Image", font=("Helvetica", 24), fg="white", bg="black")
+            placeholder.place(relx=0.5, rely=0.5, anchor="center")
+        
+        # Botão X (cinzento, canto superior esquerdo) - volta para página ROUTER DOWNGRADE
+        def close_fullscreen():
+            print("DEBUG: [ROUTER_DOWNGRADE_FULLSCREEN] Fechando fullscreen - voltando para página ROUTER DOWNGRADE")
+            self._show_equipment_inventory_for_router_downgrade()
+        
+        x_btn = tk.Button(
+            self, 
+            text="✖", 
+            font=("Helvetica", 24, "bold"), 
+            bg="#AAAAAA", 
+            fg="white", 
+            width=2, 
+            height=1, 
+            borderwidth=0, 
+            highlightthickness=0, 
+            command=close_fullscreen, 
+            cursor="hand2", 
+            activebackground="#CCCCCC"
+        )
+        x_btn.place(relx=0.02, rely=0, anchor="nw")
+        
+        # Botão de confirmação (roxo, canto superior direito)
+        def confirm_downgrade():
+            print(f"DEBUG: [ROUTER_DOWNGRADE_FULLSCREEN] Confirmando downgrade: {os.path.basename(equipment_path)}")
+            self._mostrar_overlay_confirmacao_router_downgrade(equipment_path)
+        
+        confirm_btn = tk.Button(
+            self,
+            text="✓",
+            font=("Helvetica", 24, "bold"),
+            bg="#800080",  # Roxo
+            fg="white",
+            width=2,
+            height=1,
+            borderwidth=0,
+            highlightthickness=0,
+            command=confirm_downgrade,
+            cursor="hand2",
+            activebackground="#9900AA"
+        )
+        confirm_btn.place(relx=0.98, rely=0, anchor="ne")
+        
+        print("DEBUG: [ROUTER_DOWNGRADE_FULLSCREEN] ===== FULLSCREEN CRIADO COM SUCESSO =====")
+        print("DEBUG: [ROUTER_DOWNGRADE_FULLSCREEN] Usando padrão normal de fullscreen (sem Toplevel)")
+        print("DEBUG: [ROUTER_DOWNGRADE_FULLSCREEN] ===== FIM DEBUG FULLSCREEN =====")
+
+    def _mostrar_overlay_confirmacao_router_downgrade(self, equipment_path):
+        """Mostra overlay de confirmação para ROUTER DOWNGRADE (usando mesmo método que ROUTER UPGRADE)"""
+        print(f"DEBUG: [ROUTER_DOWNGRADE_CONFIRM] Mostrando confirmação: {os.path.basename(equipment_path)}")
+        
+        # Limpar TODOS os widgets da janela principal (igual ao ROUTER UPGRADE)
+        for widget in self.winfo_children():
+            widget.destroy()
+        
+        # Definir fundo preto para a janela
+        self.config(bg="black")
+        
+        # Carregar a imagem da carta como fundo
+        try:
+            carta_img = Image.open(equipment_path)
+            screen_width, screen_height = self.winfo_screenwidth(), self.winfo_screenheight()
+            
+            # Calcular o ratio para ocupar o máximo possível da tela
+            ratio = min(screen_width/carta_img.width, screen_height/carta_img.height)
+            new_w, new_h = int(carta_img.width * ratio), int(carta_img.height * ratio)
+            carta_resized = carta_img.resize((new_w, new_h), Image.LANCZOS)
+            carta_photo = ImageTk.PhotoImage(carta_resized)
+            
+            # Label com a imagem da carta como fundo
+            carta_label = tk.Label(self, image=carta_photo, bg="black", borderwidth=0, highlightthickness=0)
+            carta_label.image = carta_photo  # Manter referência
+            carta_label.place(relx=0.5, rely=0.5, anchor="center")
+            
+        except Exception as e:
+            print(f"DEBUG: [ROUTER_DOWNGRADE_CONFIRM] Erro ao carregar imagem: {e}")
+            self.config(bg="black")
+        
+        # Frame para a dialog de confirmação (igual ao ROUTER UPGRADE)
+        confirm_frame = tk.Frame(self, bg="black")
+        confirm_frame.pack(expand=True)
+        
+        # Título (igual ao ROUTER UPGRADE)
+        tk.Label(confirm_frame, text="Router Downgrade Confirmation", 
+                font=("Helvetica", 16, "bold"), fg="yellow", bg="black").pack(pady=(40, 20))
+        
+        # Obter specific_id da carta Equipment
+        specific_id = "N/A"
+        router_id = None
+        try:
+            if self.card_database:
+                # Extrair informações do caminho
+                filename = os.path.basename(equipment_path)
+                color = self._get_color_from_path(equipment_path)
+                
+                print(f"DEBUG: [ROUTER_DOWNGRADE_CONFIRM] Filename: {filename}, Color: {color}")
+                
+                # Mapear filename para equipment_id
+                match = re.match(r'Equipment_(\d+)\.png', filename)
+                if match:
+                    equipment_num = int(match.group(1))
+                    
+                    # Equipment_4.png, Equipment_5.png, Equipment_6.png -> medium_router_1_color, etc
+                    if 4 <= equipment_num <= 6:
+                        specific_id_num = equipment_num - 3  # Equipment_4 -> 1, Equipment_5 -> 2, etc
+                        router_id = specific_id_num
+                        equipment_id = f"medium_router_{specific_id_num}_{color}"
+                        
+                        # Obter carta da base de dados
+                        equipment_result = self.card_database.get_equipment_with_file(equipment_id)
+                        
+                        if equipment_result:
+                            equipment_data, _ = equipment_result
+                            # CORREÇÃO: EquipmentCard é um objeto, não um dict - usar atributo diretamente
+                            specific_id = str(getattr(equipment_data, 'specific_id', specific_id_num))
+                            print(f"DEBUG: [ROUTER_DOWNGRADE_CONFIRM] Equipment encontrado - specific_id: {specific_id}")
+                        else:
+                            print(f"DEBUG: [ROUTER_DOWNGRADE_CONFIRM] Equipment não encontrado na base de dados")
+                            specific_id = str(specific_id_num)  # Fallback para número calculado
+                    else:
+                        print(f"DEBUG: [ROUTER_DOWNGRADE_CONFIRM] Equipment number fora do range Medium Router: {equipment_num}")
+                else:
+                    print(f"DEBUG: [ROUTER_DOWNGRADE_CONFIRM] Filename não corresponde ao padrão Equipment_X.png")
+            else:
+                print(f"DEBUG: [ROUTER_DOWNGRADE_CONFIRM] Card database não disponível")
+                
+        except Exception as e:
+            print(f"DEBUG: [ROUTER_DOWNGRADE_CONFIRM] Erro ao obter specific_id: {e}")
+            # Usar fallback baseado em router_id se disponível
+            if hasattr(self, '_router_downgrade_target_id') and self._router_downgrade_target_id:
+                specific_id = str(self._router_downgrade_target_id)
+        
+        # Mensagem de confirmação com specific_id (igual ao ROUTER UPGRADE)
+        tk.Label(confirm_frame, text=f"Router {specific_id} is going to be downgraded", 
+                font=("Helvetica", 16), fg="white", bg="black").pack(pady=(0, 30))
+        
+        # Frame para o botão (só botão Ok, igual ao ROUTER UPGRADE)
+        btns_frame = tk.Frame(confirm_frame, bg="black")
+        btns_frame.pack(pady=30)
+        
+        # Botão Ok (roxo - sem botão Cancel, igual ao ROUTER UPGRADE)
+        def confirmar_downgrade():
+            print(f"DEBUG: [ROUTER_DOWNGRADE_CONFIRM] Ok clicado - executando downgrade")
+            self._executar_router_downgrade(equipment_path)
+        
+        ok_btn = tk.Button(
+            btns_frame,
+            text="Ok",
+            font=("Helvetica", 16, "bold"),
+            bg="#8A2BE2",  # Roxo (purple) - igual ao ROUTER UPGRADE
+            fg="white",
+            width=8,
+            height=2,
+            command=confirmar_downgrade
+        )
+        ok_btn.pack()
+        
+        print("DEBUG: [ROUTER_DOWNGRADE_CONFIRM] Overlay de confirmação criado")
+
+    def _executar_router_downgrade(self, medium_router_path):
+        """Executa o processo de ROUTER DOWNGRADE com detecção em duas fases"""
+        print(f"DEBUG: [ROUTER_DOWNGRADE_EXECUTE] Executando downgrade: {os.path.basename(medium_router_path)}")
+        
+        try:
+            # Extrair router_id do nome do arquivo
+            filename = os.path.basename(medium_router_path)
+            equipment_num = int(filename.replace("Equipment_", "").replace(".png", ""))
+            router_id = equipment_num - 3  # Equipment_4 -> 1, Equipment_5 -> 2, Equipment_6 -> 3
+            
+            # Mapeamento Medium Router -> Small Router
+            equipment_mapping = {
+                1: ("Equipment_4.png", "Equipment_1.png"),  # Medium Router 1 -> Small Router 1
+                2: ("Equipment_5.png", "Equipment_2.png"),  # Medium Router 2 -> Small Router 2
+                3: ("Equipment_6.png", "Equipment_3.png"),  # Medium Router 3 -> Small Router 3
+            }
+            
+            medium_router_file, small_router_file = equipment_mapping[router_id]
+            
+            print(f"DEBUG: [ROUTER_DOWNGRADE_EXECUTE] Downgrade: {medium_router_file} -> {small_router_file}")
+            
+            # NOVA LÓGICA: Executar detecção em duas fases antes de processar downgrade
+            # Fase 1: Detectar Medium Router (objeto atual)
+            # Fase 2: Detectar Small Router (objeto de destino)
+            
+            # Obter object names para detecção ANTES de criar loading screen
+            old_object_name = get_equipment_object_name(medium_router_path, self.card_database)
+            
+            # Criar loading screen inicial com object name real
+            loading_window = create_yolo_loading_screen(self, old_object_name if old_object_name else "router_medio_vermelho")
+            
+            if loading_window:
+                print("DEBUG: [ROUTER_DOWNGRADE_EXECUTE] Loading screen criado - iniciando detecção duas fases")
+                
+                # Construir caminho para Small Router (usar mesmo diretório do Medium Router)
+                small_router_path = os.path.join(os.path.dirname(medium_router_path), small_router_file)
+                new_object_name = get_equipment_object_name(small_router_path, self.card_database)
+                
+                old_equipment_name = f"Medium Router {router_id}"
+                new_equipment_name = f"Small Router {router_id}"
+                
+                print(f"DEBUG: [ROUTER_DOWNGRADE_EXECUTE] Old object: {old_object_name}")
+                print(f"DEBUG: [ROUTER_DOWNGRADE_EXECUTE] New object: {new_object_name}")
+                
+                if old_object_name and new_object_name:
+                    # Executar detecção em duas fases
+                    success = self._execute_two_phase_detection_for_router_downgrade(
+                        old_object_name, new_object_name, loading_window, 
+                        old_equipment_name, new_equipment_name, medium_router_path, router_id
+                    )
+                    
+                    if success:
+                        print("DEBUG: [ROUTER_DOWNGRADE_EXECUTE] SUCCESS: Detecção duas fases iniciada")
+                        # Processamento será continuado após detecção bem-sucedida
+                        return
+                    else:
+                        print("DEBUG: [ROUTER_DOWNGRADE_EXECUTE] ERRO: Falha ao iniciar detecção duas fases")
+                        if loading_window:
+                            loading_window.destroy()
+                else:
+                    print("DEBUG: [ROUTER_DOWNGRADE_EXECUTE] ERRO: Não foi possível obter object names")
+                    if loading_window:
+                        loading_window.destroy()
+            else:
+                print("DEBUG: [ROUTER_DOWNGRADE_EXECUTE] ERRO: Não foi possível criar loading screen")
+            
+            # Fallback: se detecção falhar, processar diretamente (desenvolvimento)
+            print("DEBUG: [ROUTER_DOWNGRADE_EXECUTE] Fallback: processando downgrade diretamente")
+            self._processar_router_downgrade_completo(medium_router_path, router_id)
+            
+        except Exception as e:
+            print(f"DEBUG: [ROUTER_DOWNGRADE_EXECUTE] ERRO durante downgrade: {e}")
+            # Limpar flags em caso de erro
+            self._in_router_downgrade_context = False
+            self._router_downgrade_target_id = None
+
+    def _execute_two_phase_detection_for_router_downgrade(self, old_object_name, new_object_name, loading_window, 
+                                                        old_equipment_name, new_equipment_name, medium_router_path, router_id):
+        """
+        Executa detecção YOLO em duas fases para ROUTER DOWNGRADE:
+        Fase 1: Detectar Medium Router (objeto atual)
+        Fase 2: Detectar Small Router (objeto de destino)
+        """
+        try:
+            # Usar os utilitários universais para detectar ambiente e caminhos
+            universal_paths = get_universal_paths()
+            
+            if universal_paths['environment'] != 'raspberry_pi':
+                print("DEBUG: [ROUTER_DOWNGRADE_2PHASE] Ambiente não é Raspberry Pi - usando fallback")
+                if loading_window:
+                    loading_window.destroy()
+                # Processar downgrade diretamente no desenvolvimento
+                self.after(1000, lambda: self._processar_router_downgrade_completo(medium_router_path, router_id))
+                return True
+            
+            # Usar o caminho do script detectado automaticamente
+            script_path = universal_paths['detection_script']
+            
+            # Verificar se existe
+            if not os.path.exists(script_path):
+                print(f"DEBUG: [ROUTER_DOWNGRADE_2PHASE] Script não encontrado: {script_path}")
+                if loading_window:
+                    loading_window.destroy()
+                return False
+            
+            print(f"DEBUG: [ROUTER_DOWNGRADE_2PHASE] Iniciando Fase 1: {old_object_name}")
+            
+            # Iniciar Fase 1: Detecção do Medium Router
+            success = self._start_phase_1_detection_downgrade(
+                script_path, old_object_name, new_object_name, loading_window, 
+                old_equipment_name, new_equipment_name, medium_router_path, router_id
+            )
+            
+            return success
+            
+        except Exception as e:
+            print(f"DEBUG: [ROUTER_DOWNGRADE_2PHASE] Erro: {e}")
+            if loading_window:
+                loading_window.destroy()
+            return False
+
+    def _start_phase_1_detection_downgrade(self, script_path, old_object_name, new_object_name, loading_window, 
+                                         old_equipment_name, new_equipment_name, medium_router_path, router_id):
+        """Inicia Fase 1: Detecção do Medium Router atual"""
+        try:
+            print(f"DEBUG: [DOWNGRADE_PHASE1] Executando: {script_path} {old_object_name}")
+            
+            # Tornar o script executável
+            subprocess.run(['chmod', '+x', script_path], check=True)
+            
+            # Executar script em background
+            process = subprocess.Popen([script_path, old_object_name])
+            
+            print(f"DEBUG: [DOWNGRADE_PHASE1] Script iniciado (PID: {process.pid})")
+            
+            # Monitorar inicialização da Fase 1 (igual ao ROUTER UPGRADE)
+            def check_phase_1_initialization():
+                try:
+                    poll_result = process.poll()
+                    if poll_result is None:
+                        # YOLO Fase 1 inicializado - fechar loading screen atual
+                        print(f"DEBUG: [DOWNGRADE_PHASE1] Fechando loading screen Fase 1 - YOLO inicializando")
+                        if loading_window and loading_window.winfo_exists():
+                            loading_window.destroy()
+                        self.withdraw()  # Esconder interface Python
+                        
+                        # Monitorar conclusão da Fase 1
+                        def check_phase_1_completion():
+                            poll_result = process.poll()
+                            if poll_result is None:
+                                self.after(1000, check_phase_1_completion)
+                            else:
+                                print(f"DEBUG: [DOWNGRADE_PHASE1] Fase 1 completa - iniciando Fase 2")
+                                self.deiconify()  # Mostrar interface Python novamente
+                                # Iniciar segunda fase
+                                self._start_phase_2_detection_downgrade(
+                                    script_path, new_object_name, new_equipment_name, 
+                                    medium_router_path, router_id
+                                )
+                        
+                        self.after(1000, check_phase_1_completion)
+                    else:
+                        # Script terminou antes de inicializar
+                        print(f"DEBUG: [DOWNGRADE_PHASE1] Fase 1 terminou inesperadamente")
+                        if loading_window and loading_window.winfo_exists():
+                            loading_window.destroy()
+                        # Fallback: processar diretamente
+                        self._processar_router_downgrade_completo(medium_router_path, router_id)
+                        
+                except Exception as e:
+                    print(f"DEBUG: [DOWNGRADE_PHASE1] Erro no monitor: {e}")
+                    if loading_window and loading_window.winfo_exists():
+                        loading_window.destroy()
+                    # Fallback: processar diretamente
+                    self._processar_router_downgrade_completo(medium_router_path, router_id)
+            
+            # Aguardar 4.5 segundos para YOLO inicializar (igual ao ROUTER UPGRADE)
+            self.after(4500, check_phase_1_initialization)
+            
+            return True
+            
+        except Exception as e:
+            print(f"DEBUG: [DOWNGRADE_PHASE1] Erro: {e}")
+            if loading_window and loading_window.winfo_exists():
+                loading_window.destroy()
+            return False
+
+    def _start_phase_2_detection_downgrade(self, script_path, new_object_name, new_equipment_name, 
+                                         medium_router_path, router_id):
+        """Inicia Fase 2: Detecção do Small Router de destino (igual ao ROUTER UPGRADE)"""
+        try:
+            print(f"DEBUG: [DOWNGRADE_PHASE2] === INICIANDO FASE 2: {new_equipment_name} ===")
+            
+            # Criar novo loading screen para segunda fase
+            phase_2_loading = create_yolo_loading_screen(self, new_object_name)
+            
+            if not phase_2_loading:
+                print(f"DEBUG: [DOWNGRADE_PHASE2] ERRO: Não foi possível criar loading screen Fase 2")
+                self._processar_router_downgrade_completo(medium_router_path, router_id)
+                return
+                
+            print(f"DEBUG: [DOWNGRADE_PHASE2] Loading screen Fase 2 criado para: {new_object_name}")
+            print(f"DEBUG: [DOWNGRADE_PHASE2] Executando: {script_path} {new_object_name}")
+            
+            # Executar script para segunda detecção
+            process = subprocess.Popen([script_path, new_object_name])
+            
+            print(f"DEBUG: [DOWNGRADE_PHASE2] Script Fase 2 iniciado (PID: {process.pid})")
+            
+            # Monitorar inicialização da Fase 2 (igual ao ROUTER UPGRADE)
+            def check_phase_2_initialization():
+                try:
+                    poll_result = process.poll()
+                    if poll_result is None:
+                        # YOLO Fase 2 inicializado - fechar loading screen atual
+                        print(f"DEBUG: [DOWNGRADE_PHASE2] Fechando loading screen Fase 2 - YOLO inicializando")
+                        if phase_2_loading and phase_2_loading.winfo_exists():
+                            phase_2_loading.destroy()
+                        self.withdraw()  # Esconder interface Python
+                        
+                        # Monitorar conclusão da Fase 2
+                        def check_phase_2_completion():
+                            poll_result = process.poll()
+                            if poll_result is None:
+                                self.after(1000, check_phase_2_completion)
+                            else:
+                                print(f"DEBUG: [DOWNGRADE_PHASE2] Fase 2 completa - processando downgrade")
+                                self.deiconify()  # Mostrar interface Python novamente
+                                # Processar downgrade completo
+                                self._processar_router_downgrade_completo(medium_router_path, router_id)
+                        
+                        self.after(1000, check_phase_2_completion)
+                    else:
+                        # Script terminou antes de inicializar
+                        print(f"DEBUG: [DOWNGRADE_PHASE2] Fase 2 terminou inesperadamente")
+                        if phase_2_loading and phase_2_loading.winfo_exists():
+                            phase_2_loading.destroy()
+                        # Fallback: processar diretamente
+                        self._processar_router_downgrade_completo(medium_router_path, router_id)
+                        
+                except Exception as e:
+                    print(f"DEBUG: [DOWNGRADE_PHASE2] Erro no monitor: {e}")
+                    if phase_2_loading and phase_2_loading.winfo_exists():
+                        phase_2_loading.destroy()
+                    # Fallback: processar diretamente
+                    self._processar_router_downgrade_completo(medium_router_path, router_id)
+            
+            # Aguardar 4.5 segundos para YOLO inicializar (igual ao ROUTER UPGRADE)
+            self.after(4500, check_phase_2_initialization)
+            
+            return True
+            
+        except Exception as e:
+            print(f"DEBUG: [DOWNGRADE_PHASE2] Erro: {e}")
+            return False
+
+    def _processar_router_downgrade_completo(self, medium_router_path, router_id):
+        """
+        Processa efetivamente o ROUTER DOWNGRADE após detecção bem-sucedida.
+        Remove Medium Router e adiciona Small Router correspondente.
+        """
+        print(f"DEBUG: [ROUTER_DOWNGRADE_COMPLETO] Processando downgrade completo")
+        print(f"DEBUG: [ROUTER_DOWNGRADE_COMPLETO] Medium Router: {os.path.basename(medium_router_path)}")
+        print(f"DEBUG: [ROUTER_DOWNGRADE_COMPLETO] Router ID: {router_id}")
+        
+        try:
+            # Mapeamento: Medium Router -> Small Router
+            equipment_mapping = {
+                1: ("Equipment_4.png", "Equipment_1.png"),  # Medium Router 1 -> Small Router 1
+                2: ("Equipment_5.png", "Equipment_2.png"),  # Medium Router 2 -> Small Router 2
+                3: ("Equipment_6.png", "Equipment_3.png"),  # Medium Router 3 -> Small Router 3
+            }
+            
+            medium_router_file, small_router_file = equipment_mapping[router_id]
+            
+            # PASSO 1: Remover Medium Router dos equipments ativos
+            medium_router_path_ativo = None
+            for equipment_path in self.active_equipments:
+                if os.path.basename(equipment_path) == medium_router_file:
+                    medium_router_path_ativo = equipment_path
+                    break
+            
+            if medium_router_path_ativo:
+                self.active_equipments.remove(medium_router_path_ativo)
+                print(f"DEBUG: [ROUTER_DOWNGRADE_COMPLETO] {medium_router_file} removido dos equipments ativos")
+            else:
+                print(f"DEBUG: [ROUTER_DOWNGRADE_COMPLETO] AVISO: {medium_router_file} não encontrado nos equipments ativos")
+            
+            # PASSO 2: Remover Medium Router do inventário
+            equipments_inventory = self.inventario.get("equipments", [])
+            medium_router_inventory = None
+            for equipment_path in equipments_inventory:
+                if os.path.basename(equipment_path) == medium_router_file:
+                    medium_router_inventory = equipment_path
+                    break
+            
+            if medium_router_inventory:
+                self.inventario["equipments"].remove(medium_router_inventory)
+                print(f"DEBUG: [ROUTER_DOWNGRADE_COMPLETO] {medium_router_file} removido do inventário")
+            else:
+                print(f"DEBUG: [ROUTER_DOWNGRADE_COMPLETO] AVISO: {medium_router_file} não encontrado no inventário")
+            
+            # PASSO 3: Adicionar Small Router ao inventário (usar mesmo diretório)
+            small_router_path = os.path.join(os.path.dirname(medium_router_path), small_router_file)
+            
+            # Verificar se já existe no inventário
+            small_router_exists = any(
+                os.path.basename(equipment_path) == small_router_file 
+                for equipment_path in self.inventario.get("equipments", [])
+            )
+            
+            if not small_router_exists:
+                self.inventario["equipments"].append(small_router_path)
+                print(f"DEBUG: [ROUTER_DOWNGRADE_COMPLETO] {small_router_file} adicionado ao inventário")
+            else:
+                print(f"DEBUG: [ROUTER_DOWNGRADE_COMPLETO] {small_router_file} já existe no inventário")
+            
+            # PASSO 4: CORREÇÃO CRÍTICA - Ativar Small Router (igual ao ROUTER UPGRADE)
+            # Adicionar Small Router aos equipments ativos para que fique virado para cima
+            if small_router_path not in self.active_equipments:
+                self.active_equipments.append(small_router_path)
+                print(f"DEBUG: [ROUTER_DOWNGRADE_COMPLETO] CORREÇÃO: {small_router_file} adicionado aos ativos (carta fica virada para cima)")
+            else:
+                print(f"DEBUG: [ROUTER_DOWNGRADE_COMPLETO] {small_router_file} já está nos ativos")
+            
+            # PASSO 5: Limpar flags de contexto
+            self._in_router_downgrade_context = False
+            self._router_downgrade_target_id = None
+            
+            print(f"DEBUG: [ROUTER_DOWNGRADE_COMPLETO] SUCCESS: Router Downgrade aplicado com sucesso!")
+            print(f"DEBUG: [ROUTER_DOWNGRADE_COMPLETO] {medium_router_file} -> {small_router_file} (ATIVO)")
+            
+            # PASSO 6: Voltar para o PlayerDashboard após processamento completo
+            self.after(1000, lambda: self.playerdashboard_interface(
+                self.player_name, self.saldo, self.other_players
+            ))
+            
+        except Exception as e:
+            print(f"DEBUG: [ROUTER_DOWNGRADE_COMPLETO] ERRO durante processamento: {e}")
+            # Limpar flags em caso de erro
+            self._in_router_downgrade_context = False
+            self._router_downgrade_target_id = None
+            
+            # Voltar para dashboard mesmo em caso de erro
+            self.after(1000, lambda: self.playerdashboard_interface(
+                self.player_name, self.saldo, self.other_players
+            ))
 
     def _aplicar_router_downgrade(self, router_id):
         """
@@ -9909,7 +14449,8 @@ class PlayerDashboard(tk.Toplevel):
     def _aplicar_link_upgrade(self, router_id):
         """
         Aplica o efeito LINK UPGRADE baseado no router_id.
-        Verifica se existe Long Link correspondente e abre inventário para upgrade.
+        Abre página SELECT LINK para seleção do Long Link a ser upgradado.
+        Sistema flexível baseado no specific_id da base de dados.
         """
         print(f"DEBUG: [LINK_UPGRADE] Aplicando Link Upgrade para Router ID: {router_id}")
         
@@ -9917,52 +14458,1237 @@ class PlayerDashboard(tk.Toplevel):
             print(f"DEBUG: [LINK_UPGRADE] Router ID é None - não aplicando upgrade")
             return
         
-        # Mapeamento: Long Link -> Short Link
-        equipment_mapping = {
-            1: ("Equipment_10.png", "Equipment_7.png"),  # Long Link 1 -> Short Link 1
-            2: ("Equipment_11.png", "Equipment_8.png"),  # Long Link 2 -> Short Link 2
-            3: ("Equipment_12.png", "Equipment_9.png"),  # Long Link 3 -> Short Link 3
-        }
+        # Sistema flexível: verificar se há Long Links com specific_id = router_id
+        long_links_available = self._get_long_links_by_specific_id(router_id)
         
-        if router_id not in equipment_mapping:
-            print(f"DEBUG: [LINK_UPGRADE] Router ID {router_id} não suportado")
+        if not long_links_available:
+            print(f"DEBUG: [LINK_UPGRADE] Nenhum Long Link com specific_id {router_id} encontrado no inventário")
             return
         
-        long_link, short_link = equipment_mapping[router_id]
+        # Verificar se já existe Short Link com mesmo specific_id
+        short_link_exists = self._check_short_link_exists_by_specific_id(router_id)
         
-        # Verificar se o jogador tem o Long Link correspondente no inventário
+        if short_link_exists:
+            print(f"DEBUG: [LINK_UPGRADE] ERRO: Já existe Short Link com specific_id {router_id} no inventário")
+            return
+        
+        print(f"DEBUG: [LINK_UPGRADE] Long Links encontrados: {len(long_links_available)}")
+        
+        # Definir contexto de LINK UPGRADE e router_id
+        self._in_link_upgrade_context = True
+        self._link_upgrade_target_id = router_id
+        
+        # Abrir página SELECT LINK (similar ao REMOVE ROUTER)
+        self._show_select_link_page(router_id)
+        print("DEBUG: [LINK_UPGRADE] SUCCESS: Página SELECT LINK aberta")
+    
+    def _get_long_links_by_specific_id(self, specific_id):
+        """
+        Obtém todos os Long Links no inventário com specific_id correspondente.
+        """
+        print(f"DEBUG: [LINK_UPGRADE_SELECT] Procurando Long Links com specific_id {specific_id}")
+        
+        long_links_found = []
         equipments_inventory = self.inventario.get("equipments", [])
-        long_link_found = None
         
         for equipment_path in equipments_inventory:
-            if os.path.basename(equipment_path) == long_link:
-                long_link_found = equipment_path
-                break
+            if self._is_long_link_with_specific_id(equipment_path, specific_id):
+                long_links_found.append(equipment_path)
         
-        if long_link_found:
-            print(f"DEBUG: [LINK_UPGRADE] Long Link {long_link} encontrado - procedendo com inventário")
-            print(f"DEBUG: [LINK_UPGRADE] Long Link encontrado: {os.path.basename(long_link_found)}")
+        print(f"DEBUG: [LINK_UPGRADE_SELECT] Encontrados {len(long_links_found)} Long Links")
+        return long_links_found
+    
+    def _show_select_link_page(self, router_id):
+        """
+        Cria página SELECT LINK para escolher qual Long Link fazer upgrade.
+        Layout similar à página REMOVE ROUTER.
+        """
+        print(f"DEBUG: [SELECT_LINK_PAGE] Criando página SELECT LINK para Router ID {router_id}")
+        
+        # Salvar estado da interface
+        self._save_dashboard_state()
+        
+        # Limpar widgets (exceto TopBar)
+        for widget in self.winfo_children():
+            if hasattr(widget, '_is_topbar') and widget._is_topbar:
+                continue
+            widget.destroy()
+        
+        screen_width = self.winfo_screenwidth()
+        screen_height = self.winfo_screenheight()
+        
+        # Criar TopBar do jogador - usar TopBar específico da cor do jogador (igual à interface principal)
+        try:
+            topbar_img_path = os.path.join(IMG_DIR, f"TopBar_{self.player_color.lower()}.png")
+            if os.path.exists(topbar_img_path):
+                img = Image.open(topbar_img_path).convert("RGBA")
+                img = img.resize((screen_width, 60), Image.Resampling.LANCZOS)
+                topbar_img = ImageTk.PhotoImage(img)
+                topbar_label = tk.Label(self, image=topbar_img, bg="black", borderwidth=0, highlightthickness=0)
+                topbar_label.image = topbar_img
+                topbar_label.pack(side="top", fill="x")
+                print(f"DEBUG: [SELECT_LINK_PAGE] TopBar do jogador {self.player_color} aplicado com sucesso")
+            else:
+                print(f"DEBUG: [SELECT_LINK_PAGE] TopBar do jogador não encontrado, usando fallback")
+                # Criar TopBar fallback com cor do jogador
+                topbar_frame = tk.Frame(self, bg=self.bar_color, height=60)
+                topbar_frame.pack(side="top", fill="x")
+                topbar_frame.pack_propagate(False)
+        except Exception as e:
+            print(f"DEBUG: [SELECT_LINK_PAGE] Erro ao criar TopBar do jogador: {e}")
+            # Criar TopBar fallback em caso de erro
+            topbar_frame = tk.Frame(self, bg=self.bar_color, height=60)
+            topbar_frame.pack(side="top", fill="x")
+            topbar_frame.pack_propagate(False)
+        
+        # Nome do jogador (igual ao inventário original - fundo da cor do jogador e texto preto)
+        name_lbl = tk.Label(self, text=self.player_name, font=("Helvetica", 18, "bold"), bg=self.bar_color, fg="black", borderwidth=0)
+        name_lbl.place(relx=0.5, y=25, anchor="n")
+        
+        # Título
+        title = tk.Label(self, text="SELECT LINK", font=("Helvetica", 22, "bold"), fg="white", bg="black")
+        title.place(relx=0.5, y=65, anchor="n")
+        
+        # Obter Long Links com specific_id correspondente
+        long_links = self._get_long_links_by_specific_id(router_id)
+        
+        if not long_links:
+            # Mensagem se não há Long Links disponíveis
+            no_links_msg = tk.Label(self, text="No Long Links available for upgrade", 
+                                   font=("Helvetica", 18), fg="red", bg="black")
+            no_links_msg.place(relx=0.5, rely=0.5, anchor="center")
             
-            # Verificar se o jogador já tem o Short Link correspondente no inventário
-            short_link_exists = any(os.path.basename(eq) == short_link for eq in equipments_inventory)
+            # Botão de volta
+            back_btn = tk.Button(self, text="Back", font=("Helvetica", 16), 
+                               bg="#AAAAAA", fg="white", width=10, height=2,
+                               command=self._voltar_dashboard_apos_select_link)
+            back_btn.place(relx=0.5, rely=0.7, anchor="center")
+            return
+        
+        # Layout grid 2xn para múltiplas Equipment Long Link
+        matriz_frame = tk.Frame(self, bg="black")
+        matriz_frame.place(relx=0.5, rely=0.5, anchor="center")
+        
+        card_w, card_h = 85, 120  # Tamanho padrão igual ao REMOVE ROUTER
+        
+        # Grid 2xn - sempre 2 colunas, n linhas conforme necessário
+        for idx, link_path in enumerate(long_links):
+            row = idx // 2
+            col = idx % 2
             
-            if short_link_exists:
-                print(f"DEBUG: [LINK_UPGRADE] ERROR: {short_link} já existe no inventário - upgrade não aplicado")
-                return
+            try:
+                # Carregar e redimensionar imagem
+                pil_img = Image.open(link_path)
+                pil_img = pil_img.resize((card_w, card_h), Image.Resampling.LANCZOS)
+                card_img = ImageTk.PhotoImage(pil_img)
+                
+                # Criar label da carta
+                card_lbl = tk.Label(matriz_frame, image=card_img, cursor="hand2", bg="black")
+                card_lbl.image = card_img
+                card_lbl.grid(row=row, column=col, padx=10, pady=10)
+                
+                # Bind para clique na carta
+                card_lbl.bind("<Button-1>", lambda e, path=link_path: self._show_select_link_fullscreen(path))
+                
+            except Exception as e:
+                print(f"DEBUG: [SELECT_LINK_PAGE] Erro ao carregar carta {os.path.basename(link_path)}: {e}")
+        
+        # Barra inferior do jogador - usar BelowBar específico da cor do jogador
+        try:
+            belowbar_img_path = os.path.join(IMG_DIR, f"BelowBar_{self.player_color.lower()}.png")
+            if os.path.exists(belowbar_img_path):
+                belowbar_img = ImageTk.PhotoImage(Image.open(belowbar_img_path).resize((screen_width, 50)))
+                belowbar_label = tk.Label(self, image=belowbar_img, bg="black")
+                belowbar_label.image = belowbar_img
+                belowbar_label.pack(side="bottom", fill="x")
+                print(f"DEBUG: [SELECT_LINK_PAGE] Barra inferior do jogador {self.player_color} carregada")
+            else:
+                print(f"DEBUG: [SELECT_LINK_PAGE] BelowBar do jogador não encontrado, usando fallback")
+                # Criar barra inferior fallback com cor do jogador
+                belowbar_frame = tk.Frame(self, bg=self.bar_color, height=50)
+                belowbar_frame.pack(side="bottom", fill="x")
+                belowbar_frame.pack_propagate(False)
+        except Exception as e:
+            print(f"DEBUG: [SELECT_LINK_PAGE] Erro ao carregar BelowBar do jogador: {e}")
+            # Criar barra inferior fallback
+            belowbar_frame = tk.Frame(self, bg="#DC8392", height=50)
+            belowbar_frame.pack(side="bottom", fill="x")
+            belowbar_frame.pack_propagate(False)
+        
+        print("DEBUG: [SELECT_LINK_PAGE] SUCCESS: Página SELECT LINK criada")
+    
+    def _show_select_link_fullscreen(self, link_path):
+        """
+        Mostra Long Link em fullscreen com botão roxo para confirmação.
+        """
+        print(f"DEBUG: [SELECT_LINK_FULLSCREEN] Mostrando fullscreen: {os.path.basename(link_path)}")
+        
+        # Limpar widgets
+        for widget in self.winfo_children():
+            widget.destroy()
+        
+        # Carregar e exibir imagem do Long Link
+        try:
+            pil_img = Image.open(link_path)
+            img_w, img_h = pil_img.size
+            max_w, max_h = self.winfo_screenwidth(), self.winfo_screenheight()
+            ratio = min(max_w/img_w, max_h/img_h)
+            new_w, new_h = int(img_w*ratio), int(img_h*ratio)
+            pil_img = pil_img.resize((new_w, new_h), Image.Resampling.LANCZOS)
             
-            # Definir contexto de LINK UPGRADE e router_id
-            self._in_link_upgrade_context = True
-            self._link_upgrade_target_id = router_id
+            card_img = ImageTk.PhotoImage(pil_img)
+            card_lbl = tk.Label(self, image=card_img, bg="black")
+            card_lbl.image = card_img
+            card_lbl.place(relx=0.5, rely=0.5, anchor="center")
             
-            # Abrir inventário de equipamentos para seleção
-            self._show_equipment_inventory_for_link_upgrade()
-            print("DEBUG: [LINK_UPGRADE] SUCCESS: Inventário de equipamentos aberto para upgrade")
-        else:
-            print(f"DEBUG: [LINK_UPGRADE] Nenhum Long Link {long_link} encontrado no inventário - não é possível fazer upgrade")
-            print(f"DEBUG: [LINK_UPGRADE] LINK UPGRADE só funciona se houver {long_link} disponível no inventário")
-            print(f"DEBUG: [LINK_UPGRADE] Equipamentos disponíveis:")
+        except Exception as e:
+            print(f"DEBUG: [SELECT_LINK_FULLSCREEN] Erro ao carregar imagem: {e}")
+        
+        # Botão X (cinzento, canto superior esquerdo) - volta para SELECT LINK
+        def close_fullscreen():
+            router_id = getattr(self, '_link_upgrade_target_id', 1)
+            self._show_select_link_page(router_id)
+        
+        x_btn = tk.Button(
+            self, 
+            text="✖", 
+            font=("Helvetica", 24, "bold"), 
+            bg="#AAAAAA", 
+            fg="white", 
+            width=2, 
+            height=1, 
+            borderwidth=0, 
+            highlightthickness=0, 
+            command=close_fullscreen, 
+            cursor="hand2", 
+            activebackground="#CCCCCC"
+        )
+        x_btn.place(relx=0.02, rely=0, anchor="nw")
+        
+        # Botão de confirmação (roxo, canto superior direito)
+        def confirm_link_selection():
+            self._show_link_upgrade_confirmation(link_path)
+        
+        confirm_btn = tk.Button(
+            self,
+            text="✓",
+            font=("Helvetica", 24, "bold"),
+            bg="#800080",
+            fg="white",
+            width=2,
+            height=1,
+            borderwidth=0,
+            highlightthickness=0,
+            command=confirm_link_selection,
+            cursor="hand2",
+            activebackground="#9900AA"
+        )
+        confirm_btn.place(relx=0.98, rely=0, anchor="ne")
+        
+        print("DEBUG: [SELECT_LINK_FULLSCREEN] Fullscreen criado com botões")
+    
+    def _show_link_upgrade_confirmation(self, link_path):
+        """
+        Mostra overlay de confirmação Link Upgrade Confirmation.
+        """
+        print(f"DEBUG: [LINK_UPGRADE_CONFIRMATION] Mostrando confirmação para: {os.path.basename(link_path)}")
+        
+        # Limpar widgets
+        for widget in self.winfo_children():
+            widget.destroy()
+        
+        # Definir fundo preto
+        self.config(bg="black")
+        
+        # Carregar imagem da carta como fundo
+        try:
+            pil_img = Image.open(link_path)
+            img_w, img_h = pil_img.size
+            max_w, max_h = self.winfo_screenwidth(), self.winfo_screenheight()
+            ratio = min(max_w/img_w, max_h/img_h)
+            new_w, new_h = int(img_w*ratio), int(img_h*ratio)
+            pil_img = pil_img.resize((new_w, new_h), Image.Resampling.LANCZOS)
+            
+            bg_img = ImageTk.PhotoImage(pil_img)
+            bg_lbl = tk.Label(self, image=bg_img, bg="black")
+            bg_lbl.image = bg_img
+            bg_lbl.place(relx=0.5, rely=0.5, anchor="center")
+            
+        except Exception as e:
+            print(f"DEBUG: [LINK_UPGRADE_CONFIRMATION] Erro ao carregar imagem de fundo: {e}")
+        
+        # Frame para a dialog de confirmação
+        confirm_frame = tk.Frame(self, bg="black")
+        confirm_frame.pack(expand=True)
+        
+        # Título
+        tk.Label(confirm_frame, text="Link Upgrade Confirmation", 
+                font=("Helvetica", 16, "bold"), fg="yellow", bg="black").pack(pady=(40, 20))
+        
+        # Obter specific_id da carta
+        specific_id = self._get_equipment_specific_id_from_path(link_path)
+        
+        # Mensagem de confirmação
+        tk.Label(confirm_frame, text=f"Long Link {specific_id} is going to be upgraded", 
+                font=("Helvetica", 16), fg="white", bg="black").pack(pady=(0, 30))
+        
+        # Frame para o botão
+        btns_frame = tk.Frame(confirm_frame, bg="black")
+        btns_frame.pack(pady=30)
+        
+        # Botão Ok (roxo)
+        def confirmar_upgrade():
+            print("DEBUG: [LINK_UPGRADE_CONFIRMATION] Upgrade confirmado - destruindo interface e iniciando Fase 1")
+            # CORREÇÃO: Destruir completamente a interface antes do loading screen
+            for widget in self.winfo_children():
+                widget.destroy()
+            self.config(bg="black")
+            print("DEBUG: [LINK_UPGRADE_CONFIRMATION] Interface destruída - prosseguindo para detecção YOLO")
+            self._executar_link_upgrade_phase_1(link_path, specific_id)
+        
+        ok_btn = tk.Button(
+            btns_frame,
+            text="Ok",
+            font=("Helvetica", 16, "bold"),
+            bg="#8A2BE2",
+            fg="white",
+            width=8,
+            height=2,
+            command=confirmar_upgrade
+        )
+        ok_btn.pack()
+        
+        print("DEBUG: [LINK_UPGRADE_CONFIRMATION] Overlay de confirmação criado")
+    
+    def _executar_link_upgrade_phase_1(self, long_link_path, specific_id):
+        """
+        Executa a Fase 1: detecção do Long Link atual com loading + YOLO.
+        """
+        print(f"DEBUG: [LINK_UPGRADE_PHASE1] Iniciando Fase 1 para: {os.path.basename(long_link_path)}")
+        
+        try:
+            # Obter object name para detecção
+            old_object_name = get_equipment_object_name(long_link_path, self.card_database)
+            
+            # Criar loading screen
+            loading_window = create_yolo_loading_screen(self, old_object_name if old_object_name else f"link_longo_{specific_id}")
+            
+            if loading_window:
+                print("DEBUG: [LINK_UPGRADE_PHASE1] Loading screen criado - iniciando detecção")
+                
+                # Usar utilitários universais para detectar script
+                universal_paths = get_universal_paths()
+                script_path = universal_paths['detection_script']
+                
+                if not os.path.exists(script_path):
+                    print(f"DEBUG: [LINK_UPGRADE_PHASE1] Script não encontrado: {script_path}")
+                    if loading_window and loading_window.winfo_exists():
+                        loading_window.destroy()
+                    # Fallback: ir direto para página LINK UPGRADE
+                    self._show_link_upgrade_page(long_link_path, specific_id)
+                    return
+                
+                print(f"DEBUG: [LINK_UPGRADE_PHASE1] Executando: {script_path} {old_object_name}")
+                
+                # Esconder interface Python
+                self.withdraw()
+                
+                # Executar script YOLO
+                process = subprocess.Popen([script_path, old_object_name])
+                
+                print(f"DEBUG: [LINK_UPGRADE_PHASE1] Script iniciado (PID: {process.pid})")
+                
+                # Monitor de inicialização e conclusão
+                def check_phase_1_initialization():
+                    try:
+                        if process.poll() is None:
+                            # Script ainda está rodando - YOLO deve ter inicializado
+                            print(f"DEBUG: [LINK_UPGRADE_PHASE1] YOLO inicializado - destruindo loading screen")
+                            
+                            if loading_window and loading_window.winfo_exists():
+                                loading_window.destroy()
+                            
+                            # Monitor de conclusão
+                            def check_phase_1_completion():
+                                try:
+                                    if process.poll() is not None:
+                                        # Script terminou - detecção completa
+                                        print(f"DEBUG: [LINK_UPGRADE_PHASE1] Detecção Fase 1 completa")
+                                        self.deiconify()  # Mostrar interface Python
+                                        # Ir para página LINK UPGRADE
+                                        self._show_link_upgrade_page(long_link_path, specific_id)
+                                    else:
+                                        # Continuar monitorando
+                                        self.after(1000, check_phase_1_completion)
+                                except Exception as e:
+                                    print(f"DEBUG: [LINK_UPGRADE_PHASE1] Erro no monitor: {e}")
+                                    self.deiconify()
+                                    self._show_link_upgrade_page(long_link_path, specific_id)
+                            
+                            self.after(1000, check_phase_1_completion)
+                        else:
+                            # Script terminou antes de inicializar
+                            print(f"DEBUG: [LINK_UPGRADE_PHASE1] Script terminou inesperadamente")
+                            if loading_window and loading_window.winfo_exists():
+                                loading_window.destroy()
+                            self.deiconify()
+                            self._show_link_upgrade_page(long_link_path, specific_id)
+                    except Exception as e:
+                        print(f"DEBUG: [LINK_UPGRADE_PHASE1] Erro na inicialização: {e}")
+                        if loading_window and loading_window.winfo_exists():
+                            loading_window.destroy()
+                        self.deiconify()
+                        self._show_link_upgrade_page(long_link_path, specific_id)
+                
+                # Aguardar 4.5 segundos para YOLO inicializar
+                self.after(4500, check_phase_1_initialization)
+            else:
+                print("DEBUG: [LINK_UPGRADE_PHASE1] Erro ao criar loading screen - fallback direto")
+                self._show_link_upgrade_page(long_link_path, specific_id)
+                
+        except Exception as e:
+            print(f"DEBUG: [LINK_UPGRADE_PHASE1] Erro: {e}")
+            self._show_link_upgrade_page(long_link_path, specific_id)
+    
+    def _show_link_upgrade_page(self, long_link_path, specific_id):
+        """
+        Cria página LINK UPGRADE para escolher Short Link.
+        Layout similar à página REMOVE ROUTER.
+        """
+        print(f"DEBUG: [LINK_UPGRADE_PAGE] Criando página LINK UPGRADE para specific_id {specific_id}")
+        
+        # Salvar referências importantes
+        self._current_long_link_path = long_link_path
+        self._current_specific_id = specific_id
+        
+        # Salvar estado da interface
+        self._save_dashboard_state()
+        
+        # Limpar widgets (exceto TopBar)
+        for widget in self.winfo_children():
+            if hasattr(widget, '_is_topbar') and widget._is_topbar:
+                continue
+            widget.destroy()
+        
+        screen_width = self.winfo_screenwidth()
+        screen_height = self.winfo_screenheight()
+        
+        # Criar TopBar igual à Store - usar awning da Store
+        try:
+            awning_img_path = os.path.join(IMG_DIR, "Store_awning_v3.png")
+            if os.path.exists(awning_img_path):
+                awning_img = ImageTk.PhotoImage(Image.open(awning_img_path).resize((screen_width, 50)))
+                awning_label = tk.Label(self, image=awning_img, bg="black")
+                awning_label.image = awning_img
+                awning_label.pack(pady=(0, 10), fill="x")
+                
+                # Label pequeno à esquerda do logo (igual à Store)
+                left_label = tk.Label(self, text="••••", font=("Helvetica", 12, "bold"), bg="#DC8392", fg="#DC8392")
+                left_label.place(relx=0.46, y=10, anchor="center")
+                
+                # Logo NetMaster posicionado independentemente (igual à Store)
+                try:
+                    logo_img = ImageTk.PhotoImage(Image.open(os.path.join(IMG_DIR, "logo_netmaster_store.png")).resize((20, 20)))
+                    logo_lbl = tk.Label(self, image=logo_img, bg="#DC8392")
+                    logo_lbl.image = logo_img
+                    logo_lbl.place(relx=0.5, y=10, anchor="center")
+                except Exception as e:
+                    print(f"DEBUG: [LINK_UPGRADE_PAGE] Erro ao carregar logo: {e}")
+                
+                # Label largo à direita do logo para cobrir área amarela (igual à Store)
+                right_logo_label = tk.Label(self, text="     ", font=("Helvetica", 12, "bold"), bg="#DC8392", fg="#DC8392")
+                right_logo_label.place(relx=0.53, y=10, anchor="w")
+                
+                # Label adicional para garantir cobertura completa (igual à Store)
+                extra_cover_label = tk.Label(self, text="     ", font=("Helvetica", 10), bg="#DC8392", fg="#DC8392")
+                extra_cover_label.place(relx=0.55, y=10, anchor="w")
+                
+                print(f"DEBUG: [LINK_UPGRADE_PAGE] TopBar da Store aplicado com sucesso")
+                
+            else:
+                print(f"DEBUG: [LINK_UPGRADE_PAGE] Store awning não encontrado, usando fallback")
+                # Criar TopBar fallback
+                topbar_frame = tk.Frame(self, bg="#DC8392", height=50)
+                topbar_frame.pack(pady=(0, 10), fill="x")
+                topbar_frame.pack_propagate(False)
+        except Exception as e:
+            print(f"DEBUG: [LINK_UPGRADE_PAGE] Erro ao criar TopBar da Store: {e}")
+            # Criar TopBar fallback em caso de erro
+            topbar_frame = tk.Frame(self, bg="#DC8392", height=50)
+            topbar_frame.pack(pady=(0, 10), fill="x")
+            topbar_frame.pack_propagate(False)
+        
+        # Texto "Store" posicionado independentemente (igual à Store)
+        store_name_lbl = tk.Label(self, text="Store", 
+                                 font=("Helvetica", 15, "bold"), bg="#DC8392", fg="black")
+        store_name_lbl.place(relx=0.5, y=30, anchor="center")
+        
+        # Label pequeno à direita do nome Store (igual à Store original)
+        right_store_label = tk.Label(self, text="•", font=("Helvetica", 12, "bold"), bg="#DC8392", fg="#DC8392")
+        right_store_label.place(relx=0.6, y=30, anchor="center")
+        
+        # Título
+        title = tk.Label(self, text="LINK UPGRADE", font=("Helvetica", 22, "bold"), fg="white", bg="black")
+        title.place(relx=0.5, y=65, anchor="n")
+        
+        # Obter Short Links correspondentes (mesmo specific_id)
+        short_links = self._get_short_links_for_upgrade(specific_id)
+        
+        if not short_links:
+            # Mensagem de erro
+            no_links_msg = tk.Label(self, text="No Short Links available", 
+                                   font=("Helvetica", 18), fg="red", bg="black")
+            no_links_msg.place(relx=0.5, rely=0.5, anchor="center")
+            
+            # Botão de volta
+            back_btn = tk.Button(self, text="Back", font=("Helvetica", 16), 
+                               bg="#AAAAAA", fg="white", width=10, height=2,
+                               command=self._voltar_dashboard_apos_link_upgrade)
+            back_btn.place(relx=0.5, rely=0.7, anchor="center")
+            return
+        
+        # Layout grid 2xn para múltiplas cartas Short Link (igual ao SELECT LINK)
+        matriz_frame = tk.Frame(self, bg="black")
+        matriz_frame.place(relx=0.5, rely=0.5, anchor="center")
+        
+        card_w, card_h = 85, 120  # Tamanho padrão igual ao REMOVE ROUTER
+        
+        # CORREÇÃO: Layout 2xn sempre (2 colunas, n linhas conforme necessário)
+        # Colocar Short Links em grid 2xn
+        for idx, link_path in enumerate(short_links):
+            row = idx // 2
+            col = idx % 2
+            
+            try:
+                # Carregar e redimensionar imagem
+                pil_img = Image.open(link_path)
+                pil_img = pil_img.resize((card_w, card_h), Image.Resampling.LANCZOS)
+                card_img = ImageTk.PhotoImage(pil_img)
+                
+                # Criar label da carta
+                card_lbl = tk.Label(matriz_frame, image=card_img, cursor="hand2", bg="black")
+                card_lbl.image = card_img
+                card_lbl.grid(row=row, column=col, padx=10, pady=10)
+                
+                print(f"DEBUG: [LINK_UPGRADE_PAGE] Short Link {os.path.basename(link_path)} colocado na linha {row}, coluna {col}")
+                
+                # Bind para clique na carta
+                card_lbl.bind("<Button-1>", lambda e, path=link_path: self._show_link_upgrade_fullscreen(path))
+                
+            except Exception as e:
+                print(f"DEBUG: [LINK_UPGRADE_PAGE] Erro ao carregar carta {os.path.basename(link_path)}: {e}")
+        
+        # Barra inferior igual à Store - usar BelowBar_store.png
+        try:
+            belowbar_img_path = os.path.join(IMG_DIR, "BelowBar_store.png")
+            if os.path.exists(belowbar_img_path):
+                belowbar_img = ImageTk.PhotoImage(Image.open(belowbar_img_path).resize((screen_width, 50)))
+                belowbar_label = tk.Label(self, image=belowbar_img, bg="black")
+                belowbar_label.image = belowbar_img
+                belowbar_label.pack(side="bottom", fill="x")
+                print(f"DEBUG: [LINK_UPGRADE_PAGE] Barra inferior BelowBar_store.png carregada (igual à Store)")
+            else:
+                print(f"DEBUG: [LINK_UPGRADE_PAGE] BelowBar_store.png não encontrado, usando fallback")
+                # Criar barra inferior fallback
+                belowbar_frame = tk.Frame(self, bg="#DC8392", height=50)
+                belowbar_frame.pack(side="bottom", fill="x")
+                belowbar_frame.pack_propagate(False)
+        except Exception as e:
+            print(f"DEBUG: [LINK_UPGRADE_PAGE] Erro ao carregar BelowBar_store.png: {e}")
+            # Criar barra inferior fallback
+            belowbar_frame = tk.Frame(self, bg="#DC8392", height=50)
+            belowbar_frame.pack(side="bottom", fill="x")
+            belowbar_frame.pack_propagate(False)
+        
+        print("DEBUG: [LINK_UPGRADE_PAGE] SUCCESS: Página LINK UPGRADE criada")
+    
+    def _get_short_links_for_upgrade(self, specific_id):
+        """
+        Obtém cartas Short Link da COR DO JOGADOR com specific_id correspondente na Store.
+        Similar ao SELECT LINK mas procura apenas na cor do jogador.
+        """
+        print(f"DEBUG: [LINK_UPGRADE_LINKS] Obtendo Short Links da cor '{self.player_color}' para specific_id {specific_id}")
+        
+        # Obter informações do Short Link baseado no specific_id
+        short_link_info = self._get_corresponding_short_link_info(specific_id)
+        
+        if not short_link_info:
+            print(f"DEBUG: [LINK_UPGRADE_LINKS] Nenhum Short Link correspondente encontrado")
+            return []
+        
+        short_links_found = []
+        filename = short_link_info['filename']
+        
+        # Usar utilitários universais para detectar caminhos
+        universal_paths = get_universal_paths()
+        base_dir = universal_paths['base_dir']
+        
+        # Mapear cor do jogador para nome do diretório (primeira letra maiúscula)
+        player_color_dir = self.player_color.capitalize()  # red -> Red, blue -> Blue, etc.
+        
+        print(f"DEBUG: [LINK_UPGRADE_LINKS] Procurando {filename} na cor {player_color_dir}...")
+        
+        # Possíveis bases para busca
+        possivel_bases = [base_dir]
+        
+        # Para cada base possível, buscar Short Links
+        for base_path in possivel_bases:
+            if not os.path.exists(base_path):
+                continue
+                
+            # Testar estruturas de diretórios (similar ao _obter_equipments_da_store)
+            equipments_variations = [
+                os.path.join(base_path, "equipments", "Residential-level"),  # Raspberry Pi (minúscula)
+                os.path.join(base_path, "Equipments", "Residential-level"),  # Desenvolvimento (maiúscula)
+                os.path.join(base_path, "img", "cartas", "equipments", "Residential-level")  # Fallback
+            ]
+            
+            equipments_base = None
+            for variation in equipments_variations:
+                if os.path.exists(variation):
+                    equipments_base = variation
+                    print(f"DEBUG: [LINK_UPGRADE_LINKS] Usando estrutura: {equipments_base}")
+                    break
+            
+            if not equipments_base:
+                continue
+                
+            # Buscar Short Links APENAS na cor do jogador
+            cor_dir = os.path.join(equipments_base, player_color_dir)
+            if not os.path.exists(cor_dir):
+                print(f"DEBUG: [LINK_UPGRADE_LINKS] Diretório da cor {player_color_dir} não existe: {cor_dir}")
+                continue
+                
+            # CORREÇÃO: Procurar TODAS as cartas com o filename da cor do jogador
+            # Se há 3 Equipment_7.png verdes na Store, todas aparecerão
+            print(f"DEBUG: [LINK_UPGRADE_LINKS] Procurando em: {cor_dir}")
+            
+            # Listar todos os arquivos no diretório da cor do jogador
+            if os.path.isdir(cor_dir):
+                arquivos_na_cor = os.listdir(cor_dir)
+                print(f"DEBUG: [LINK_UPGRADE_LINKS] Arquivos encontrados na cor {player_color_dir}: {arquivos_na_cor}")
+                
+                # Procurar TODAS as instâncias do filename
+                for arquivo in arquivos_na_cor:
+                    if arquivo == filename:
+                        short_link_path = os.path.join(cor_dir, arquivo)
+                        short_links_found.append(short_link_path)
+                        print(f"DEBUG: [LINK_UPGRADE_LINKS] Short Link encontrado: {short_link_path}")
+        
+        # NOTA: Se há múltiplas cópias da mesma carta na Store (ex: 3x Equipment_7.png verdes)
+        # elas aparecerão na lista. Para simular isto, podemos duplicar o path se necessário
+        
+        print(f"DEBUG: [LINK_UPGRADE_LINKS] Total de Short Links encontrados: {len(short_links_found)}")
+        return short_links_found
+    
+    def _show_link_upgrade_fullscreen(self, short_link_path):
+        """
+        Mostra Short Link em fullscreen com botão roxo para confirmação de trade.
+        """
+        print(f"DEBUG: [LINK_UPGRADE_FULLSCREEN] Mostrando fullscreen: {os.path.basename(short_link_path)}")
+        
+        # Limpar widgets
+        for widget in self.winfo_children():
+            widget.destroy()
+        
+        # Carregar e exibir imagem do Short Link
+        try:
+            pil_img = Image.open(short_link_path)
+            img_w, img_h = pil_img.size
+            max_w, max_h = self.winfo_screenwidth(), self.winfo_screenheight()
+            ratio = min(max_w/img_w, max_h/img_h)
+            new_w, new_h = int(img_w*ratio), int(img_h*ratio)
+            pil_img = pil_img.resize((new_w, new_h), Image.Resampling.LANCZOS)
+            
+            card_img = ImageTk.PhotoImage(pil_img)
+            card_lbl = tk.Label(self, image=card_img, bg="black")
+            card_lbl.image = card_img
+            card_lbl.place(relx=0.5, rely=0.5, anchor="center")
+            
+        except Exception as e:
+            print(f"DEBUG: [LINK_UPGRADE_FULLSCREEN] Erro ao carregar imagem: {e}")
+        
+        # Botão X (cinzento, canto superior esquerdo) - volta para LINK UPGRADE
+        def close_fullscreen():
+            long_link_path = getattr(self, '_current_long_link_path', None)
+            specific_id = getattr(self, '_current_specific_id', 1)
+            if long_link_path and specific_id:
+                self._show_link_upgrade_page(long_link_path, specific_id)
+            else:
+                self._voltar_dashboard_apos_link_upgrade()
+        
+        x_btn = tk.Button(
+            self, 
+            text="✖", 
+            font=("Helvetica", 24, "bold"), 
+            bg="#AAAAAA", 
+            fg="white", 
+            width=2, 
+            height=1, 
+            borderwidth=0, 
+            highlightthickness=0, 
+            command=close_fullscreen, 
+            cursor="hand2", 
+            activebackground="#CCCCCC"
+        )
+        x_btn.place(relx=0.02, rely=0, anchor="nw")
+        
+        # Botão de confirmação (roxo, canto superior direito)
+        def confirm_trade():
+            self._show_link_trade_confirmation(short_link_path)
+        
+        confirm_btn = tk.Button(
+            self,
+            text="✓",
+            font=("Helvetica", 24, "bold"),
+            bg="#800080",
+            fg="white",
+            width=2,
+            height=1,
+            borderwidth=0,
+            highlightthickness=0,
+            command=confirm_trade,
+            cursor="hand2",
+            activebackground="#9900AA"
+        )
+        confirm_btn.place(relx=0.98, rely=0, anchor="ne")
+        
+        print("DEBUG: [LINK_UPGRADE_FULLSCREEN] Fullscreen criado com botões")
+    
+    def _voltar_dashboard_apos_select_link(self):
+        """Volta para o PlayerDashboard após SELECT LINK"""
+        print("DEBUG: [SELECT_LINK] Voltando para PlayerDashboard")
+        self.playerdashboard_interface(self.player_name, self.saldo, self.other_players)
+    
+    def _show_link_trade_confirmation(self, short_link_path):
+        """
+        Overlay de confirmação final para o trade Link Upgrade.
+        Usa o mesmo estilo do Link Upgrade Confirmation.
+        """
+        print(f"DEBUG: [LINK_TRADE_CONFIRMATION] Criando overlay de trade para: {os.path.basename(short_link_path)}")
+        
+        # Salvar referência do Short Link escolhido
+        self._chosen_short_link_path = short_link_path
+        
+        # Limpar widgets (mesmo padrão do Link Upgrade Confirmation)
+        for widget in self.winfo_children():
+            widget.destroy()
+        
+        # Definir fundo preto
+        self.config(bg="black")
+        
+        # Carregar imagem da carta Short Link como fundo
+        try:
+            pil_img = Image.open(short_link_path)
+            img_w, img_h = pil_img.size
+            max_w, max_h = self.winfo_screenwidth(), self.winfo_screenheight()
+            ratio = min(max_w/img_w, max_h/img_h)
+            new_w, new_h = int(img_w*ratio), int(img_h*ratio)
+            pil_img = pil_img.resize((new_w, new_h), Image.Resampling.LANCZOS)
+            
+            bg_img = ImageTk.PhotoImage(pil_img)
+            bg_lbl = tk.Label(self, image=bg_img, bg="black")
+            bg_lbl.image = bg_img
+            bg_lbl.place(relx=0.5, rely=0.5, anchor="center")
+            
+        except Exception as e:
+            print(f"DEBUG: [LINK_TRADE_CONFIRMATION] Erro ao carregar imagem de fundo: {e}")
+        
+        # Frame para a dialog de confirmação (mesmo padrão)
+        confirm_frame = tk.Frame(self, bg="black")
+        confirm_frame.pack(expand=True)
+        
+        # Título (mesmo padrão)
+        tk.Label(confirm_frame, text="Link Trade Confirmation", 
+                font=("Helvetica", 16, "bold"), fg="yellow", bg="black").pack(pady=(40, 20))
+        
+         # Obter specific_id da carta
+        specific_id = self._get_equipment_specific_id_from_path(short_link_path)
+        
+        # Mensagem de confirmação (mesmo padrão)
+        tk.Label(confirm_frame, text=f"Short Link {specific_id} is going to be added \nto your inventory", 
+                font=("Helvetica", 16), fg="white", bg="black").pack(pady=(0, 30))
+        
+        # Frame para o botão (mesmo padrão)
+        btns_frame = tk.Frame(confirm_frame, bg="black")
+        btns_frame.pack(pady=30)
+        
+        # Botão Ok (roxo - mesmo padrão do Link Upgrade Confirmation)
+        def confirmar_trade():
+            print("DEBUG: [LINK_TRADE_CONFIRMATION] Trade confirmado - destruindo fullscreen e iniciando Fase 2")
+            # CORREÇÃO: Destruir completamente a interface fullscreen antes do loading screen
+            for widget in self.winfo_children():
+                widget.destroy()
+            self.config(bg="black")
+            print("DEBUG: [LINK_TRADE_CONFIRMATION] Interface fullscreen destruída - prosseguindo para detecção YOLO")
+            self._executar_link_upgrade_phase_2()
+        
+        ok_btn = tk.Button(
+            btns_frame,
+            text="Ok",
+            font=("Helvetica", 16, "bold"),
+            bg="#8A2BE2",
+            fg="white",
+            width=8,
+            height=2,
+            command=confirmar_trade
+        )
+        ok_btn.pack()
+        
+        print("DEBUG: [LINK_TRADE_CONFIRMATION] Overlay de trade criado")
+    
+    def _executar_link_upgrade_phase_2(self):
+        """
+        Executa a Fase 2: detecção do Short Link novo + conclusão do upgrade.
+        """
+        short_link_path = getattr(self, '_chosen_short_link_path', '')
+        long_link_path = getattr(self, '_current_long_link_path', '')
+        specific_id = getattr(self, '_current_specific_id', 1)
+        
+        print(f"DEBUG: [LINK_UPGRADE_PHASE2] Iniciando Fase 2")
+        print(f"DEBUG: [LINK_UPGRADE_PHASE2] Short Link: {os.path.basename(short_link_path)}")
+        print(f"DEBUG: [LINK_UPGRADE_PHASE2] Long Link: {os.path.basename(long_link_path)}")
+        
+        try:
+            # Obter object name do Short Link
+            new_object_name = get_equipment_object_name(short_link_path, self.card_database)
+            
+            # Criar loading screen
+            loading_window = create_yolo_loading_screen(self, new_object_name if new_object_name else f"short_link_{specific_id}")
+            
+            if loading_window:
+                print("DEBUG: [LINK_UPGRADE_PHASE2] Loading screen criado - iniciando detecção")
+                
+                # Usar utilitários universais para detectar script
+                universal_paths = get_universal_paths()
+                script_path = universal_paths['detection_script']
+                
+                if not os.path.exists(script_path):
+                    print(f"DEBUG: [LINK_UPGRADE_PHASE2] Script não encontrado: {script_path}")
+                    if loading_window and loading_window.winfo_exists():
+                        loading_window.destroy()
+                    # Fallback: completar upgrade sem YOLO
+                    self._complete_link_upgrade()
+                    return
+                
+                print(f"DEBUG: [LINK_UPGRADE_PHASE2] Executando: {script_path} {new_object_name}")
+                
+                # Esconder interface Python
+                self.withdraw()
+                
+                # Executar script YOLO
+                process = subprocess.Popen([script_path, new_object_name])
+                
+                print(f"DEBUG: [LINK_UPGRADE_PHASE2] Script iniciado (PID: {process.pid})")
+                
+                # Monitor de inicialização e conclusão
+                def check_phase_2_initialization():
+                    try:
+                        if process.poll() is None:
+                            # Script ainda está rodando - YOLO deve ter inicializado
+                            print(f"DEBUG: [LINK_UPGRADE_PHASE2] YOLO inicializado - destruindo loading screen")
+                            
+                            if loading_window and loading_window.winfo_exists():
+                                loading_window.destroy()
+                            
+                            # Monitor de conclusão
+                            def check_phase_2_completion():
+                                try:
+                                    if process.poll() is not None:
+                                        # Script terminou - detecção completa
+                                        print(f"DEBUG: [LINK_UPGRADE_PHASE2] Detecção Fase 2 completa")
+                                        self.deiconify()  # Mostrar interface Python
+                                        # Completar upgrade
+                                        self._complete_link_upgrade()
+                                    else:
+                                        # Continuar monitorando
+                                        self.after(1000, check_phase_2_completion)
+                                except Exception as e:
+                                    print(f"DEBUG: [LINK_UPGRADE_PHASE2] Erro no monitor: {e}")
+                                    self.deiconify()
+                                    self._complete_link_upgrade()
+                            
+                            self.after(1000, check_phase_2_completion)
+                        else:
+                            # Script terminou antes de inicializar
+                            print(f"DEBUG: [LINK_UPGRADE_PHASE2] Script terminou inesperadamente")
+                            if loading_window and loading_window.winfo_exists():
+                                loading_window.destroy()
+                            self.deiconify()
+                            self._complete_link_upgrade()
+                    except Exception as e:
+                        print(f"DEBUG: [LINK_UPGRADE_PHASE2] Erro na inicialização: {e}")
+                        if loading_window and loading_window.winfo_exists():
+                            loading_window.destroy()
+                        self.deiconify()
+                        self._complete_link_upgrade()
+                
+                # Aguardar 4.5 segundos para YOLO inicializar
+                self.after(4500, check_phase_2_initialization)
+            else:
+                print("DEBUG: [LINK_UPGRADE_PHASE2] Erro ao criar loading screen - fallback direto")
+                self._complete_link_upgrade()
+                
+        except Exception as e:
+            print(f"DEBUG: [LINK_UPGRADE_PHASE2] Erro: {e}")
+            self._complete_link_upgrade()
+    
+    def _complete_link_upgrade(self):
+        """
+        Completa o processo de Link Upgrade: remove Long Link, adiciona Short Link.
+        """
+        long_link_path = getattr(self, '_current_long_link_path', '')
+        short_link_path = getattr(self, '_chosen_short_link_path', '')
+        
+        print(f"DEBUG: [LINK_UPGRADE_COMPLETE] Completando upgrade")
+        print(f"DEBUG: [LINK_UPGRADE_COMPLETE] Removendo: {os.path.basename(long_link_path)}")
+        print(f"DEBUG: [LINK_UPGRADE_COMPLETE] Adicionando: {os.path.basename(short_link_path)}")
+        
+        try:
+            # Usar existing helper functions para completar trade
+            success = self._perform_link_upgrade_database_transaction(long_link_path, short_link_path)
+            
+            if success:
+                # Mostrar mensagem de sucesso e voltar ao dashboard
+                self._show_upgrade_success_message()
+            else:
+                # Mostrar mensagem de erro
+                self._show_upgrade_error_message()
+                
+        except Exception as e:
+            print(f"DEBUG: [LINK_UPGRADE_COMPLETE] Erro ao completar upgrade: {e}")
+            self._show_upgrade_error_message()
+    
+    def _perform_link_upgrade_database_transaction(self, long_link_path, short_link_path):
+        """
+        Executa a transação de base de dados para Link Upgrade: remove Long Link e adiciona Short Link.
+        
+        Args:
+            long_link_path: Caminho para o Long Link a ser removido
+            short_link_path: Caminho para o Short Link a ser adicionado
+            
+        Returns:
+            bool: True se transação foi bem-sucedida, False caso contrário
+        """
+        try:
+            print(f"DEBUG: [LINK_UPGRADE_TRANSACTION] Iniciando transação")
+            print(f"DEBUG: [LINK_UPGRADE_TRANSACTION] Long Link: {os.path.basename(long_link_path)}")
+            print(f"DEBUG: [LINK_UPGRADE_TRANSACTION] Short Link: {os.path.basename(short_link_path)}")
+            
+            # PASSO 1: Remover Long Link do inventário
+            if long_link_path in self.inventario.get("equipments", []):
+                self.inventario["equipments"].remove(long_link_path)
+                print(f"DEBUG: [LINK_UPGRADE_TRANSACTION] Long Link removido do inventário")
+            else:
+                print(f"DEBUG: [LINK_UPGRADE_TRANSACTION] AVISO: Long Link não encontrado no inventário")
+            
+            # PASSO 2: Remover Long Link dos ativos (se estiver ativo)
+            if long_link_path in self.active_equipments:
+                self.active_equipments.remove(long_link_path)
+                print(f"DEBUG: [LINK_UPGRADE_TRANSACTION] Long Link removido dos ativos")
+            
+            # PASSO 3: Adicionar Short Link ao inventário
+            # Verificar se já existe no inventário
+            short_link_filename = os.path.basename(short_link_path)
+            short_link_exists = any(
+                os.path.basename(equipment_path) == short_link_filename 
+                for equipment_path in self.inventario.get("equipments", [])
+            )
+            
+            if not short_link_exists:
+                self.inventario["equipments"].append(short_link_path)
+                print(f"DEBUG: [LINK_UPGRADE_TRANSACTION] Short Link adicionado ao inventário")
+            else:
+                print(f"DEBUG: [LINK_UPGRADE_TRANSACTION] Short Link já existe no inventário")
+            
+            # PASSO 4: Ativar Short Link (carta fica virada para cima)
+            if short_link_path not in self.active_equipments:
+                self.active_equipments.append(short_link_path)
+                print(f"DEBUG: [LINK_UPGRADE_TRANSACTION] Short Link adicionado aos ativos (carta virada para cima)")
+            
+            # PASSO 5: Devolver Long Link para a Store (se existir)
+            if hasattr(self, 'store_window') and self.store_window:
+                try:
+                    self.store_window.adicionar_carta_ao_baralho(long_link_path, "equipments")
+                    print(f"DEBUG: [LINK_UPGRADE_TRANSACTION] Long Link devolvido à Store")
+                except Exception as store_e:
+                    print(f"DEBUG: [LINK_UPGRADE_TRANSACTION] ERRO ao devolver à Store: {store_e}")
+            
+            print(f"DEBUG: [LINK_UPGRADE_TRANSACTION] Transação completa com sucesso")
+            return True
+            
+        except Exception as e:
+            print(f"DEBUG: [LINK_UPGRADE_TRANSACTION] ERRO na transação: {e}")
+            return False
+    
+    def _show_upgrade_success_message(self):
+        """
+        Mostra mensagem de sucesso do Link Upgrade.
+        """
+        print("DEBUG: [LINK_UPGRADE_SUCCESS] Mostrando mensagem de sucesso")
+        
+        # Criar overlay
+        overlay = tk.Toplevel(self)
+        overlay.configure(bg="black")
+        overlay.attributes("-alpha", 0.9)
+        overlay.attributes("-fullscreen", True)
+        overlay.attributes("-topmost", True)
+        overlay.grab_set()
+        overlay.focus_set()
+        
+        # Frame central
+        frame = tk.Frame(overlay, bg="#1B5E20", relief="raised", bd=3, padx=30, pady=25)
+        frame.place(relx=0.5, rely=0.5, anchor="center")
+        
+        # Título
+        title = tk.Label(frame, text="Link Upgrade Completed!", 
+                        font=("Helvetica", 24, "bold"), fg="white", bg="#1B5E20")
+        title.pack(pady=(0, 20))
+        
+        # Mensagem
+        msg = tk.Label(frame, text="Your Long Link has been\nsuccessfully upgraded to Short Link!", 
+                      font=("Helvetica", 16), fg="white", bg="#1B5E20", justify="center")
+        msg.pack(pady=(0, 25))
+        
+        # Botão OK
+        def return_dashboard():
+            print("DEBUG: [LINK_UPGRADE_SUCCESS] Voltando para PlayerDashboard")
+            overlay.destroy()
+            self.playerdashboard_interface(self.player_name, self.saldo, self.other_players)
+        
+        ok_btn = tk.Button(frame, text="Continue", font=("Helvetica", 16, "bold"), 
+                          bg="#4CAF50", fg="white", width=15, height=2,
+                          command=return_dashboard)
+        ok_btn.pack()
+        
+        # Auto-close após 3 segundos
+        self.after(3000, return_dashboard)
+    
+    def _show_upgrade_error_message(self):
+        """
+        Mostra mensagem de erro do Link Upgrade.
+        """
+        print("DEBUG: [LINK_UPGRADE_ERROR] Mostrando mensagem de erro")
+        
+        # Criar overlay
+        overlay = tk.Toplevel(self)
+        overlay.configure(bg="black")
+        overlay.attributes("-alpha", 0.9)
+        overlay.attributes("-fullscreen", True)
+        overlay.attributes("-topmost", True)
+        overlay.grab_set()
+        overlay.focus_set()
+        
+        # Frame central
+        frame = tk.Frame(overlay, bg="#B71C1C", relief="raised", bd=3, padx=30, pady=25)
+        frame.place(relx=0.5, rely=0.5, anchor="center")
+        
+        # Título
+        title = tk.Label(frame, text="Link Upgrade Failed", 
+                        font=("Helvetica", 24, "bold"), fg="white", bg="#B71C1C")
+        title.pack(pady=(0, 20))
+        
+        # Mensagem
+        msg = tk.Label(frame, text="There was an error processing\nyour Link Upgrade. Please try again.", 
+                      font=("Helvetica", 16), fg="white", bg="#B71C1C", justify="center")
+        msg.pack(pady=(0, 25))
+        
+        # Botão OK
+        def return_dashboard():
+            print("DEBUG: [LINK_UPGRADE_ERROR] Voltando para PlayerDashboard")
+            overlay.destroy()
+            self.playerdashboard_interface(self.player_name, self.saldo, self.other_players)
+        
+        ok_btn = tk.Button(frame, text="Back to Dashboard", font=("Helvetica", 16, "bold"), 
+                          bg="#F44336", fg="white", width=18, height=2,
+                          command=return_dashboard)
+        ok_btn.pack()
+    
+    def _voltar_dashboard_apos_link_upgrade(self):
+        """Volta para o PlayerDashboard após LINK UPGRADE"""
+        print("DEBUG: [LINK_UPGRADE] Voltando para PlayerDashboard")
+        self.playerdashboard_interface(self.player_name, self.saldo, self.other_players)
+    
+    def _find_long_link_by_specific_id(self, specific_id):
+        """
+        Encontra Long Link no inventário com specific_id correspondente.
+        Usa a base de dados integrada para determinar dinamicamente o equipment_id.
+        """
+        print(f"DEBUG: [LINK_UPGRADE_SEARCH] Procurando Long Link com specific_id {specific_id}")
+        
+        if not self.card_database:
+            print(f"DEBUG: [LINK_UPGRADE_SEARCH] Base de dados não disponível - usando fallback")
+            return self._find_long_link_fallback(specific_id)
+        
+        try:
+            # Obter cor do jogador para construir equipment_id
+            player_color = self.player_color.lower()
+            equipment_id = f"long_link_{specific_id}_{player_color}"
+            
+            print(f"DEBUG: [LINK_UPGRADE_SEARCH] Procurando equipment_id: {equipment_id}")
+            
+            # Verificar se existe na base de dados
+            equipment_card = self.card_database.get_equipment(equipment_id)
+            if not equipment_card:
+                print(f"DEBUG: [LINK_UPGRADE_SEARCH] Equipment {equipment_id} não encontrado na base de dados")
+                return None
+            
+            # Procurar no inventário do jogador
+            equipments_inventory = self.inventario.get("equipments", [])
+            
             for equipment_path in equipments_inventory:
-                print(f"DEBUG: [LINK_UPGRADE]   - {os.path.basename(equipment_path)}")
+                # Verificar se o caminho corresponde ao Long Link procurado
+                if self._is_long_link_with_specific_id(equipment_path, specific_id):
+                    print(f"DEBUG: [LINK_UPGRADE_SEARCH] ENCONTRADO: {os.path.basename(equipment_path)}")
+                    return equipment_path
+            
+            print(f"DEBUG: [LINK_UPGRADE_SEARCH] Long Link com specific_id {specific_id} não encontrado no inventário")
+            return None
+            
+        except Exception as e:
+            print(f"DEBUG: [LINK_UPGRADE_SEARCH] Erro: {e}")
+            return None
+    
+    def _check_short_link_exists_by_specific_id(self, specific_id):
+        """
+        Verifica se já existe Short Link no inventário com specific_id correspondente.
+        """
+        print(f"DEBUG: [LINK_UPGRADE_CHECK] Verificando Short Link com specific_id {specific_id}")
+        
+        equipments_inventory = self.inventario.get("equipments", [])
+        
+        for equipment_path in equipments_inventory:
+            if self._is_short_link_with_specific_id(equipment_path, specific_id):
+                print(f"DEBUG: [LINK_UPGRADE_CHECK] CONFLITO: {os.path.basename(equipment_path)} já existe")
+                return True
+        
+        print(f"DEBUG: [LINK_UPGRADE_CHECK] Short Link com specific_id {specific_id} não existe - upgrade possível")
+        return False
+    
+    def _is_long_link_with_specific_id(self, equipment_path, specific_id):
+        """
+        Verifica se um caminho de equipment corresponde a Long Link com specific_id.
+        """
+        filename = os.path.basename(equipment_path)
+        
+        # Mapeamento Equipment_X.png -> specific_id
+        # Long Link: Equipment_10.png (id=1), Equipment_11.png (id=2), Equipment_12.png (id=3)
+        long_link_mapping = {
+            "Equipment_10.png": 1,
+            "Equipment_11.png": 2, 
+            "Equipment_12.png": 3
+        }
+        
+        return long_link_mapping.get(filename) == specific_id
+    
+    def _is_short_link_with_specific_id(self, equipment_path, specific_id):
+        """
+        Verifica se um caminho de equipment corresponde a Short Link com specific_id.
+        """
+        filename = os.path.basename(equipment_path)
+        
+        # Mapeamento Equipment_X.png -> specific_id
+        # Short Link: Equipment_7.png (id=1), Equipment_8.png (id=2), Equipment_9.png (id=3)
+        short_link_mapping = {
+            "Equipment_7.png": 1,
+            "Equipment_8.png": 2,
+            "Equipment_9.png": 3
+        }
+        
+        return short_link_mapping.get(filename) == specific_id
+    
+    def _find_long_link_fallback(self, specific_id):
+        """
+        Fallback para encontrar Long Link quando base de dados não está disponível.
+        """
+        # Mapeamento fallback baseado nos filenames
+        long_link_files = {
+            1: "Equipment_10.png",
+            2: "Equipment_11.png", 
+            3: "Equipment_12.png"
+        }
+        
+        if specific_id not in long_link_files:
+            return None
+        
+        target_filename = long_link_files[specific_id]
+        equipments_inventory = self.inventario.get("equipments", [])
+        
+        for equipment_path in equipments_inventory:
+            if os.path.basename(equipment_path) == target_filename:
+                return equipment_path
+        
+        return None
+    
+    def _get_equipment_specific_id_from_path(self, equipment_path):
+        """
+        Obtém o specific_id de um equipment baseado no seu caminho.
+        """
+        filename = os.path.basename(equipment_path)
+        
+        # Mapeamento Equipment_X.png -> specific_id
+        equipment_mapping = {
+            # Small Router
+            "Equipment_1.png": 1, "Equipment_2.png": 2, "Equipment_3.png": 3,
+            # Medium Router  
+            "Equipment_4.png": 1, "Equipment_5.png": 2, "Equipment_6.png": 3,
+            # Short Link
+            "Equipment_7.png": 1, "Equipment_8.png": 2, "Equipment_9.png": 3,
+            # Long Link
+            "Equipment_10.png": 1, "Equipment_11.png": 2, "Equipment_12.png": 3
+        }
+        
+        return equipment_mapping.get(filename)
+    
+    def _get_equipment_info_from_path(self, equipment_path):
+        """
+        Obtém informações detalhadas de um equipment baseado no seu caminho.
+        """
+        filename = os.path.basename(equipment_path)
+        specific_id = self._get_equipment_specific_id_from_path(equipment_path)
+        
+        if not specific_id:
+            return None
+        
+        # Determinar tipo baseado no filename
+        if filename in ["Equipment_1.png", "Equipment_2.png", "Equipment_3.png"]:
+            equipment_type = "small_router"
+        elif filename in ["Equipment_4.png", "Equipment_5.png", "Equipment_6.png"]:
+            equipment_type = "medium_router"
+        elif filename in ["Equipment_7.png", "Equipment_8.png", "Equipment_9.png"]:
+            equipment_type = "short_link"
+        elif filename in ["Equipment_10.png", "Equipment_11.png", "Equipment_12.png"]:
+            equipment_type = "long_link"
+        else:
+            return None
+        
+        return {
+            "filename": filename,
+            "equipment_type": equipment_type,
+            "specific_id": specific_id,
+            "path": equipment_path
+        }
+    
+    def _get_corresponding_short_link_info(self, specific_id):
+        """
+        Obtém informações do Short Link correspondente baseado no specific_id.
+        """
+        # Mapeamento specific_id -> filename do Short Link
+        short_link_mapping = {
+            1: "Equipment_7.png",
+            2: "Equipment_8.png", 
+            3: "Equipment_9.png"
+        }
+        
+        filename = short_link_mapping.get(specific_id)
+        if not filename:
+            return None
+        
+        return {
+            "filename": filename,
+            "equipment_type": "short_link", 
+            "specific_id": specific_id
+        }
 
     def _show_equipment_inventory_for_link_upgrade(self):
         """Abre inventário de equipamentos especificamente para LINK UPGRADE"""
@@ -9977,63 +15703,1397 @@ class PlayerDashboard(tk.Toplevel):
         
         print("DEBUG: [LINK_UPGRADE_INVENTORY] SUCCESS: Inventário específico para LINK UPGRADE criado")
 
+    def _executar_link_upgrade(self, long_link_path, link_id):
+        """Executa o processo de LINK UPGRADE com detecção YOLO em duas fases (igual ao ROUTER UPGRADE)"""
+        print(f"DEBUG: [LINK_UPGRADE_EXECUTE] Executando upgrade: {os.path.basename(long_link_path)}")
+        
+        try:
+            # Sistema flexível baseado no specific_id da base de dados
+            long_link_specific_id = self._get_equipment_specific_id_from_path(long_link_path)
+            
+            if long_link_specific_id != link_id:
+                print(f"DEBUG: [LINK_UPGRADE_EXECUTE] ERRO: specific_id {long_link_specific_id} não corresponde ao link_id {link_id}")
+                return
+            
+            # Obter informações do Long Link da base de dados
+            long_link_info = self._get_equipment_info_from_path(long_link_path)
+            
+            # Calcular Short Link correspondente (mesmo specific_id, diferente tipo)
+            short_link_info = self._get_corresponding_short_link_info(link_id)
+            
+            if not long_link_info or not short_link_info:
+                print(f"DEBUG: [LINK_UPGRADE_EXECUTE] ERRO: Não foi possível obter informações dos equipments")
+                return
+            
+            print(f"DEBUG: [LINK_UPGRADE_EXECUTE] Upgrade: {long_link_info['filename']} -> {short_link_info['filename']}")
+            print(f"DEBUG: [LINK_UPGRADE_EXECUTE] Long Link specific_id: {long_link_specific_id}")
+            print(f"DEBUG: [LINK_UPGRADE_EXECUTE] Short Link specific_id: {link_id}")
+            
+            # NOVA LÓGICA: Executar detecção em duas fases antes de processar upgrade
+            # Fase 1: Detectar Long Link (objeto atual)
+            # Fase 2: Detectar Short Link (objeto de destino)
+            
+            # Obter object names para detecção ANTES de criar loading screen
+            old_object_name = get_equipment_object_name(long_link_path, self.card_database)
+            
+            # Criar loading screen inicial com object name real
+            loading_window = create_yolo_loading_screen(self, old_object_name if old_object_name else "ligacao_longa_vermelha")
+            
+            if loading_window:
+                print("DEBUG: [LINK_UPGRADE_EXECUTE] Loading screen criado - iniciando detecção duas fases")
+                
+                # Construir caminho para Short Link (usar mesmo diretório do Long Link)
+                short_link_filename = short_link_info['filename']
+                short_link_path = os.path.join(os.path.dirname(long_link_path), short_link_filename)
+                new_object_name = get_equipment_object_name(short_link_path, self.card_database)
+                
+                old_equipment_name = f"Long Link {link_id}"
+                new_equipment_name = f"Short Link {link_id}"
+                
+                print(f"DEBUG: [LINK_UPGRADE_EXECUTE] Old object: {old_object_name}")
+                print(f"DEBUG: [LINK_UPGRADE_EXECUTE] New object: {new_object_name}")
+                
+                if old_object_name and new_object_name:
+                    # Executar detecção em duas fases
+                    success = self._execute_two_phase_detection_for_link_upgrade(
+                        old_object_name, new_object_name, loading_window, 
+                        old_equipment_name, new_equipment_name, long_link_path, link_id
+                    )
+                    
+                    if success:
+                        print("DEBUG: [LINK_UPGRADE_EXECUTE] SUCCESS: Detecção duas fases iniciada")
+                        # Processamento será continuado após detecção bem-sucedida
+                        return
+                    else:
+                        print("DEBUG: [LINK_UPGRADE_EXECUTE] ERRO: Falha ao iniciar detecção duas fases")
+                        if loading_window:
+                            loading_window.destroy()
+                else:
+                    print("DEBUG: [LINK_UPGRADE_EXECUTE] ERRO: Não foi possível obter object names")
+                    if loading_window:
+                        loading_window.destroy()
+            else:
+                print("DEBUG: [LINK_UPGRADE_EXECUTE] ERRO: Não foi possível criar loading screen")
+            
+            # Fallback: se detecção falhar, processar diretamente (desenvolvimento)
+            print("DEBUG: [LINK_UPGRADE_EXECUTE] Fallback: processando upgrade diretamente")
+            self._processar_link_upgrade_completo(long_link_path, link_id)
+            
+        except Exception as e:
+            print(f"DEBUG: [LINK_UPGRADE_EXECUTE] ERRO durante upgrade: {e}")
+            # Limpar flags em caso de erro
+            self._in_link_upgrade_context = False
+            self._link_upgrade_target_id = None
+
+    def _execute_two_phase_detection_for_link_upgrade(self, old_object_name, new_object_name, loading_window, 
+                                                     old_equipment_name, new_equipment_name, long_link_path, link_id):
+        """
+        Executa detecção YOLO em duas fases para LINK UPGRADE:
+        Fase 1: Detectar Long Link (objeto atual)
+        Fase 2: Detectar Short Link (objeto de destino)
+        """
+        try:
+            # Usar os utilitários universais para detectar ambiente e caminhos
+            universal_paths = get_universal_paths()
+            
+            if universal_paths['environment'] != 'raspberry_pi':
+                print("DEBUG: [LINK_UPGRADE_2PHASE] Ambiente não é Raspberry Pi - usando fallback")
+                if loading_window:
+                    loading_window.destroy()
+                # Processar upgrade diretamente no desenvolvimento
+                self.after(1000, lambda: self._processar_link_upgrade_completo(long_link_path, link_id))
+                return True
+            
+            # Usar o caminho do script detectado automaticamente
+            script_path = universal_paths['detection_script']
+            
+            # Verificar se existe
+            if not os.path.exists(script_path):
+                print(f"DEBUG: [LINK_UPGRADE_2PHASE] Script não encontrado: {script_path}")
+                if loading_window:
+                    loading_window.destroy()
+                # Fallback: processar diretamente
+                self.after(1000, lambda: self._processar_link_upgrade_completo(long_link_path, link_id))
+                return False
+            
+            print(f"DEBUG: [LINK_UPGRADE_2PHASE] Script encontrado: {script_path}")
+            
+            # Iniciar Fase 1: Detectar Long Link
+            success = self._start_phase_1_detection_link_upgrade(
+                script_path, old_object_name, new_object_name, loading_window,
+                old_equipment_name, new_equipment_name, long_link_path, link_id
+            )
+            
+            return success
+            
+        except Exception as e:
+            print(f"DEBUG: [LINK_UPGRADE_2PHASE] Erro: {e}")
+            if loading_window:
+                loading_window.destroy()
+            # Fallback: processar diretamente
+            self.after(1000, lambda: self._processar_link_upgrade_completo(long_link_path, link_id))
+            return False
+
+    def _start_phase_1_detection_link_upgrade(self, script_path, old_object_name, new_object_name, loading_window, 
+                                             old_equipment_name, new_equipment_name, long_link_path, link_id):
+        """Inicia a Fase 1 da detecção: Long Link"""
+        try:
+            print(f"DEBUG: [LINK_UPGRADE_PHASE1] Iniciando Fase 1: {old_object_name}")
+            print(f"DEBUG: [LINK_UPGRADE_PHASE1] Executando: {script_path} {old_object_name}")
+            
+            # Executar script para primeira detecção
+            process = subprocess.Popen([script_path, old_object_name])
+            
+            print(f"DEBUG: [LINK_UPGRADE_PHASE1] Script Fase 1 iniciado (PID: {process.pid})")
+            
+            # Monitorar inicialização da Fase 1 (igual ao ROUTER UPGRADE)
+            def check_phase_1_initialization():
+                try:
+                    poll_result = process.poll()
+                    if poll_result is None:
+                        # YOLO Fase 1 inicializado - fechar loading screen atual
+                        print(f"DEBUG: [LINK_UPGRADE_PHASE1] Fechando loading screen Fase 1 - YOLO inicializando")
+                        if loading_window and loading_window.winfo_exists():
+                            loading_window.destroy()
+                        self.withdraw()  # Esconder interface Python
+                        
+                        # Monitorar conclusão da Fase 1
+                        def check_phase_1_completion():
+                            poll_result = process.poll()
+                            if poll_result is None:
+                                self.after(1000, check_phase_1_completion)
+                            else:
+                                print(f"DEBUG: [LINK_UPGRADE_PHASE1] Fase 1 completa - iniciando Fase 2")
+                                self.deiconify()  # Mostrar interface Python novamente
+                                # Iniciar Fase 2
+                                self._start_phase_2_detection_link_upgrade(
+                                    script_path, new_object_name, new_equipment_name, long_link_path, link_id
+                                )
+                        
+                        self.after(1000, check_phase_1_completion)
+                    else:
+                        # Script terminou antes de inicializar
+                        print(f"DEBUG: [LINK_UPGRADE_PHASE1] Fase 1 terminou inesperadamente")
+                        if loading_window and loading_window.winfo_exists():
+                            loading_window.destroy()
+                        # Fallback: processar diretamente
+                        self._processar_link_upgrade_completo(long_link_path, link_id)
+                        
+                except Exception as e:
+                    print(f"DEBUG: [LINK_UPGRADE_PHASE1] Erro no monitor: {e}")
+                    if loading_window and loading_window.winfo_exists():
+                        loading_window.destroy()
+                    # Fallback: processar diretamente
+                    self._processar_link_upgrade_completo(long_link_path, link_id)
+            
+            # Aguardar 4.5 segundos para YOLO inicializar (igual ao ROUTER UPGRADE)
+            self.after(4500, check_phase_1_initialization)
+            
+            return True
+            
+        except Exception as e:
+            print(f"DEBUG: [LINK_UPGRADE_PHASE1] Erro: {e}")
+            return False
+
+    def _start_phase_2_detection_link_upgrade(self, script_path, new_object_name, new_equipment_name, 
+                                             long_link_path, link_id):
+        """Inicia a Fase 2 da detecção: Short Link"""
+        try:
+            print(f"DEBUG: [LINK_UPGRADE_PHASE2] Iniciando Fase 2: {new_object_name}")
+            
+            # Criar loading screen para Fase 2
+            phase_2_loading = create_yolo_loading_screen(self, new_object_name)
+            
+            if not phase_2_loading:
+                print(f"DEBUG: [LINK_UPGRADE_PHASE2] ERRO: Não foi possível criar loading screen Fase 2")
+                self._processar_link_upgrade_completo(long_link_path, link_id)
+                return
+                
+            print(f"DEBUG: [LINK_UPGRADE_PHASE2] Loading screen Fase 2 criado para: {new_object_name}")
+            print(f"DEBUG: [LINK_UPGRADE_PHASE2] Executando: {script_path} {new_object_name}")
+            
+            # Executar script para segunda detecção
+            process = subprocess.Popen([script_path, new_object_name])
+            
+            print(f"DEBUG: [LINK_UPGRADE_PHASE2] Script Fase 2 iniciado (PID: {process.pid})")
+            
+            # Monitorar inicialização da Fase 2 (igual ao ROUTER UPGRADE)
+            def check_phase_2_initialization():
+                try:
+                    poll_result = process.poll()
+                    if poll_result is None:
+                        # YOLO Fase 2 inicializado - fechar loading screen atual
+                        print(f"DEBUG: [LINK_UPGRADE_PHASE2] Fechando loading screen Fase 2 - YOLO inicializando")
+                        if phase_2_loading and phase_2_loading.winfo_exists():
+                            phase_2_loading.destroy()
+                        self.withdraw()  # Esconder interface Python
+                        
+                        # Monitorar conclusão da Fase 2
+                        def check_phase_2_completion():
+                            poll_result = process.poll()
+                            if poll_result is None:
+                                self.after(1000, check_phase_2_completion)
+                            else:
+                                print(f"DEBUG: [LINK_UPGRADE_PHASE2] Fase 2 completa - processando upgrade")
+                                self.deiconify()  # Mostrar interface Python novamente
+                                # Processar upgrade completo
+                                self._processar_link_upgrade_completo(long_link_path, link_id)
+                        
+                        self.after(1000, check_phase_2_completion)
+                    else:
+                        # Script terminou antes de inicializar
+                        print(f"DEBUG: [LINK_UPGRADE_PHASE2] Fase 2 terminou inesperadamente")
+                        if phase_2_loading and phase_2_loading.winfo_exists():
+                            phase_2_loading.destroy()
+                        # Fallback: processar diretamente
+                        self._processar_link_upgrade_completo(long_link_path, link_id)
+                        
+                except Exception as e:
+                    print(f"DEBUG: [LINK_UPGRADE_PHASE2] Erro no monitor: {e}")
+                    if phase_2_loading and phase_2_loading.winfo_exists():
+                        phase_2_loading.destroy()
+                    # Fallback: processar diretamente
+                    self._processar_link_upgrade_completo(long_link_path, link_id)
+            
+            # Aguardar 4.5 segundos para YOLO inicializar (igual ao ROUTER UPGRADE)
+            self.after(4500, check_phase_2_initialization)
+            
+            return True
+            
+        except Exception as e:
+            print(f"DEBUG: [LINK_UPGRADE_PHASE2] Erro: {e}")
+            return False
+
+    def _processar_link_upgrade_completo(self, long_link_path, link_id):
+        """
+        Processa efetivamente o LINK UPGRADE após detecção bem-sucedida.
+        Remove Long Link e adiciona Short Link correspondente (ativo).
+        """
+        print(f"DEBUG: [LINK_UPGRADE_COMPLETO] Processando upgrade completo")
+        print(f"DEBUG: [LINK_UPGRADE_COMPLETO] Long Link: {os.path.basename(long_link_path)}")
+        print(f"DEBUG: [LINK_UPGRADE_COMPLETO] Link ID: {link_id}")
+        
+        try:
+            # Sistema flexível baseado no specific_id
+            long_link_info = self._get_equipment_info_from_path(long_link_path)
+            short_link_info = self._get_corresponding_short_link_info(link_id)
+            
+            if not long_link_info or not short_link_info:
+                print(f"DEBUG: [LINK_UPGRADE_COMPLETO] ERRO: Não foi possível obter informações dos equipments")
+                return
+            
+            long_link_file = long_link_info['filename']
+            short_link_file = short_link_info['filename']
+            
+            print(f"DEBUG: [LINK_UPGRADE_COMPLETO] Sistema flexível: {long_link_file} -> {short_link_file}")
+            
+            # PASSO 1: Remover Long Link do inventário
+            if long_link_path in self.inventario.get("equipments", []):
+                self.inventario["equipments"].remove(long_link_path)
+                print(f"DEBUG: [LINK_UPGRADE_COMPLETO] {long_link_file} removido do inventário")
+            else:
+                print(f"DEBUG: [LINK_UPGRADE_COMPLETO] AVISO: {long_link_file} não encontrado no inventário")
+            
+            # PASSO 2: Adicionar Short Link ao inventário (usar mesmo diretório)
+            short_link_path = os.path.join(os.path.dirname(long_link_path), short_link_file)
+            
+            # Verificar se já existe no inventário
+            short_link_exists = any(
+                os.path.basename(equipment_path) == short_link_file 
+                for equipment_path in self.inventario.get("equipments", [])
+            )
+            
+            if not short_link_exists:
+                self.inventario["equipments"].append(short_link_path)
+                print(f"DEBUG: [LINK_UPGRADE_COMPLETO] {short_link_file} adicionado ao inventário")
+            else:
+                print(f"DEBUG: [LINK_UPGRADE_COMPLETO] {short_link_file} já existe no inventário")
+            
+            # PASSO 3: CORREÇÃO CRÍTICA - Ativar Short Link (diferente da lógica anterior)
+            # Adicionar Short Link aos equipments ativos para que fique virado para cima
+            if short_link_path not in self.active_equipments:
+                self.active_equipments.append(short_link_path)
+                print(f"DEBUG: [LINK_UPGRADE_COMPLETO] CORREÇÃO: {short_link_file} adicionado aos ativos (carta fica virada para cima)")
+            else:
+                print(f"DEBUG: [LINK_UPGRADE_COMPLETO] {short_link_file} já está nos ativos")
+            
+            # PASSO 4: Enviar Long Link para a Store
+            if hasattr(self, 'store_window') and self.store_window:
+                try:
+                    self.store_window.adicionar_carta_ao_baralho(long_link_path, "equipments", "neutral")
+                    print(f"DEBUG: [LINK_UPGRADE_COMPLETO] Long Link enviado para Store")
+                except Exception as e:
+                    print(f"DEBUG: [LINK_UPGRADE_COMPLETO] Erro ao enviar Long Link para Store: {e}")
+            
+            # PASSO 5: Limpar flags de contexto
+            self._in_link_upgrade_context = False
+            self._link_upgrade_target_id = None
+            
+            print(f"DEBUG: [LINK_UPGRADE_COMPLETO] SUCCESS: Link Upgrade aplicado com sucesso!")
+            print(f"DEBUG: [LINK_UPGRADE_COMPLETO] {long_link_file} -> {short_link_file} (ATIVO)")
+            
+            # PASSO 6: Voltar IMEDIATAMENTE para o PlayerDashboard após processamento completo
+            # (Sem delay para evitar qualquer display intermediário indesejado)
+            print(f"DEBUG: [LINK_UPGRADE_COMPLETO] Voltando diretamente ao PlayerDashboard")
+            self.playerdashboard_interface(
+                self.player_name, self.saldo, self.other_players
+            )
+            
+        except Exception as e:
+            print(f"DEBUG: [LINK_UPGRADE_COMPLETO] ERRO durante processamento: {e}")
+            # Limpar flags em caso de erro
+            self._in_link_upgrade_context = False
+            self._link_upgrade_target_id = None
+            
+            # Voltar para dashboard mesmo em caso de erro
+            print(f"DEBUG: [LINK_UPGRADE_COMPLETO] ERRO - Voltando diretamente ao PlayerDashboard")
+            self.playerdashboard_interface(
+                self.player_name, self.saldo, self.other_players
+            )
+
     def _aplicar_link_downgrade(self, router_id):
         """
         Aplica o efeito LINK DOWNGRADE baseado no router_id.
-        Verifica se existe Short Link correspondente e abre inventário para downgrade.
+        Similar ao LINK UPGRADE mas inverso: Short Link (inventário) → Long Link (Store)
         """
-        print(f"DEBUG: [LINK_DOWNGRADE] Aplicando Link Downgrade para Router ID: {router_id}")
+        print(f"DEBUG: [LINK_DOWNGRADE] Iniciando Link Downgrade para Router ID: {router_id}")
         
         if router_id is None:
-            print(f"DEBUG: [LINK_DOWNGRADE] Router ID é None - não aplicando downgrade")
+            print(f"DEBUG: [LINK_DOWNGRADE] Router ID é None - cancelando")
             return
         
-        # Mapeamento: Short Link -> Long Link
-        equipment_mapping = {
-            1: ("Equipment_7.png", "Equipment_10.png"),  # Short Link 1 -> Long Link 1
-            2: ("Equipment_8.png", "Equipment_11.png"),  # Short Link 2 -> Long Link 2
-            3: ("Equipment_9.png", "Equipment_12.png"),  # Short Link 3 -> Long Link 3
-        }
+        # Mapear router_id para specific_id (mesmo mapeamento do LINK UPGRADE)
+        specific_id = router_id  # router_id 1 -> specific_id 1, etc.
         
-        if router_id not in equipment_mapping:
-            print(f"DEBUG: [LINK_DOWNGRADE] Router ID {router_id} não suportado")
+        print(f"DEBUG: [LINK_DOWNGRADE] Router ID {router_id} -> Specific ID {specific_id}")
+        
+        # Verificar se há Short Links com specific_id correspondente no inventário do jogador
+        short_links_available = self._get_short_links_by_specific_id_from_inventory(specific_id)
+        
+        if not short_links_available:
+            print(f"DEBUG: [LINK_DOWNGRADE] Nenhum Short Link com specific_id {specific_id} encontrado no inventário")
+            print(f"DEBUG: [LINK_DOWNGRADE] LINK DOWNGRADE requer Short Links no inventário do jogador")
             return
         
-        short_link, long_link = equipment_mapping[router_id]
+        print(f"DEBUG: [LINK_DOWNGRADE] {len(short_links_available)} Short Link(s) encontrado(s)")
         
-        # Verificar se o jogador tem o Short Link correspondente no inventário
+        # Definir contexto de LINK DOWNGRADE
+        self._in_link_downgrade_context = True
+        self._link_downgrade_target_id = router_id
+        
+        # Ir para página SELECT LINK (mas com Short Links em vez de Long Links)
+        self._show_select_short_link_page(router_id)
+    
+    def _get_short_links_by_specific_id_from_inventory(self, specific_id):
+        """
+        Obtém todos os Short Links no inventário com specific_id correspondente.
+        Similar ao _get_long_links_by_specific_id mas para Short Links.
+        """
+        print(f"DEBUG: [LINK_DOWNGRADE_SELECT] Procurando Short Links com specific_id {specific_id}")
+        
+        short_links_found = []
         equipments_inventory = self.inventario.get("equipments", [])
-        short_link_found = None
         
         for equipment_path in equipments_inventory:
-            if os.path.basename(equipment_path) == short_link:
-                short_link_found = equipment_path
-                break
+            if self._is_short_link_with_specific_id(equipment_path, specific_id):
+                short_links_found.append(equipment_path)
         
-        if short_link_found:
-            print(f"DEBUG: [LINK_DOWNGRADE] Short Link {short_link} encontrado - procedendo com inventário")
-            print(f"DEBUG: [LINK_DOWNGRADE] Short Link encontrado: {os.path.basename(short_link_found)}")
+        print(f"DEBUG: [LINK_DOWNGRADE_SELECT] Encontrados {len(short_links_found)} Short Links")
+        return short_links_found
+    
+    def _show_select_short_link_page(self, router_id):
+        """
+        Cria página SELECT LINK para Short Links (inverso da página Long Links).
+        Layout idêntico mas com Short Links em vez de Long Links.
+        """
+        print(f"DEBUG: [SELECT_SHORT_LINK_PAGE] Criando página SELECT LINK para Short Links - Router ID {router_id}")
+        
+        # Salvar estado da interface
+        self._save_dashboard_state()
+        
+        # Limpar widgets (exceto TopBar)
+        for widget in self.winfo_children():
+            if hasattr(widget, '_is_topbar') and widget._is_topbar:
+                continue
+            widget.destroy()
+        
+        screen_width = self.winfo_screenwidth()
+        screen_height = self.winfo_screenheight()
+        
+        # Criar TopBar do jogador
+        try:
+            topbar_img_path = os.path.join(IMG_DIR, f"TopBar_{self.player_color.lower()}.png")
+            if os.path.exists(topbar_img_path):
+                img = Image.open(topbar_img_path).convert("RGBA")
+                img = img.resize((screen_width, 60), Image.Resampling.LANCZOS)
+                topbar_img = ImageTk.PhotoImage(img)
+                topbar_label = tk.Label(self, image=topbar_img, bg="black", borderwidth=0, highlightthickness=0)
+                topbar_label.image = topbar_img
+                topbar_label.pack(side="top", fill="x")
+                topbar_label._is_topbar = True
+                print(f"DEBUG: [SELECT_SHORT_LINK_PAGE] TopBar do jogador {self.player_color} carregado")
+            else:
+                print(f"DEBUG: [SELECT_SHORT_LINK_PAGE] TopBar não encontrado, usando fallback")
+        except Exception as e:
+            print(f"DEBUG: [SELECT_SHORT_LINK_PAGE] Erro ao carregar TopBar: {e}")
+        
+        # Nome do jogador (igual ao inventário original - fundo da cor do jogador e texto preto)
+        name_lbl = tk.Label(self, text=self.player_name, font=("Helvetica", 18, "bold"), bg=self.bar_color, fg="black", borderwidth=0)
+        name_lbl.place(relx=0.5, y=25, anchor="n")
+        
+        # Título da página
+        title = tk.Label(self, text="SELECT LINK", font=("Helvetica", 22, "bold"), fg="white", bg="black")
+        title.place(relx=0.5, y=65, anchor="n")
+        
+        # Obter Short Links com specific_id correspondente
+        short_links = self._get_short_links_by_specific_id_from_inventory(router_id)
+        
+        if not short_links:
+            # Mensagem se não há Short Links disponíveis
+            no_links_msg = tk.Label(self, text="No Short Links available for downgrade", 
+                                   font=("Helvetica", 18), fg="red", bg="black")
+            no_links_msg.place(relx=0.5, rely=0.5, anchor="center")
             
-            # Verificar se o jogador já tem o Long Link correspondente no inventário
-            long_link_exists = any(os.path.basename(eq) == long_link for eq in equipments_inventory)
+            # Botão de volta
+            back_btn = tk.Button(self, text="Back", font=("Helvetica", 16), 
+                               bg="#AAAAAA", fg="white", width=10, height=2,
+                               command=self._voltar_dashboard_apos_select_link)
+            back_btn.place(relx=0.5, rely=0.7, anchor="center")
+            return
+        
+        # Layout grid 2xn para múltiplos Short Links
+        matriz_frame = tk.Frame(self, bg="black")
+        matriz_frame.place(relx=0.5, rely=0.5, anchor="center")
+        
+        card_w, card_h = 85, 120  # Tamanho padrão
+        
+        # Grid 2xn - sempre 2 colunas, n linhas conforme necessário
+        for idx, link_path in enumerate(short_links):
+            row = idx // 2
+            col = idx % 2
             
-            if long_link_exists:
-                print(f"DEBUG: [LINK_DOWNGRADE] ERROR: {long_link} já existe no inventário - downgrade não aplicado")
+            try:
+                # Carregar e redimensionar imagem
+                pil_img = Image.open(link_path)
+                pil_img = pil_img.resize((card_w, card_h), Image.Resampling.LANCZOS)
+                card_img = ImageTk.PhotoImage(pil_img)
+                
+                # Criar label da carta
+                card_lbl = tk.Label(matriz_frame, image=card_img, cursor="hand2", bg="black")
+                card_lbl.image = card_img
+                card_lbl.grid(row=row, column=col, padx=10, pady=10)
+                
+                # Bind para clique na carta (vai para confirmação de downgrade)
+                card_lbl.bind("<Button-1>", lambda e, path=link_path: self._show_select_short_link_fullscreen(path))
+                
+            except Exception as e:
+                print(f"DEBUG: [SELECT_SHORT_LINK_PAGE] Erro ao carregar carta {os.path.basename(link_path)}: {e}")
+        
+        # Barra inferior do jogador
+        try:
+            belowbar_img_path = os.path.join(IMG_DIR, f"BelowBar_{self.player_color.lower()}.png")
+            if os.path.exists(belowbar_img_path):
+                belowbar_img = ImageTk.PhotoImage(Image.open(belowbar_img_path).resize((screen_width, 50)))
+                belowbar_label = tk.Label(self, image=belowbar_img, bg="black")
+                belowbar_label.image = belowbar_img
+                belowbar_label.pack(side="bottom", fill="x")
+                print(f"DEBUG: [SELECT_SHORT_LINK_PAGE] BelowBar do jogador {self.player_color} carregado")
+            else:
+                print(f"DEBUG: [SELECT_SHORT_LINK_PAGE] BelowBar não encontrado, usando fallback")
+                belowbar_frame = tk.Frame(self, bg=self.bar_color, height=50)
+                belowbar_frame.pack(side="bottom", fill="x")
+                belowbar_frame.pack_propagate(False)
+        except Exception as e:
+            print(f"DEBUG: [SELECT_SHORT_LINK_PAGE] Erro ao carregar BelowBar: {e}")
+            belowbar_frame = tk.Frame(self, bg="#DC8392", height=50)
+            belowbar_frame.pack(side="bottom", fill="x")
+            belowbar_frame.pack_propagate(False)
+        
+        print("DEBUG: [SELECT_SHORT_LINK_PAGE] SUCCESS: Página SELECT LINK (Short Links) criada")
+    
+    def _show_select_short_link_fullscreen(self, link_path):
+        """
+        Mostra Short Link em fullscreen com botão roxo para confirmação de downgrade.
+        """
+        print(f"DEBUG: [SELECT_SHORT_LINK_FULLSCREEN] Mostrando fullscreen: {os.path.basename(link_path)}")
+        
+        # Limpar widgets
+        for widget in self.winfo_children():
+            widget.destroy()
+        
+        # Carregar e exibir imagem do Short Link
+        try:
+            pil_img = Image.open(link_path)
+            img_w, img_h = pil_img.size
+            max_w, max_h = self.winfo_screenwidth(), self.winfo_screenheight()
+            ratio = min(max_w/img_w, max_h/img_h)
+            new_w, new_h = int(img_w*ratio), int(img_h*ratio)
+            pil_img = pil_img.resize((new_w, new_h), Image.Resampling.LANCZOS)
+            
+            card_img = ImageTk.PhotoImage(pil_img)
+            card_lbl = tk.Label(self, image=card_img, bg="black")
+            card_lbl.image = card_img
+            card_lbl.place(relx=0.5, rely=0.5, anchor="center")
+            
+        except Exception as e:
+            print(f"DEBUG: [SELECT_SHORT_LINK_FULLSCREEN] Erro ao carregar imagem: {e}")
+        
+        # Botão X (cinzento, canto superior esquerdo) - volta para SELECT LINK
+        def close_fullscreen():
+            router_id = getattr(self, '_link_downgrade_target_id', 1)
+            self._show_select_short_link_page(router_id)
+        
+        x_btn = tk.Button(
+            self, 
+            text="✖", 
+            font=("Helvetica", 24, "bold"), 
+            bg="#AAAAAA", 
+            fg="white", 
+            width=2, 
+            height=1, 
+            borderwidth=0, 
+            highlightthickness=0, 
+            command=close_fullscreen, 
+            cursor="hand2", 
+            activebackground="#CCCCCC"
+        )
+        x_btn.place(relx=0.02, rely=0, anchor="nw")
+        
+        # Botão ROXO (canto superior direito) - confirma downgrade
+        def confirm_downgrade():
+            self._show_link_downgrade_confirmation(link_path)
+        
+        purple_btn = tk.Button(
+            self, 
+            text="✓", 
+            font=("Helvetica", 24, "bold"), 
+            bg="#800080", 
+            fg="white", 
+            width=2, 
+            height=1, 
+            borderwidth=0, 
+            highlightthickness=0, 
+            command=confirm_downgrade, 
+            cursor="hand2", 
+            activebackground="#9900AA"
+        )
+        purple_btn.place(relx=0.98, rely=0, anchor="ne")
+        
+        print("DEBUG: [SELECT_SHORT_LINK_FULLSCREEN] SUCCESS: Fullscreen criado com botões")
+    
+    def _show_link_downgrade_confirmation(self, link_path):
+        """
+        Mostra overlay de confirmação Link Downgrade Confirmation.
+        """
+        print(f"DEBUG: [LINK_DOWNGRADE_CONFIRMATION] Mostrando confirmação para: {os.path.basename(link_path)}")
+        
+        # Limpar widgets
+        for widget in self.winfo_children():
+            widget.destroy()
+        
+        # Definir fundo preto
+        self.config(bg="black")
+        
+        # Carregar imagem da carta como fundo
+        try:
+            pil_img = Image.open(link_path)
+            img_w, img_h = pil_img.size
+            max_w, max_h = self.winfo_screenwidth(), self.winfo_screenheight()
+            ratio = min(max_w/img_w, max_h/img_h)
+            new_w, new_h = int(img_w*ratio), int(img_h*ratio)
+            pil_img = pil_img.resize((new_w, new_h), Image.Resampling.LANCZOS)
+            
+            bg_img = ImageTk.PhotoImage(pil_img)
+            bg_lbl = tk.Label(self, image=bg_img, bg="black")
+            bg_lbl.image = bg_img
+            bg_lbl.place(relx=0.5, rely=0.5, anchor="center")
+            
+        except Exception as e:
+            print(f"DEBUG: [LINK_DOWNGRADE_CONFIRMATION] Erro ao carregar imagem de fundo: {e}")
+        
+        # Frame para a dialog de confirmação
+        confirm_frame = tk.Frame(self, bg="black")
+        confirm_frame.pack(expand=True)
+        
+        # Título
+        tk.Label(confirm_frame, text="Link Downgrade Confirmation", 
+                font=("Helvetica", 16, "bold"), fg="yellow", bg="black").pack(pady=(40, 20))
+        
+        # Obter specific_id da carta
+        specific_id = self._get_equipment_specific_id_from_path(link_path)
+        
+        # Mensagem de confirmação
+        tk.Label(confirm_frame, text=f"Short Link {specific_id} is going to be downgraded", 
+                font=("Helvetica", 14), fg="white", bg="black").pack(pady=(0, 30))
+        
+        # Frame para o botão
+        btns_frame = tk.Frame(confirm_frame, bg="black")
+        btns_frame.pack(pady=30)
+        
+        # Botão Ok (roxo)
+        def confirmar_downgrade():
+            print("DEBUG: [LINK_DOWNGRADE_CONFIRMATION] Downgrade confirmado - destruindo interface e iniciando Fase 1")
+            # Salvar Short Link path para uso posterior
+            self._link_downgrade_short_link_path = link_path
+            # Destruir completamente a interface antes do loading screen
+            for widget in self.winfo_children():
+                widget.destroy()
+            self.config(bg="black")
+            print("DEBUG: [LINK_DOWNGRADE_CONFIRMATION] Interface destruída - prosseguindo para detecção YOLO")
+            self._executar_link_downgrade_phase_1(link_path, specific_id)
+        
+        ok_btn = tk.Button(
+            btns_frame,
+            text="Ok",
+            font=("Helvetica", 16, "bold"),
+            bg="#8A2BE2",
+            fg="white",
+            width=8,
+            height=2,
+            command=confirmar_downgrade
+        )
+        ok_btn.pack()
+        
+        print("DEBUG: [LINK_DOWNGRADE_CONFIRMATION] Overlay de confirmação criado")
+    
+    def _executar_link_downgrade_phase_1(self, short_link_path, specific_id):
+        """
+        Phase 1 de LINK DOWNGRADE: Detectar Short Link atual.
+        Após detecção, vai para página LINK DOWNGRADE com Long Links.
+        """
+        print(f"DEBUG: [LINK_DOWNGRADE_PHASE1] Iniciando Phase 1 para Short Link: {os.path.basename(short_link_path)}")
+        
+        try:
+            # Obter object_name do Short Link para detecção YOLO
+            if self.card_database:
+                object_name = get_equipment_object_name(short_link_path, self.card_database)
+                
+                if not object_name:
+                    print(f"DEBUG: [LINK_DOWNGRADE_PHASE1] Nenhum object_name encontrado - fallback direto")
+                    self._show_link_downgrade_page(short_link_path, specific_id)
+                    return
+                
+                print(f"DEBUG: [LINK_DOWNGRADE_PHASE1] Object name para detecção: {object_name}")
+            else:
+                print(f"DEBUG: [LINK_DOWNGRADE_PHASE1] Base de dados não disponível - fallback direto")
+                self._show_link_downgrade_page(short_link_path, specific_id)
                 return
             
-            # Definir contexto de LINK DOWNGRADE e router_id
-            self._in_link_downgrade_context = True
-            self._link_downgrade_target_id = router_id
+            # Criar loading screen
+            loading_window = create_yolo_loading_screen(self, object_name)
             
-            # Abrir inventário de equipamentos para seleção
-            self._show_equipment_inventory_for_link_downgrade()
-            print("DEBUG: [LINK_DOWNGRADE] SUCCESS: Inventário de equipamentos aberto para downgrade")
-        else:
-            print(f"DEBUG: [LINK_DOWNGRADE] Nenhum Short Link {short_link} encontrado no inventário - não é possível fazer downgrade")
-            print(f"DEBUG: [LINK_DOWNGRADE] LINK DOWNGRADE só funciona se houver {short_link} disponível no inventário")
-            print(f"DEBUG: [LINK_DOWNGRADE] Equipamentos disponíveis:")
-            for equipment_path in equipments_inventory:
-                print(f"DEBUG: [LINK_DOWNGRADE]   - {os.path.basename(equipment_path)}")
+            if loading_window:
+                print("DEBUG: [LINK_DOWNGRADE_PHASE1] Loading screen criado - iniciando detecção")
+                
+                # Usar utilitários universais para detectar script
+                universal_paths = get_universal_paths()
+                script_path = universal_paths['detection_script']
+                
+                if not os.path.exists(script_path):
+                    print(f"DEBUG: [LINK_DOWNGRADE_PHASE1] Script não encontrado: {script_path}")
+                    if loading_window and loading_window.winfo_exists():
+                        loading_window.destroy()
+                    self._show_link_downgrade_page(short_link_path, specific_id)
+                    return
+                
+                print(f"DEBUG: [LINK_DOWNGRADE_PHASE1] Executando: {script_path} {object_name}")
+                
+                # Esconder interface Python
+                self.withdraw()
+                
+                # Executar script YOLO
+                subprocess.run(['chmod', '+x', script_path], check=True)
+                process = subprocess.Popen([script_path, object_name])
+                
+                # Monitor de inicialização (aguardar YOLO carregar)
+                def check_phase_1_initialization():
+                    try:
+                        if process.poll() is None:
+                            # Script ainda rodando - YOLO inicializado com sucesso
+                            print(f"DEBUG: [LINK_DOWNGRADE_PHASE1] YOLO inicializado - destruindo loading")
+                            
+                            # Destruir loading screen
+                            if loading_window and loading_window.winfo_exists():
+                                loading_window.destroy()
+                            
+                            # Monitor de conclusão
+                            def check_phase_1_completion():
+                                try:
+                                    if process.poll() is not None:
+                                        # Script terminou - detecção completa
+                                        print(f"DEBUG: [LINK_DOWNGRADE_PHASE1] Detecção Phase 1 completa")
+                                        self.deiconify()  # Mostrar interface Python
+                                        # Ir para página LINK DOWNGRADE
+                                        self._show_link_downgrade_page(short_link_path, specific_id)
+                                    else:
+                                        # Continuar monitorando
+                                        self.after(1000, check_phase_1_completion)
+                                except Exception as e:
+                                    print(f"DEBUG: [LINK_DOWNGRADE_PHASE1] Erro no monitor: {e}")
+                                    self.deiconify()
+                                    self._show_link_downgrade_page(short_link_path, specific_id)
+                            
+                            self.after(1000, check_phase_1_completion)
+                        else:
+                            # Script terminou antes de inicializar
+                            print(f"DEBUG: [LINK_DOWNGRADE_PHASE1] Script terminou inesperadamente")
+                            if loading_window and loading_window.winfo_exists():
+                                loading_window.destroy()
+                            self.deiconify()
+                            self._show_link_downgrade_page(short_link_path, specific_id)
+                    except Exception as e:
+                        print(f"DEBUG: [LINK_DOWNGRADE_PHASE1] Erro na inicialização: {e}")
+                        if loading_window and loading_window.winfo_exists():
+                            loading_window.destroy()
+                        self.deiconify()
+                        self._show_link_downgrade_page(short_link_path, specific_id)
+                
+                # Aguardar 4.5 segundos para YOLO inicializar
+                self.after(4500, check_phase_1_initialization)
+            else:
+                print("DEBUG: [LINK_DOWNGRADE_PHASE1] Erro ao criar loading screen - fallback direto")
+                self._show_link_downgrade_page(short_link_path, specific_id)
+                
+        except Exception as e:
+            print(f"DEBUG: [LINK_DOWNGRADE_PHASE1] Erro: {e}")
+            self._show_link_downgrade_page(short_link_path, specific_id)
+    
+    def _show_link_downgrade_page(self, short_link_path, specific_id):
+        """
+        Cria página LINK DOWNGRADE para escolher Long Link.
+        Inverso da página LINK UPGRADE: título "LINK DOWNGRADE" e Long Links da Store.
+        """
+        print(f"DEBUG: [LINK_DOWNGRADE_PAGE] Criando página LINK DOWNGRADE para specific_id {specific_id}")
+        
+        # Salvar estado da interface
+        self._save_dashboard_state()
+        
+        # Limpar widgets (exceto TopBar)
+        for widget in self.winfo_children():
+            if hasattr(widget, '_is_topbar') and widget._is_topbar:
+                continue
+            widget.destroy()
+        
+        screen_width = self.winfo_screenwidth()
+        screen_height = self.winfo_screenheight()
+        
+        # Criar TopBar igual à Store - usar awning da Store
+        try:
+            awning_img_path = os.path.join(IMG_DIR, "Store_awning_v3.png")
+            if os.path.exists(awning_img_path):
+                awning_img = ImageTk.PhotoImage(Image.open(awning_img_path).resize((screen_width, 50)))
+                awning_label = tk.Label(self, image=awning_img, bg="black")
+                awning_label.image = awning_img
+                awning_label.pack(pady=(0, 10), fill="x")
+                awning_label._is_topbar = True
+                
+                # Label pequeno à esquerda do logo (igual à Store)
+                left_label = tk.Label(self, text="••••", font=("Helvetica", 12, "bold"), bg="#DC8392", fg="#DC8392")
+                left_label.place(relx=0.46, y=10, anchor="center")
+                
+                # Logo NetMaster posicionado independentemente (igual à Store)
+                try:
+                    logo_img = ImageTk.PhotoImage(Image.open(os.path.join(IMG_DIR, "logo_netmaster_store.png")).resize((20, 20)))
+                    logo_lbl = tk.Label(self, image=logo_img, bg="#DC8392")
+                    logo_lbl.image = logo_img
+                    logo_lbl.place(relx=0.5, y=10, anchor="center")
+                except Exception as e:
+                    print(f"DEBUG: [LINK_DOWNGRADE_PAGE] Erro ao carregar logo: {e}")
+                
+                # Label largo à direita do logo para cobrir área amarela (igual à Store)
+                right_logo_label = tk.Label(self, text="     ", font=("Helvetica", 12, "bold"), bg="#DC8392", fg="#DC8392")
+                right_logo_label.place(relx=0.53, y=10, anchor="w")
+                
+                # Label adicional para garantir cobertura completa (igual à Store)
+                extra_cover_label = tk.Label(self, text="     ", font=("Helvetica", 10), bg="#DC8392", fg="#DC8392")
+                extra_cover_label.place(relx=0.55, y=10, anchor="w")
+                
+                print(f"DEBUG: [LINK_DOWNGRADE_PAGE] TopBar da Store aplicado com sucesso")
+                
+            else:
+                print(f"DEBUG: [LINK_DOWNGRADE_PAGE] Store awning não encontrado, usando fallback")
+                # Criar TopBar fallback
+                topbar_frame = tk.Frame(self, bg="#DC8392", height=50)
+                topbar_frame.pack(pady=(0, 10), fill="x")
+                topbar_frame.pack_propagate(False)
+        except Exception as e:
+            print(f"DEBUG: [LINK_DOWNGRADE_PAGE] Erro ao criar TopBar da Store: {e}")
+            # Criar TopBar fallback em caso de erro
+            topbar_frame = tk.Frame(self, bg="#DC8392", height=50)
+            topbar_frame.pack(pady=(0, 10), fill="x")
+            topbar_frame.pack_propagate(False)
+        
+        # Texto "Store" posicionado independentemente (igual à Store)
+        store_name_lbl = tk.Label(self, text="Store", 
+                                 font=("Helvetica", 15, "bold"), bg="#DC8392", fg="black")
+        store_name_lbl.place(relx=0.5, y=30, anchor="center")
+        
+        # Label pequeno à direita do nome Store (igual à Store original)
+        right_store_label = tk.Label(self, text="•", font=("Helvetica", 12, "bold"), bg="#DC8392", fg="#DC8392")
+        right_store_label.place(relx=0.6, y=30, anchor="center")
+        
+        # Título da página - LINK DOWNGRADE (em vez de LINK UPGRADE)
+        title = tk.Label(self, text="LINK DOWNGRADE", font=("Helvetica", 22, "bold"), fg="white", bg="black")
+        title.place(relx=0.5, y=65, anchor="n")
+        
+        # Obter Long Links para downgrade (da Store da cor do jogador)
+        long_links = self._get_long_links_for_downgrade(specific_id)
+        
+        if not long_links:
+            # Mensagem se não há Long Links disponíveis
+            no_links_msg = tk.Label(self, text="No Long Links available for downgrade", 
+                                   font=("Helvetica", 18), fg="red", bg="black")
+            no_links_msg.place(relx=0.5, rely=0.5, anchor="center")
+            
+            # Botão de volta
+            back_btn = tk.Button(self, text="Back", font=("Helvetica", 16), 
+                               bg="#AAAAAA", fg="white", width=10, height=2,
+                               command=self._voltar_dashboard_apos_select_link)
+            back_btn.place(relx=0.5, rely=0.7, anchor="center")
+            return
+        
+        # Layout grid 2xn para múltiplos Long Links
+        matriz_frame = tk.Frame(self, bg="black")
+        matriz_frame.place(relx=0.5, rely=0.5, anchor="center")
+        
+        card_w, card_h = 85, 120  # Tamanho padrão
+        
+        # Grid 2xn - sempre 2 colunas, n linhas conforme necessário
+        for idx, link_path in enumerate(long_links):
+            row = idx // 2
+            col = idx % 2
+            
+            try:
+                # Carregar e redimensionar imagem
+                pil_img = Image.open(link_path)
+                pil_img = pil_img.resize((card_w, card_h), Image.Resampling.LANCZOS)
+                card_img = ImageTk.PhotoImage(pil_img)
+                
+                # Criar label da carta
+                card_lbl = tk.Label(matriz_frame, image=card_img, cursor="hand2", bg="black")
+                card_lbl.image = card_img
+                card_lbl.grid(row=row, column=col, padx=10, pady=10)
+                
+                # Bind para clique na carta
+                card_lbl.bind("<Button-1>", lambda e, path=link_path: self._show_link_downgrade_fullscreen(path))
+                
+            except Exception as e:
+                print(f"DEBUG: [LINK_DOWNGRADE_PAGE] Erro ao carregar carta {os.path.basename(link_path)}: {e}")
+        
+        # Barra inferior da Store (igual à página LINK UPGRADE)
+        try:
+            belowbar_img_path = os.path.join(IMG_DIR, "BelowBar_store.png")
+            if os.path.exists(belowbar_img_path):
+                belowbar_img = ImageTk.PhotoImage(Image.open(belowbar_img_path).resize((screen_width, 50)))
+                belowbar_label = tk.Label(self, image=belowbar_img, bg="black")
+                belowbar_label.image = belowbar_img
+                belowbar_label.pack(side="bottom", fill="x")
+                print(f"DEBUG: [LINK_DOWNGRADE_PAGE] BelowBar_store carregado")
+            else:
+                print(f"DEBUG: [LINK_DOWNGRADE_PAGE] BelowBar_store não encontrado, usando fallback")
+                belowbar_frame = tk.Frame(self, bg="#DC8392", height=50)
+                belowbar_frame.pack(side="bottom", fill="x")
+                belowbar_frame.pack_propagate(False)
+        except Exception as e:
+            print(f"DEBUG: [LINK_DOWNGRADE_PAGE] Erro ao carregar BelowBar_store: {e}")
+            belowbar_frame = tk.Frame(self, bg="#DC8392", height=50)
+            belowbar_frame.pack(side="bottom", fill="x")
+            belowbar_frame.pack_propagate(False)
+        
+        print("DEBUG: [LINK_DOWNGRADE_PAGE] SUCCESS: Página LINK DOWNGRADE criada")
+    
+    def _get_long_links_for_downgrade(self, specific_id):
+        """
+        Obtém cartas Long Link da COR DO JOGADOR com specific_id correspondente na Store.
+        Inverso do _get_short_links_for_upgrade: procura Long Links em vez de Short Links.
+        """
+        print(f"DEBUG: [LINK_DOWNGRADE_LINKS] Obtendo Long Links da cor '{self.player_color}' para specific_id {specific_id}")
+        
+        # Obter informações do Long Link baseado no specific_id
+        long_link_info = self._get_corresponding_long_link_info(specific_id)
+        
+        if not long_link_info:
+            print(f"DEBUG: [LINK_DOWNGRADE_LINKS] Nenhum Long Link correspondente encontrado")
+            return []
+        
+        long_links_found = []
+        filename = long_link_info['filename']
+        
+        # Usar utilitários universais para detectar caminhos
+        universal_paths = get_universal_paths()
+        base_dir = universal_paths['base_dir']
+        
+        # Mapear cor do jogador para nome do diretório (primeira letra maiúscula)
+        player_color_dir = self.player_color.capitalize()  # red -> Red, blue -> Blue, etc.
+        
+        print(f"DEBUG: [LINK_DOWNGRADE_LINKS] Procurando {filename} na cor {player_color_dir}...")
+        
+        # Possíveis bases para busca
+        possivel_bases = [base_dir]
+        
+        # Para cada base possível, buscar Long Links
+        for base_path in possivel_bases:
+            if not os.path.exists(base_path):
+                continue
+                
+            # Testar estruturas de diretórios (similar ao _obter_equipments_da_store)
+            equipments_variations = [
+                os.path.join(base_path, "equipments", "Residential-level"),  # Raspberry Pi (minúscula)
+                os.path.join(base_path, "Equipments", "Residential-level"),  # Desenvolvimento (maiúscula)
+                os.path.join(base_path, "img", "cartas", "equipments", "Residential-level")  # Fallback
+            ]
+            
+            equipments_base = None
+            for variation in equipments_variations:
+                if os.path.exists(variation):
+                    equipments_base = variation
+                    print(f"DEBUG: [LINK_DOWNGRADE_LINKS] Usando estrutura: {equipments_base}")
+                    break
+            
+            if not equipments_base:
+                continue
+                
+            # Buscar Long Links APENAS na cor do jogador
+            cor_dir = os.path.join(equipments_base, player_color_dir)
+            if not os.path.exists(cor_dir):
+                print(f"DEBUG: [LINK_DOWNGRADE_LINKS] Diretório da cor {player_color_dir} não existe: {cor_dir}")
+                continue
+                
+            # Procurar TODAS as cartas com o filename da cor do jogador
+            print(f"DEBUG: [LINK_DOWNGRADE_LINKS] Procurando em: {cor_dir}")
+            
+            # Listar todos os arquivos no diretório da cor do jogador
+            if os.path.isdir(cor_dir):
+                arquivos_na_cor = os.listdir(cor_dir)
+                print(f"DEBUG: [LINK_DOWNGRADE_LINKS] Arquivos encontrados na cor {player_color_dir}: {arquivos_na_cor}")
+                
+                # Procurar TODAS as instâncias do filename
+                for arquivo in arquivos_na_cor:
+                    if arquivo == filename:
+                        long_link_path = os.path.join(cor_dir, arquivo)
+                        long_links_found.append(long_link_path)
+                        print(f"DEBUG: [LINK_DOWNGRADE_LINKS] Long Link encontrado: {long_link_path}")
+        
+        print(f"DEBUG: [LINK_DOWNGRADE_LINKS] Total de Long Links encontrados: {len(long_links_found)}")
+        return long_links_found
+    
+    def _get_corresponding_long_link_info(self, specific_id):
+        """
+        Obtém informações do Long Link correspondente ao specific_id.
+        Inverso do _get_corresponding_short_link_info.
+        """
+        # Mapeamento: specific_id -> Long Link filename
+        mapping = {
+            1: "Equipment_10.png",  # Long Link 1
+            2: "Equipment_11.png",  # Long Link 2
+            3: "Equipment_12.png",  # Long Link 3
+        }
+        
+        filename = mapping.get(specific_id)
+        if filename:
+            return {'filename': filename, 'specific_id': specific_id}
+        return None
+    
+    def _show_link_downgrade_fullscreen(self, long_link_path):
+        """
+        Mostra Long Link em fullscreen com botão roxo para confirmação de trade.
+        """
+        print(f"DEBUG: [LINK_DOWNGRADE_FULLSCREEN] Mostrando fullscreen: {os.path.basename(long_link_path)}")
+        
+        # Limpar widgets
+        for widget in self.winfo_children():
+            widget.destroy()
+        
+        # Carregar e exibir imagem do Long Link
+        try:
+            pil_img = Image.open(long_link_path)
+            img_w, img_h = pil_img.size
+            max_w, max_h = self.winfo_screenwidth(), self.winfo_screenheight()
+            ratio = min(max_w/img_w, max_h/img_h)
+            new_w, new_h = int(img_w*ratio), int(img_h*ratio)
+            pil_img = pil_img.resize((new_w, new_h), Image.Resampling.LANCZOS)
+            
+            card_img = ImageTk.PhotoImage(pil_img)
+            card_lbl = tk.Label(self, image=card_img, bg="black")
+            card_lbl.image = card_img
+            card_lbl.place(relx=0.5, rely=0.5, anchor="center")
+            
+        except Exception as e:
+            print(f"DEBUG: [LINK_DOWNGRADE_FULLSCREEN] Erro ao carregar imagem: {e}")
+        
+        # Botão X (cinzento, canto superior esquerdo) - volta para LINK DOWNGRADE
+        def close_fullscreen():
+            router_id = getattr(self, '_link_downgrade_target_id', 1)
+            specific_id = router_id
+            short_link_path = getattr(self, '_link_downgrade_source_path', None)
+            self._show_link_downgrade_page(short_link_path, specific_id)
+        
+        x_btn = tk.Button(
+            self, 
+            text="✖", 
+            font=("Helvetica", 24, "bold"), 
+            bg="#AAAAAA", 
+            fg="white", 
+            width=2, 
+            height=1, 
+            borderwidth=0, 
+            highlightthickness=0, 
+            command=close_fullscreen, 
+            cursor="hand2", 
+            activebackground="#CCCCCC"
+        )
+        x_btn.place(relx=0.02, rely=0, anchor="nw")
+        
+        # Botão ROXO (canto superior direito) - confirma trade
+        def confirm_trade():
+            self._show_link_downgrade_trade_confirmation(long_link_path)
+        
+        purple_btn = tk.Button(
+            self, 
+            text="✓", 
+            font=("Helvetica", 24, "bold"), 
+            bg="#800080", 
+            fg="white", 
+            width=2, 
+            height=1, 
+            borderwidth=0, 
+            highlightthickness=0, 
+            command=confirm_trade, 
+            cursor="hand2", 
+            activebackground="#9900AA"
+        )
+        purple_btn.place(relx=0.98, rely=0, anchor="ne")
+        
+        print("DEBUG: [LINK_DOWNGRADE_FULLSCREEN] SUCCESS: Fullscreen criado com botões")
+    
+    def _show_link_downgrade_trade_confirmation(self, long_link_path):
+        """
+        Overlay de confirmação final para o trade Link Downgrade.
+        """
+        print(f"DEBUG: [LINK_DOWNGRADE_TRADE] Criando overlay de trade para: {os.path.basename(long_link_path)}")
+        
+        # Salvar referência do Long Link escolhido
+        self._link_downgrade_long_link_path = long_link_path
+        
+        # Limpar widgets 
+        for widget in self.winfo_children():
+            widget.destroy()
+        
+        # Definir fundo preto
+        self.config(bg="black")
+        
+        # Carregar imagem da carta Long Link como fundo
+        try:
+            pil_img = Image.open(long_link_path)
+            img_w, img_h = pil_img.size
+            max_w, max_h = self.winfo_screenwidth(), self.winfo_screenheight()
+            ratio = min(max_w/img_w, max_h/img_h)
+            new_w, new_h = int(img_w*ratio), int(img_h*ratio)
+            pil_img = pil_img.resize((new_w, new_h), Image.Resampling.LANCZOS)
+            
+            bg_img = ImageTk.PhotoImage(pil_img)
+            bg_lbl = tk.Label(self, image=bg_img, bg="black")
+            bg_lbl.image = bg_img
+            bg_lbl.place(relx=0.5, rely=0.5, anchor="center")
+            
+        except Exception as e:
+            print(f"DEBUG: [LINK_DOWNGRADE_TRADE] Erro ao carregar imagem de fundo: {e}")
+        
+        # Frame para a dialog de confirmação
+        confirm_frame = tk.Frame(self, bg="black")
+        confirm_frame.pack(expand=True)
+        
+        # Título
+        tk.Label(confirm_frame, text="Link Trade Confirmation", 
+                font=("Helvetica", 16, "bold"), fg="yellow", bg="black").pack(pady=(40, 20))
+        
+         # Obter specific_id da carta
+        specific_id = self._get_equipment_specific_id_from_path(long_link_path)
+        
+        # Mensagem de confirmação
+        tk.Label(confirm_frame, text=f"Long Link {specific_id} is going to be added \nto your inventory", 
+                font=("Helvetica", 16), fg="white", bg="black").pack(pady=(0, 30))
+        
+        # Frame para o botão
+        btns_frame = tk.Frame(confirm_frame, bg="black")
+        btns_frame.pack(pady=30)
+        
+        # Botão Ok (roxo)
+        def confirmar_trade():
+            print("DEBUG: [LINK_DOWNGRADE_TRADE] Trade confirmado - destruindo interface e iniciando Fase 2")
+            # Destruir completamente a interface antes do loading screen
+            for widget in self.winfo_children():
+                widget.destroy()
+            self.config(bg="black")
+            print("DEBUG: [LINK_DOWNGRADE_TRADE] Interface destruída - prosseguindo para detecção YOLO")
+            self._executar_link_downgrade_phase_2(long_link_path)
+        
+        ok_btn = tk.Button(
+            btns_frame,
+            text="Ok",
+            font=("Helvetica", 16, "bold"),
+            bg="#8A2BE2",
+            fg="white",
+            width=8,
+            height=2,
+            command=confirmar_trade
+        )
+        ok_btn.pack()
+        
+        print("DEBUG: [LINK_DOWNGRADE_TRADE] Overlay de trade criado")
+    
+    def _executar_link_downgrade_phase_2(self, long_link_path):
+        """
+        Phase 2 de LINK DOWNGRADE: Detectar Long Link da Store.
+        Após detecção, completa o downgrade.
+        """
+        print(f"DEBUG: [LINK_DOWNGRADE_PHASE2] Iniciando Phase 2 para Long Link: {os.path.basename(long_link_path)}")
+        
+        try:
+            # Obter object_name do Long Link para detecção YOLO
+            if self.card_database:
+                object_name = get_equipment_object_name(long_link_path, self.card_database)
+                
+                if not object_name:
+                    print(f"DEBUG: [LINK_DOWNGRADE_PHASE2] Nenhum object_name encontrado - fallback direto")
+                    self._complete_link_downgrade()
+                    return
+                
+                print(f"DEBUG: [LINK_DOWNGRADE_PHASE2] Object name para detecção: {object_name}")
+            else:
+                print(f"DEBUG: [LINK_DOWNGRADE_PHASE2] Base de dados não disponível - fallback direto")
+                self._complete_link_downgrade()
+                return
+            
+            # Criar loading screen
+            loading_window = create_yolo_loading_screen(self, object_name)
+            
+            if loading_window:
+                print("DEBUG: [LINK_DOWNGRADE_PHASE2] Loading screen criado - iniciando detecção")
+                
+                # Usar utilitários universais para detectar script
+                universal_paths = get_universal_paths()
+                script_path = universal_paths['detection_script']
+                
+                if not os.path.exists(script_path):
+                    print(f"DEBUG: [LINK_DOWNGRADE_PHASE2] Script não encontrado: {script_path}")
+                    if loading_window and loading_window.winfo_exists():
+                        loading_window.destroy()
+                    # Fallback: completar downgrade sem YOLO
+                    self._complete_link_downgrade()
+                    return
+                
+                print(f"DEBUG: [LINK_DOWNGRADE_PHASE2] Executando: {script_path} {object_name}")
+                
+                # Esconder interface Python
+                self.withdraw()
+                
+                # Executar script YOLO
+                subprocess.run(['chmod', '+x', script_path], check=True)
+                process = subprocess.Popen([script_path, object_name])
+                
+                # Monitor de inicialização (aguardar YOLO carregar)
+                def check_phase_2_initialization():
+                    try:
+                        if process.poll() is None:
+                            # Script ainda rodando - YOLO inicializado com sucesso
+                            print(f"DEBUG: [LINK_DOWNGRADE_PHASE2] YOLO inicializado - destruindo loading")
+                            
+                            # Destruir loading screen
+                            if loading_window and loading_window.winfo_exists():
+                                loading_window.destroy()
+                            
+                            # Monitor de conclusão
+                            def check_phase_2_completion():
+                                try:
+                                    if process.poll() is not None:
+                                        # Script terminou - detecção completa
+                                        print(f"DEBUG: [LINK_DOWNGRADE_PHASE2] Detecção Phase 2 completa")
+                                        self.deiconify()  # Mostrar interface Python
+                                        # Completar o downgrade
+                                        self._complete_link_downgrade()
+                                    else:
+                                        # Continuar monitorando
+                                        self.after(1000, check_phase_2_completion)
+                                except Exception as e:
+                                    print(f"DEBUG: [LINK_DOWNGRADE_PHASE2] Erro no monitor: {e}")
+                                    self.deiconify()
+                                    self._complete_link_downgrade()
+                            
+                            self.after(1000, check_phase_2_completion)
+                        else:
+                            # Script terminou antes de inicializar
+                            print(f"DEBUG: [LINK_DOWNGRADE_PHASE2] Script terminou inesperadamente")
+                            if loading_window and loading_window.winfo_exists():
+                                loading_window.destroy()
+                            self.deiconify()
+                            self._complete_link_downgrade()
+                    except Exception as e:
+                        print(f"DEBUG: [LINK_DOWNGRADE_PHASE2] Erro na inicialização: {e}")
+                        if loading_window and loading_window.winfo_exists():
+                            loading_window.destroy()
+                        self.deiconify()
+                        self._complete_link_downgrade()
+                
+                # Aguardar 4.5 segundos para YOLO inicializar
+                self.after(4500, check_phase_2_initialization)
+            else:
+                print("DEBUG: [LINK_DOWNGRADE_PHASE2] Erro ao criar loading screen - fallback direto")
+                self._complete_link_downgrade()
+                
+        except Exception as e:
+            print(f"DEBUG: [LINK_DOWNGRADE_PHASE2] Erro: {e}")
+            self._complete_link_downgrade()
+    
+    def _complete_link_downgrade(self):
+        """
+        Completa o LINK DOWNGRADE fazendo a troca na base de dados.
+        Short Link (inventário) -> Long Link (Store)
+        """
+        print(f"DEBUG: [LINK_DOWNGRADE_COMPLETE] Completando Link Downgrade")
+        
+        try:
+            # Obter paths salvos
+            short_link_path = getattr(self, '_link_downgrade_short_link_path', None)
+            long_link_path = getattr(self, '_link_downgrade_long_link_path', None)
+            
+            if not short_link_path or not long_link_path:
+                print(f"DEBUG: [LINK_DOWNGRADE_COMPLETE] Erro: paths não encontrados")
+                self._show_downgrade_error_message()
+                return
+            
+            # Realizar transação na base de dados
+            success = self._perform_link_downgrade_database_transaction(short_link_path, long_link_path)
+            
+            if success:
+                # CORREÇÃO: Ir diretamente para o dashboard após sucesso
+                print("DEBUG: [LINK_DOWNGRADE_COMPLETE] SUCCESS: Transação completa, voltando ao dashboard")
+                self._voltar_dashboard_apos_link_downgrade()
+            else:
+                self._show_downgrade_error_message()
+                
+        except Exception as e:
+            print(f"DEBUG: [LINK_DOWNGRADE_COMPLETE] Erro: {e}")
+            self._show_downgrade_error_message()
+    
+    def _perform_link_downgrade_database_transaction(self, short_link_path, long_link_path):
+        """
+        Realiza a transação de LINK DOWNGRADE na base de dados.
+        Remove Short Link do inventário, adiciona Long Link ao inventário.
+        """
+        print(f"DEBUG: [LINK_DOWNGRADE_TRANSACTION] Executando transação")
+        print(f"DEBUG: [LINK_DOWNGRADE_TRANSACTION] Short Link: {os.path.basename(short_link_path)}")
+        print(f"DEBUG: [LINK_DOWNGRADE_TRANSACTION] Long Link: {os.path.basename(long_link_path)}")
+        
+        try:
+            # Desativar Short Link antes de removê-lo (se estiver ativo)
+            try:
+                if self.is_card_active(short_link_path, "equipments"):
+                    self.deactivate_card(short_link_path, "equipments")
+                    print(f"DEBUG: [LINK_DOWNGRADE_TRANSACTION] Short Link desativado: {os.path.basename(short_link_path)}")
+            except Exception as e:
+                print(f"DEBUG: [LINK_DOWNGRADE_TRANSACTION] Aviso ao desativar Short Link: {e}")
+            
+            # Remover Short Link do inventário do jogador
+            if short_link_path in self.inventario["equipments"]:
+                self.inventario["equipments"].remove(short_link_path)
+                print(f"DEBUG: [LINK_DOWNGRADE_TRANSACTION] Short Link removido do inventário")
+            else:
+                print(f"DEBUG: [LINK_DOWNGRADE_TRANSACTION] Erro: Short Link não encontrado no inventário")
+                return False
+            
+            # Adicionar Long Link ao inventário do jogador
+            self.inventario["equipments"].append(long_link_path)
+            print(f"DEBUG: [LINK_DOWNGRADE_TRANSACTION] Long Link adicionado ao inventário")
+            
+            # CORREÇÃO: Ativar automaticamente o Long Link após o downgrade
+            try:
+                self.activate_card("equipments", long_link_path)
+                print(f"DEBUG: [LINK_DOWNGRADE_TRANSACTION] Long Link ativado automaticamente: {os.path.basename(long_link_path)}")
+            except Exception as e:
+                print(f"DEBUG: [LINK_DOWNGRADE_TRANSACTION] Aviso: Não foi possível ativar Long Link automaticamente: {e}")
+                # Não falhar a transação por causa disso, o jogador pode ativar manualmente
+            
+            print(f"DEBUG: [LINK_DOWNGRADE_TRANSACTION] SUCCESS: Transação completa")
+            return True
+            
+        except Exception as e:
+            print(f"DEBUG: [LINK_DOWNGRADE_TRANSACTION] Erro na transação: {e}")
+            return False
+    
+    def _show_downgrade_success_message(self):
+        """Mostra mensagem de sucesso do LINK DOWNGRADE"""
+        print(f"DEBUG: [LINK_DOWNGRADE_SUCCESS] Mostrando mensagem de sucesso")
+        
+        # Limpar interface
+        for widget in self.winfo_children():
+            widget.destroy()
+        
+        # Mensagem de sucesso
+        success_label = tk.Label(self, text="LINK DOWNGRADE SUCCESSFUL!", 
+                               font=("Helvetica", 24, "bold"), 
+                               fg="#00FF00", bg="black")
+        success_label.place(relx=0.5, rely=0.4, anchor="center")
+        
+        # Mensagem adicional
+        info_label = tk.Label(self, text="Short Link has been converted to Long Link", 
+                            font=("Helvetica", 16), 
+                            fg="white", bg="black")
+        info_label.place(relx=0.5, rely=0.5, anchor="center")
+        
+        # Botão para voltar ao dashboard
+        back_btn = tk.Button(self, text="Continue", font=("Helvetica", 16), 
+                           bg="#00AA00", fg="white", width=15, height=2,
+                           command=self._voltar_dashboard_apos_link_downgrade)
+        back_btn.place(relx=0.5, rely=0.65, anchor="center")
+        
+        print("DEBUG: [LINK_DOWNGRADE_SUCCESS] SUCCESS: Mensagem de sucesso criada")
+    
+    def _show_downgrade_error_message(self):
+        """Mostra mensagem de erro do LINK DOWNGRADE"""
+        print(f"DEBUG: [LINK_DOWNGRADE_ERROR] Mostrando mensagem de erro")
+        
+        # Limpar interface
+        for widget in self.winfo_children():
+            widget.destroy()
+        
+        # Mensagem de erro
+        error_label = tk.Label(self, text="LINK DOWNGRADE FAILED!", 
+                             font=("Helvetica", 24, "bold"), 
+                             fg="#FF0000", bg="black")
+        error_label.place(relx=0.5, rely=0.4, anchor="center")
+        
+        # Mensagem adicional
+        info_label = tk.Label(self, text="An error occurred during the downgrade process", 
+                            font=("Helvetica", 16), 
+                            fg="white", bg="black")
+        info_label.place(relx=0.5, rely=0.5, anchor="center")
+        
+        # Botão para voltar ao dashboard
+        back_btn = tk.Button(self, text="Continue", font=("Helvetica", 16), 
+                           bg="#AA0000", fg="white", width=15, height=2,
+                           command=self._voltar_dashboard_apos_link_downgrade)
+        back_btn.place(relx=0.5, rely=0.65, anchor="center")
+        
+        print("DEBUG: [LINK_DOWNGRADE_ERROR] SUCCESS: Mensagem de erro criada")
+    
+    def _voltar_dashboard_apos_link_downgrade(self):
+        """Volta ao dashboard principal após LINK DOWNGRADE"""
+        print(f"DEBUG: [LINK_DOWNGRADE_RETURN] Retornando ao dashboard")
+        
+        # Limpar flags de contexto
+        self._in_link_downgrade_context = False
+        self._link_downgrade_target_id = None
+        self._link_downgrade_short_link_path = None
+        self._link_downgrade_long_link_path = None
+        
+        # Voltar à interface principal
+        self.playerdashboard_interface(
+            self.player_name, 
+            self.saldo, 
+            self.other_players, 
+            show_store_button=True
+        )
 
     def _show_equipment_inventory_for_link_downgrade(self):
         """Abre inventário de equipamentos especificamente para LINK DOWNGRADE"""
@@ -10062,8 +17122,8 @@ class PlayerDashboard(tk.Toplevel):
             self.playerdashboard_interface(self.player_name, self.saldo, self.other_players)
 
     def _aplicar_remove_router(self):
-        """Abre página de inventário de equipamentos para o jogador escolher qual router remover"""
-        print("DEBUG: [REMOVE_ROUTER] Abrindo inventário de equipamentos")
+        """Abre página de inventário específica para REMOVE ROUTER mostrando apenas Small Routers ativos"""
+        print("DEBUG: [REMOVE_ROUTER] Iniciando processo REMOVE ROUTER")
         try:
             # Verificar se há equipamentos no inventário
             equipments_inventory = self.inventario.get("equipments", [])
@@ -10072,8 +17132,7 @@ class PlayerDashboard(tk.Toplevel):
                 self.playerdashboard_interface(self.player_name, self.saldo, self.other_players)
                 return
             
-            # CORREÇÃO: Verificar se há Small Routers (Equipment_1, Equipment_2, Equipment_3) ATIVOS
-            # Apenas permite remoção se houver Small Routers virados para cima (ativos)
+            # Verificar se há Small Routers (Equipment_1, Equipment_2, Equipment_3) ATIVOS
             small_routers_active = []
             for equipment_path in equipments_inventory:
                 equipment_filename = os.path.basename(equipment_path)
@@ -10089,13 +17148,18 @@ class PlayerDashboard(tk.Toplevel):
                 self.playerdashboard_interface(self.player_name, self.saldo, self.other_players)
                 return
             
-            print(f"DEBUG: [REMOVE_ROUTER] {len(small_routers_active)} Small Router(s) ativo(s) encontrado(s) - procedendo com inventário")
+            print(f"DEBUG: [REMOVE_ROUTER] {len(small_routers_active)} Small Router(s) ativo(s) encontrado(s)")
             for router in small_routers_active:
                 print(f"DEBUG: [REMOVE_ROUTER] Small Router ativo: {os.path.basename(router)}")
             
-            # Mostrar inventário de equipamentos com callback específico para voltar a Actions/Events
-            self._show_equipment_inventory_for_remove_router()
-            print("DEBUG: [REMOVE_ROUTER] SUCCESS: Inventário de equipamentos aberto com sucesso")
+            # Definir contexto REMOVE ROUTER
+            self._in_remove_router_context = True
+            self._remove_router_phase = "select_router"  # Fase 1: Selecionar router para remover
+            self._small_routers_active = small_routers_active
+            
+            # Mostrar inventário específico apenas com Small Routers ativos (SEM botão Back)
+            self._show_remove_router_inventory()
+            print("DEBUG: [REMOVE_ROUTER] SUCCESS: Inventário específico para REMOVE ROUTER criado")
         except Exception as e:
             print(f"DEBUG: [REMOVE_ROUTER] ERROR: Erro ao abrir inventário: {e}")
             import traceback
@@ -10103,19 +17167,561 @@ class PlayerDashboard(tk.Toplevel):
             # Fallback - retornar ao dashboard principal se houve erro
             self.playerdashboard_interface(self.player_name, self.saldo, self.other_players)
     
-    def _show_equipment_inventory_for_remove_router(self):
-        """Mostra inventário de equipamentos específico para REMOVE ROUTER com callback correto"""
+    def _show_remove_router_inventory(self):
+        """Cria inventário específico para REMOVE ROUTER com layout EXATAMENTE igual ao inventário normal"""
         print("DEBUG: [REMOVE_ROUTER_INVENTORY] Criando inventário específico para REMOVE ROUTER")
         
-        # Definir flag para indicar que estamos no contexto REMOVE ROUTER
-        self._in_remove_router_context = True
+        # Determinar que cartas mostrar baseado na fase
+        if getattr(self, '_remove_router_phase', 'select_router') == 'select_router':
+            # Fase 1: Mostrar apenas Small Routers ativos
+            cards_to_show = getattr(self, '_small_routers_active', [])
+            title_text = "REMOVE ROUTER"
+        else:
+            # Fase 2: Mostrar apenas Links com mesmo specific_id
+            cards_to_show = getattr(self, '_links_to_remove', [])
+            title_text = "REMOVE LINKS"
         
-        # CORREÇÃO: Usar o método padrão de inventory matrix em vez de criar interface customizada
-        # Isto garante consistência com o resto do sistema e permite o botão "Go!" funcionar
-        print("DEBUG: [REMOVE_ROUTER_INVENTORY] Chamando show_card_fullscreen_inventory para equipments")
-        self.show_inventory_matrix(["equipments"], page=0)
+        print(f"DEBUG: [REMOVE_ROUTER_INVENTORY] Fase: {getattr(self, '_remove_router_phase', 'select_router')}")
+        print(f"DEBUG: [REMOVE_ROUTER_INVENTORY] Cartas a mostrar: {len(cards_to_show)}")
         
-        print("DEBUG: [REMOVE_ROUTER_INVENTORY] SUCCESS: Inventário específico para REMOVE ROUTER criado")
+        # Limpar widgets (menos barra superior) - IGUAL AO INVENTÁRIO NORMAL
+        for widget in self.winfo_children():
+            if hasattr(self, 'topbar_label') and widget == self.topbar_label:
+                continue
+            widget.destroy()
+
+        screen_width = self.winfo_screenwidth()
+        screen_height = self.winfo_screenheight()
+        
+        # Criar TopBar se não existir - IGUAL AO INVENTÁRIO NORMAL
+        if not hasattr(self, 'topbar_label') or not self.topbar_label.winfo_exists():
+            try:
+                topbar_img_path = os.path.join(IMG_DIR, f"TopBar_{self.player_color.lower()}.png")
+                print(f"DEBUG: [REMOVE_ROUTER_INVENTORY] Criando TopBar: {topbar_img_path}")
+                
+                if os.path.exists(topbar_img_path):
+                    img = Image.open(topbar_img_path).convert("RGBA")
+                    img = img.resize((screen_width, 60), Image.Resampling.LANCZOS)
+                    topbar_img = ImageTk.PhotoImage(img)
+                    self.topbar_label = tk.Label(self, image=topbar_img, bg="black", borderwidth=0, highlightthickness=0)
+                    self.topbar_label.image = topbar_img  # type: ignore[attr-defined]
+                    self.topbar_label.pack(side="top", fill="x")
+                    print("DEBUG: [REMOVE_ROUTER_INVENTORY] TopBar criada com sucesso!")
+                else:
+                    print(f"DEBUG: [REMOVE_ROUTER_INVENTORY] Arquivo TopBar não encontrado, criando fallback")
+                    # Criar barra superior fallback
+                    topbar_frame = tk.Frame(self, bg=self.bar_color, height=60)
+                    topbar_frame.pack(side="top", fill="x")
+                    topbar_frame.pack_propagate(False)
+                    self.topbar_label = topbar_frame
+                    print("DEBUG: [REMOVE_ROUTER_INVENTORY] TopBar fallback criada!")
+            except Exception as e:
+                print(f"DEBUG: [REMOVE_ROUTER_INVENTORY] ERRO ao criar TopBar: {e}")
+                # Criar barra superior fallback em caso de erro
+                topbar_frame = tk.Frame(self, bg=self.bar_color, height=60)
+                topbar_frame.pack(side="top", fill="x")
+                topbar_frame.pack_propagate(False)
+                self.topbar_label = topbar_frame
+                print("DEBUG: [REMOVE_ROUTER_INVENTORY] TopBar fallback criada após erro!")
+        
+        # --- Nome do jogador --- IGUAL AO INVENTÁRIO NORMAL
+        name_lbl = tk.Label(self, text=self.player_name, font=("Helvetica", 18, "bold"), bg=self.bar_color, fg="black", borderwidth=0)
+        name_lbl.place(relx=0.5, y=25, anchor="n")
+        
+        # Marcar contexto para página especial
+        self._in_router_selection_page = True
+        
+        # Título EXATAMENTE igual ao inventário normal (sobre a barra superior)
+        title_label = tk.Label(self, text=title_text, font=("Helvetica", 22, "bold"),
+                              fg="white", bg="black")  # CORREÇÃO: fg=white, bg=black igual ao inventário normal
+        title_label.place(relx=0.5, y=65, anchor="n")
+        
+        # Se não há cartas, mostrar mensagem
+        if not cards_to_show:
+            if getattr(self, '_remove_router_phase', 'select_router') == 'select_router':
+                message = "No active Small Routers found"
+            else:
+                message = "All associated links removed!"
+            
+            no_cards_label = tk.Label(self, text=message, font=("Helvetica", 16), 
+                                     bg="black", fg="white")
+            no_cards_label.place(relx=0.5, rely=0.5, anchor="center")
+        else:
+            # CORREÇÃO CRÍTICA: Usar EXATAMENTE o mesmo layout do inventário normal
+            # Layout em grade pequena 2x2 com cartas 85x120 - IGUAL AO INVENTÁRIO NORMAL
+            matriz_frame = tk.Frame(self, bg="black")
+            matriz_frame.place(relx=0.5, rely=0.5, anchor="center")
+            
+            # CORREÇÃO: Usar tamanhos pequenos iguais ao inventário normal
+            card_w, card_h = 85, 120  # Tamanhos PEQUENOS igual ao inventário normal
+            n_col = 2  # 2 colunas igual ao inventário normal
+            
+            for idx, carta_path in enumerate(cards_to_show):
+                row = idx // n_col
+                col = idx % n_col
+                
+                try:
+                    # CORREÇÃO: Carregar imagem com tamanho pequeno igual ao inventário normal
+                    carta_img = Image.open(carta_path)
+                    carta_img = carta_img.resize((card_w, card_h), Image.LANCZOS)
+                    carta_photo = ImageTk.PhotoImage(carta_img)
+                    
+                    # Criar label da carta clicável EXATAMENTE igual ao inventário normal
+                    carta_lbl = tk.Label(matriz_frame, image=carta_photo, bg="black", cursor="hand2")
+                    carta_lbl.image = carta_photo
+                    carta_lbl.grid(row=row, column=col, padx=8, pady=8)  # CORREÇÃO: usar grid igual ao inventário normal
+                    
+                    # Bind para abrir fullscreen
+                    carta_lbl.bind("<Button-1>", lambda e, path=carta_path: self._show_remove_router_card_fullscreen(path))
+                    
+                    print(f"DEBUG: [REMOVE_ROUTER_INVENTORY] Carta colocada na linha {row}, coluna {col}: {os.path.basename(carta_path)}")
+                    
+                except Exception as e:
+                    print(f"DEBUG: [REMOVE_ROUTER_INVENTORY] Erro ao carregar carta {carta_path}: {e}")
+        
+        # --- BARRA INFERIOR COM IMAGEM EXATAMENTE igual ao inventário normal ---
+        try:
+            belowbar_img_path = os.path.join(IMG_DIR, f"BelowBar_{self.player_color.lower()}.png")
+            belowbar_img = ImageTk.PhotoImage(Image.open(belowbar_img_path).resize((screen_width, 50)))
+            belowbar_label = tk.Label(self, image=belowbar_img, bg="black")
+            belowbar_label.image = belowbar_img
+            belowbar_label.pack(side="bottom", fill="x")
+            print(f"DEBUG: Barra inferior BelowBar_{self.player_color.lower()}.png carregada na página REMOVE ROUTER")
+        except Exception as e:
+            print(f"DEBUG: Erro ao carregar BelowBar_{self.player_color.lower()}.png na página REMOVE ROUTER: {e}")
+            # Fallback: criar uma barra simples da cor do jogador se a imagem não existir
+            belowbar_frame = tk.Frame(self, bg=self.bar_color, height=50)
+            belowbar_frame.pack(side="bottom", fill="x")
+            belowbar_frame.pack_propagate(False)
+        
+        # Saldo no canto inferior direito - IGUAL AO INVENTÁRIO NORMAL
+        self.after(100, lambda: self.create_coin_saldo_overlay(screen_width, screen_height, self.saldo))
+        
+        print("DEBUG: [REMOVE_ROUTER_INVENTORY] SUCCESS: Inventário específico criado com layout IDÊNTICO ao normal")
+    
+    def _show_remove_router_card_fullscreen(self, carta_path):
+        """Mostra carta em fullscreen com botões X cinza e ✓ roxo (completamente fullscreen)"""
+        print(f"DEBUG: [REMOVE_ROUTER_FULLSCREEN] Mostrando carta: {os.path.basename(carta_path)}")
+        
+        # CORREÇÃO: Limpar TODOS os widgets para fullscreen completo (incluindo TopBar)
+        for widget in self.winfo_children():
+            widget.destroy()
+        
+        # Definir fundo preto para a janela
+        self.configure(bg="black")
+        
+        try:
+            # Carregar e centralizar imagem da carta (completamente fullscreen)
+            carta_img = Image.open(carta_path)
+            screen_width, screen_height = self.winfo_screenwidth(), self.winfo_screenheight()
+            
+            # Calcular ratio para ocupar máximo da tela
+            ratio = min(screen_width/carta_img.width, screen_height/carta_img.height)
+            new_w, new_h = int(carta_img.width * ratio), int(carta_img.height * ratio)
+            carta_resized = carta_img.resize((new_w, new_h), Image.LANCZOS)
+            carta_photo = ImageTk.PhotoImage(carta_resized)
+            
+            # Label com imagem da carta centralizada
+            carta_label = tk.Label(self, image=carta_photo, bg="black", borderwidth=0, highlightthickness=0)
+            carta_label.image = carta_photo
+            carta_label.place(relx=0.5, rely=0.5, anchor="center")
+            
+        except Exception as e:
+            print(f"DEBUG: [REMOVE_ROUTER_FULLSCREEN] Erro ao carregar carta: {e}")
+        
+        # Botão X no canto superior ESQUERDO
+        x_btn = tk.Button(self, text="✖", font=("Helvetica", 24, "bold"), 
+                         bg="#AAAAAA", fg="white", width=2, height=1, 
+                         borderwidth=0, highlightthickness=0, 
+                         command=self._voltar_remove_router_inventory, 
+                         cursor="hand2", activebackground="#CCCCCC")
+        x_btn.place(relx=0.02, rely=0, anchor="nw")
+        
+        # Botão ✓ ROXO (canto superior direito) - Confirmar remoção
+        # Verificar se é router ou link para usar função correta
+        current_phase = getattr(self, '_remove_router_phase', 'select_router')
+        if current_phase == 'remove_links':
+            # Fase 2: Confirmar remoção de link
+            check_btn = tk.Button(self, text="✓", font=("Helvetica", 24, "bold"),
+                                bg="#8A2BE2", fg="white", width=2, height=1,
+                                borderwidth=0, highlightthickness=0,
+                                command=lambda: self._confirmar_remocao_link(carta_path),
+                                cursor="hand2", activebackground="#7B68EE")
+        else:
+            # Fase 1: Confirmar remoção de router
+            check_btn = tk.Button(self, text="✓", font=("Helvetica", 24, "bold"),
+                                bg="#8A2BE2", fg="white", width=2, height=1,
+                                borderwidth=0, highlightthickness=0,
+                                command=lambda: self._confirmar_remocao_router(carta_path),
+                                cursor="hand2", activebackground="#7B68EE")
+        check_btn.place(relx=0.98, rely=0, anchor="ne")
+        
+        print("DEBUG: [REMOVE_ROUTER_FULLSCREEN] Fullscreen completo criado com botões X cinza (esquerda) e ✓ ROXO (direita)")
+    
+    def _remover_link_automaticamente(self, carta_path):
+        """Remove um link automaticamente durante a fase 2 do REMOVE ROUTER"""
+        print(f"DEBUG: [REMOVE_LINK_AUTO] Removendo link: {os.path.basename(carta_path)}")
+        
+        try:
+            # Remover link do inventário e lista de ativos
+            if "equipments" in self.inventario and carta_path in self.inventario["equipments"]:
+                self.inventario["equipments"].remove(carta_path)
+                print(f"DEBUG: [REMOVE_LINK_AUTO] Link removido do inventário")
+                
+            if carta_path in self.active_equipments:
+                self.active_equipments.remove(carta_path)
+                print(f"DEBUG: [REMOVE_LINK_AUTO] Link removido da lista de ativos")
+            
+            # Devolver carta à Store
+            if hasattr(self, 'store_window') and self.store_window:
+                try:
+                    self.store_window.adicionar_carta_ao_baralho(carta_path, "equipments", "neutral")
+                    print(f"DEBUG: [REMOVE_LINK_AUTO] Link enviado para Store")
+                except Exception as e:
+                    print(f"DEBUG: [REMOVE_LINK_AUTO] Erro ao enviar link para Store: {e}")
+            
+            # Remover da lista de links a remover
+            if hasattr(self, '_links_to_remove') and carta_path in self._links_to_remove:
+                self._links_to_remove.remove(carta_path)
+                print(f"DEBUG: [REMOVE_LINK_AUTO] Link removido da lista de remoção")
+            
+            # Verificar se ainda há links para remover
+            if hasattr(self, '_links_to_remove') and len(self._links_to_remove) > 0:
+                print(f"DEBUG: [REMOVE_LINK_AUTO] Ainda há {len(self._links_to_remove)} links para remover")
+                # Voltar ao inventário para mostrar links restantes
+                self._show_remove_router_inventory()
+            else:
+                print("DEBUG: [REMOVE_LINK_AUTO] Todos os links removidos, finalizando processo")
+                # Todos os links foram removidos, finalizar processo
+                self._finalizar_remove_router()
+                
+        except Exception as e:
+            print(f"DEBUG: [REMOVE_LINK_AUTO] Erro durante remoção automática: {e}")
+            self._voltar_dashboard_apos_remove_router()
+    
+    def _voltar_remove_router_inventory(self):
+        """Volta para o inventário específico do REMOVE ROUTER"""
+        print("DEBUG: [REMOVE_ROUTER] Voltando para inventário REMOVE ROUTER")
+        self._show_remove_router_inventory()
+    
+    def _confirmar_remocao_router(self, carta_path):
+        """Mostra overlay de confirmação para remoção do router"""
+        print(f"DEBUG: [REMOVE_ROUTER_CONFIRM] Iniciando confirmação para: {os.path.basename(carta_path)}")
+        
+        # Obter specific_id do router
+        router_id = self._get_equipment_specific_id(carta_path)
+        
+        # Limpar interface
+        for widget in self.winfo_children():
+            widget.destroy()
+        self.configure(bg="black")
+        
+        # Carregar imagem da carta como fundo
+        try:
+            carta_img = Image.open(carta_path)
+            screen_width, screen_height = self.winfo_screenwidth(), self.winfo_screenheight()
+            
+            ratio = min(screen_width/carta_img.width, screen_height/carta_img.height)
+            new_w, new_h = int(carta_img.width * ratio), int(carta_img.height * ratio)
+            carta_resized = carta_img.resize((new_w, new_h), Image.LANCZOS)
+            carta_photo = ImageTk.PhotoImage(carta_resized)
+            
+            carta_label = tk.Label(self, image=carta_photo, bg="black")
+            carta_label.image = carta_photo
+            carta_label.place(relx=0.5, rely=0.5, anchor="center")
+            
+        except Exception as e:
+            print(f"DEBUG: [REMOVE_ROUTER_CONFIRM] Erro ao carregar imagem: {e}")
+        
+        # Frame para overlay de confirmação
+        confirm_frame = tk.Frame(self, bg="black")
+        confirm_frame.pack(expand=True)
+        
+        # Título
+        title_label = tk.Label(confirm_frame, text="Router Removal Confirmation",
+                              font=("Helvetica", 16, "bold"), fg="yellow", bg="black")
+        title_label.pack(pady=(40, 20))
+        
+        # Mensagem principal
+        message_text = f"Do you want to remove the router {router_id}?"
+        message_label = tk.Label(confirm_frame, text=message_text,
+                               font=("Helvetica", 16), fg="white", bg="black")
+        message_label.pack(pady=(0, 10))
+        
+        # Mensagem adicional
+        info_label = tk.Label(confirm_frame, text="Don't forget to remove\nthe associated queue and link",
+                            font=("Helvetica", 14), fg="white", bg="black")
+        info_label.pack(pady=(0, 20))
+        
+        # Frame para botões
+        btns_frame = tk.Frame(confirm_frame, bg="black")
+        btns_frame.pack(pady=30)
+        
+        # Botão No - Voltar ao inventário
+        no_btn = tk.Button(btns_frame, text="No", font=("Helvetica", 14, "bold"),
+                          bg="#F44336", fg="white", width=8,
+                          command=self._voltar_remove_router_inventory)
+        no_btn.pack(side="left", padx=20, pady=10)
+        
+        # Botão Yes - Processar remoção
+        yes_btn = tk.Button(btns_frame, text="Yes", font=("Helvetica", 14, "bold"),
+                           bg="#4CAF50", fg="white", width=8,
+                           command=lambda: self._processar_remocao_router(carta_path, router_id))
+        yes_btn.pack(side="left", padx=20, pady=10)
+        
+        print("DEBUG: [REMOVE_ROUTER_CONFIRM] Overlay de confirmação criado")
+    
+    def _processar_remocao_router(self, carta_path, router_id):
+        """Processa a remoção do router e mostra links associados"""
+        print(f"DEBUG: [REMOVE_ROUTER_PROCESS] Processando remoção router ID {router_id}")
+        
+        try:
+            # NOVA FUNCIONALIDADE: Criar loading screen e executar script de detecção
+            print(f"DEBUG: [REMOVE_ROUTER_PROCESS] Carta Equipment detectada - criando loading screen")
+            
+            # Obter object_name da carta
+            object_name = get_equipment_object_name(carta_path, self.card_database)
+            
+            if object_name:
+                print(f"DEBUG: [REMOVE_ROUTER_PROCESS] Criando loading screen para object: {object_name}")
+                
+                # Criar loading screen imediatamente
+                loading_window = create_yolo_loading_screen(self, object_name)
+                
+                if loading_window:
+                    print(f"DEBUG: [REMOVE_ROUTER_PROCESS] Loading screen criado com sucesso")
+                    
+                    # Executar script de detecção com monitor correto
+                    detection_success = self._execute_detection_with_router_continuation(object_name, loading_window, carta_path, router_id)
+                    
+                    if detection_success:
+                        print(f"DEBUG: [REMOVE_ROUTER_PROCESS] Script de detecção iniciado com sucesso")
+                        return  # Sair aqui - a continuação será tratada pelo monitor
+                    else:
+                        print(f"DEBUG: [REMOVE_ROUTER_PROCESS] AVISO: Script de detecção falhou")
+                        # Fechar loading screen em caso de erro
+                        if loading_window:
+                            loading_window.destroy()
+                else:
+                    print(f"DEBUG: [REMOVE_ROUTER_PROCESS] ERRO: Não foi possível criar loading screen")
+            else:
+                print(f"DEBUG: [REMOVE_ROUTER_PROCESS] AVISO: Object name não encontrado para carta Equipment")
+            
+            # Fallback: processar remoção diretamente se detecção YOLO falhar
+            print(f"DEBUG: [REMOVE_ROUTER_PROCESS] Fallback: processando remoção sem detecção YOLO")
+            self._continue_router_removal_after_detection(carta_path, router_id)
+                
+        except Exception as e:
+            print(f"DEBUG: [REMOVE_ROUTER_PROCESS] Erro durante processamento: {e}")
+            self._voltar_dashboard_apos_remove_router()
+    
+    def _confirmar_remocao_link(self, carta_path):
+        """Mostra overlay de confirmação para remoção de link"""
+        try:
+            print(f"DEBUG: [CONFIRM_LINK] Confirmando remoção de link: {os.path.basename(carta_path)}")
+            
+            # Obter specific_id do link (se existir)
+            link_id = self._get_equipment_specific_id(carta_path)
+            
+            # Limpar interface
+            for widget in self.winfo_children():
+                widget.destroy()
+            self.configure(bg="black")
+            
+            # Carregar imagem da carta como fundo
+            try:
+                carta_img = Image.open(carta_path)
+                screen_width, screen_height = self.winfo_screenwidth(), self.winfo_screenheight()
+                
+                ratio = min(screen_width/carta_img.width, screen_height/carta_img.height)
+                new_w, new_h = int(carta_img.width * ratio), int(carta_img.height * ratio)
+                carta_resized = carta_img.resize((new_w, new_h), Image.LANCZOS)
+                carta_photo = ImageTk.PhotoImage(carta_resized)
+                
+                carta_label = tk.Label(self, image=carta_photo, bg="black")
+                carta_label.image = carta_photo
+                carta_label.place(relx=0.5, rely=0.5, anchor="center")
+                
+            except Exception as e:
+                print(f"DEBUG: [CONFIRM_LINK] Erro ao carregar imagem: {e}")
+            
+            # Frame para overlay de confirmação
+            confirm_frame = tk.Frame(self, bg="black")
+            confirm_frame.pack(expand=True)
+            
+            # Título
+            title_label = tk.Label(confirm_frame, text="Link Removal Confirmation",
+                                  font=("Helvetica", 16, "bold"), fg="yellow", bg="black")
+            title_label.pack(pady=(40, 20))
+            
+            # Mensagem principal
+            message_text = f"Link {link_id} is going to be removed" if link_id else "This link is going to be removed"
+            message_label = tk.Label(confirm_frame, text=message_text,
+                                   font=("Helvetica", 16), fg="white", bg="black")
+            message_label.pack(pady=(0, 20))
+            
+            # Frame para botão
+            btns_frame = tk.Frame(confirm_frame, bg="black")
+            btns_frame.pack(pady=30)
+            
+            # Botão Ok - Processar remoção do link
+            ok_btn = tk.Button(btns_frame, text="Ok", font=("Helvetica", 14, "bold"),
+                              bg="#4CAF50", fg="white", width=10,
+                              command=lambda: self._processar_remocao_link(carta_path))
+            ok_btn.pack(pady=10)
+            
+            print("DEBUG: [CONFIRM_LINK] Overlay de confirmação de link criado")
+            
+        except Exception as e:
+            print(f"DEBUG: [CONFIRM_LINK] Erro ao criar overlay: {e}")
+            self._show_remove_router_inventory()
+    
+    def _execute_detection_with_router_continuation(self, object_name, loading_window, carta_path, router_id):
+        """Executa detecção YOLO e continua processamento de router após terminar"""
+        def continuation_callback():
+            # Processar remoção de router após detecção YOLO
+            self._continue_router_removal_after_detection(carta_path, router_id)
+        
+        return execute_detection_with_continuation(object_name, self, loading_window, continuation_callback)
+    
+    def _continue_router_removal_after_detection(self, carta_path, router_id):
+        """Continua o processamento de remoção de router após a detecção YOLO"""
+        try:
+            print(f"DEBUG: [REMOVE_ROUTER_CONTINUE] Continuando remoção router após detecção YOLO")
+            
+            # Remover router do inventário e lista de ativos
+            if "equipments" in self.inventario and carta_path in self.inventario["equipments"]:
+                self.inventario["equipments"].remove(carta_path)
+                print(f"DEBUG: [REMOVE_ROUTER_CONTINUE] Router removido do inventário")
+                
+            if carta_path in self.active_equipments:
+                self.active_equipments.remove(carta_path)
+                print(f"DEBUG: [REMOVE_ROUTER_CONTINUE] Router removido da lista de ativos")
+            
+            # Devolver carta à Store
+            if hasattr(self, 'store_window') and self.store_window:
+                try:
+                    self.store_window.adicionar_carta_ao_baralho(carta_path, "equipments", "neutral")
+                    print(f"DEBUG: [REMOVE_ROUTER_CONTINUE] Router enviado para Store")
+                except Exception as e:
+                    print(f"DEBUG: [REMOVE_ROUTER_CONTINUE] Erro ao enviar router para Store: {e}")
+            
+            # Encontrar links ativos com mesmo specific_id
+            links_associados = self._find_active_links_with_same_id(router_id)
+            
+            print(f"DEBUG: [REMOVE_ROUTER_CONTINUE] Links encontrados com ID {router_id}: {len(links_associados)}")
+            for link in links_associados:
+                print(f"DEBUG: [REMOVE_ROUTER_CONTINUE] Link associado: {os.path.basename(link)}")
+            
+            if links_associados:
+                # Mudar para fase 2: remover links
+                self._remove_router_phase = "remove_links"
+                self._links_to_remove = links_associados
+                self._router_id_being_removed = router_id
+                
+                print(f"DEBUG: [REMOVE_ROUTER_CONTINUE] Mudando para fase 2: remover {len(links_associados)} links")
+                self._show_remove_router_inventory()
+            else:
+                # Sem links associados, finalizar processo
+                print("DEBUG: [REMOVE_ROUTER_CONTINUE] Nenhum link associado, finalizando processo")
+                self._finalizar_remove_router()
+                
+        except Exception as e:
+            print(f"DEBUG: [REMOVE_ROUTER_CONTINUE] Erro: {e}")
+            self._finalizar_remove_router()
+    
+    def _execute_detection_with_link_continuation(self, object_name, loading_window, carta_path):
+        """Executa detecção YOLO e continua processamento de link após terminar"""
+        def continuation_callback():
+            # Processar remoção de link após detecção YOLO
+            self._continue_link_removal_after_detection(carta_path)
+        
+        return execute_detection_with_continuation(object_name, self, loading_window, continuation_callback)
+    
+    def _continue_link_removal_after_detection(self, carta_path):
+        """Continua o processamento de remoção de link após a detecção YOLO"""
+        try:
+            print(f"DEBUG: [PROCESS_LINK_CONTINUE] Continuando remoção link após detecção YOLO")
+            
+            # Remover link usando a função automática existente
+            # CORREÇÃO: A função _remover_link_automaticamente já decide se volta ao inventário ou finaliza
+            # baseado na quantidade de links restantes, então não devemos chamar _finalizar_remove_router aqui
+            self._remover_link_automaticamente(carta_path)
+            
+            print(f"DEBUG: [PROCESS_LINK_CONTINUE] Link processado - decisão de navegação feita por _remover_link_automaticamente")
+            
+        except Exception as e:
+            print(f"DEBUG: [PROCESS_LINK_CONTINUE] Erro ao processar remoção: {e}")
+            self._finalizar_remove_router()
+    
+    def _processar_remocao_link(self, carta_path):
+        """Processa a remoção do link após confirmação"""
+        try:
+            print(f"DEBUG: [PROCESS_LINK] Processando remoção de link: {os.path.basename(carta_path)}")
+            
+            # NOVA FUNCIONALIDADE: Criar loading screen e executar script de detecção
+            print(f"DEBUG: [PROCESS_LINK] Carta Equipment detectada - criando loading screen")
+            
+            # Obter object_name da carta
+            object_name = get_equipment_object_name(carta_path, self.card_database)
+            
+            if object_name:
+                print(f"DEBUG: [PROCESS_LINK] Criando loading screen para object: {object_name}")
+                
+                # Criar loading screen imediatamente
+                loading_window = create_yolo_loading_screen(self, object_name)
+                
+                if loading_window:
+                    print(f"DEBUG: [PROCESS_LINK] Loading screen criado com sucesso")
+                    
+                    # Executar script de detecção com monitor correto
+                    detection_success = self._execute_detection_with_link_continuation(object_name, loading_window, carta_path)
+                    
+                    if detection_success:
+                        print(f"DEBUG: [PROCESS_LINK] Script de detecção iniciado com sucesso")
+                        return  # Sair aqui - a continuação será tratada pelo monitor
+                    else:
+                        print(f"DEBUG: [PROCESS_LINK] AVISO: Script de detecção falhou")
+                        # Fechar loading screen em caso de erro
+                        if loading_window:
+                            loading_window.destroy()
+                else:
+                    print(f"DEBUG: [PROCESS_LINK] ERRO: Não foi possível criar loading screen")
+            else:
+                print(f"DEBUG: [PROCESS_LINK] AVISO: Object name não encontrado para carta Equipment")
+            
+            # Fallback: remover link diretamente se detecção falhar
+            self._remover_link_automaticamente(carta_path)
+            self._finalizar_remove_router()
+            
+        except Exception as e:
+            print(f"DEBUG: [PROCESS_LINK] Erro ao processar remoção: {e}")
+            self._finalizar_remove_router()
+
+    def _finalizar_remove_router(self):
+        """Finaliza o processo REMOVE ROUTER e volta ao dashboard"""
+        print("DEBUG: [REMOVE_ROUTER] Finalizando processo REMOVE ROUTER")
+        
+        # CORREÇÃO CRÍTICA: Fazer backup dos trackings antes da reconstrução
+        # Isso garante que Challenges, Events e Services ativos não sejam perdidos
+        print("DEBUG: [REMOVE_ROUTER] Fazendo backup dos trackings antes de reconstruir interface")
+        self._backup_turn_counters_before_reconstruction()
+        
+        # Limpar contexto REMOVE ROUTER
+        self._in_remove_router_context = False
+        self._remove_router_phase = None
+        self._small_routers_active = []
+        self._links_to_remove = []
+        self._router_id_being_removed = None
+        self._in_router_selection_page = False  # Limpar flag de página especial
+        
+        # Voltar ao dashboard principal
+        self.playerdashboard_interface(self.player_name, self.saldo, self.other_players)
+    
+    def _voltar_dashboard_apos_remove_router(self):
+        """Volta ao dashboard após completar ou cancelar REMOVE ROUTER"""
+        print("DEBUG: [REMOVE_ROUTER] Voltando ao dashboard")
+        self._finalizar_remove_router()
     
     def _criar_router_selection_page(self):
         """Cria página completa para seleção de router da Store (padrão igual Store_v2.py)"""
@@ -10173,10 +17779,11 @@ class PlayerDashboard(tk.Toplevel):
         # Logo NetMaster posicionado independentemente (igual Store_v2.py)
         try:
             # Tentar carregar o logo do diretório img
-            logo_img_path = os.path.join(os.path.dirname(__file__), "img", "logo_netmaster_store.png")
-            if not os.path.exists(logo_img_path):
-                # Fallback para Raspberry Pi
-                logo_img_path = "/home/joao_rebolo/netmaster_menu/img/logo_netmaster_store.png"
+            # Usar os utilitários universais para encontrar o logo
+            logo_img_path = find_existing_path("img/logo_netmaster_store.png")
+            if not logo_img_path:
+                # Fallback local
+                logo_img_path = os.path.join(os.path.dirname(__file__), "img", "logo_netmaster_store.png")
             
             if os.path.exists(logo_img_path):
                 logo_img = ImageTk.PhotoImage(Image.open(logo_img_path).resize((20, 20)))
@@ -10353,28 +17960,19 @@ class PlayerDashboard(tk.Toplevel):
         equipments_encontrados = []
         
         # DETECÇÃO INTELIGENTE DE CAMINHOS
-        possivel_bases = []
+        # Usar os utilitários universais para detectar caminhos
+        universal_paths = get_universal_paths()
+        print(f"DEBUG: [ADD_ROUTER] Ambiente detectado: {universal_paths['environment']}")
         
-        # Detectar se estamos no Raspberry Pi
-        is_raspberry = os.path.exists("/home/joao_rebolo")
-        print(f"DEBUG: [ADD_ROUTER] Ambiente Raspberry Pi detectado: {is_raspberry}")
+        possivel_bases = [universal_paths['base_dir']]
         
-        if is_raspberry:
-            # Raspberry Pi - testar múltiplos locais possíveis
-            possivel_bases = [
-                "/home/joao_rebolo/netmaster_menu/img/cartas",  # Caminho correto mostrado pelo usuário
-                "/home/joao_rebolo/netmaster_menu",
-                "/home/joao_rebolo/NetMaster", 
-                "/home/joao_rebolo/Desktop/NetMaster"
-            ]
-        else:
-            # Desenvolvimento local
-            possivel_bases = [
-                os.getcwd(),  # Diretório atual
-                os.path.dirname(__file__)  # Diretório do script
-            ]
+        # Se for Raspberry Pi, tentar também caminhos alternativos
+        if universal_paths['environment'] == 'raspberry_pi':
+            # Adicionar caminhos alternativos possíveis
+            additional_bases = get_possible_raspberry_pi_paths("")  # Base paths
+            possivel_bases.extend([path for path in additional_bases if path not in possivel_bases])
         
-        print(f"DEBUG: [ADD_ROUTER] Bases a testar: {possivel_bases}")
+        print(f"DEBUG: [ADD_ROUTER] Bases a testar: {possivel_bases[:3]}")  # Mostrar apenas as primeiras 3
         
         # Para cada base possível, testar se tem estrutura Equipments
         for base_path in possivel_bases:
@@ -10441,7 +18039,7 @@ class PlayerDashboard(tk.Toplevel):
             print("DEBUG: [ADD_ROUTER] WARNING: NENHUM ROUTER ENCONTRADO - Usando placeholders")
             
             # Usar imagens de placeholder ou criar caminhos virtuais
-            placeholder_base = "/tmp" if is_raspberry else os.getcwd()
+            placeholder_base = "/tmp" if universal_paths['environment'] == 'raspberry_pi' else os.getcwd()
             for i, router_filename in enumerate(routers_add_router, 1):
                 placeholder_path = f"PLACEHOLDER_ROUTER_{i}"
                 equipments_encontrados.append(placeholder_path)
@@ -10581,6 +18179,83 @@ class PlayerDashboard(tk.Toplevel):
             
             print(f"DEBUG: [ADD_ROUTER] Placeholder convertido para: {router_para_inventario}")
         
+        # NOVA FUNCIONALIDADE: Obter object_name para detecção YOLO
+        object_name = get_equipment_object_name(router_para_inventario, self.card_database)
+        
+        if object_name:
+            print(f"DEBUG: [ADD_ROUTER] Object name encontrado: {object_name} - mostrando loading screen")
+            
+            # CRIAR LOADING SCREEN IMEDIATAMENTE
+            loading_window = create_yolo_loading_screen(self, object_name)
+            
+            if loading_window:
+                print(f"DEBUG: [ADD_ROUTER] Loading screen criado - processando em background")
+                
+                # Função para processar adição e detecção em background
+                def processar_router_com_yolo():
+                    try:
+                        # Adicionar router ao inventário do jogador
+                        if "equipments" not in self.inventario:
+                            self.inventario["equipments"] = []
+                            
+                        self.inventario["equipments"].append(router_para_inventario)
+                        print(f"DEBUG: [ADD_ROUTER] SUCCESS: Router adicionado gratuitamente ao inventário!")
+                        print(f"DEBUG: [ADD_ROUTER] Inventário equipments agora tem: {len(self.inventario['equipments'])} itens")
+                        
+                        # Executar script YOLO com continuação personalizada
+                        detection_success = self._execute_detection_with_router_continuation(object_name, loading_window, router_para_inventario)
+                        
+                        if not detection_success:
+                            print(f"DEBUG: [ADD_ROUTER] AVISO: Script YOLO falhou - fechando loading screen")
+                            if loading_window:
+                                loading_window.destroy()
+                            # Voltar ao PlayerDashboard em caso de erro
+                            self._voltar_playerdashboard_apos_router_selection()
+                            
+                    except Exception as e:
+                        print(f"DEBUG: [ADD_ROUTER] ERRO no processamento: {e}")
+                        if loading_window:
+                            loading_window.destroy()
+                        self._voltar_playerdashboard_apos_router_selection()
+                
+                # Executar processamento após 100ms (loading screen já está visível)
+                self.after(100, processar_router_com_yolo)
+                
+            else:
+                print(f"DEBUG: [ADD_ROUTER] ERRO: Loading screen não foi criado - continuando normalmente")
+                # Fallback: processamento normal se loading screen falhar
+                self._processar_router_normal()
+        else:
+            print(f"DEBUG: [ADD_ROUTER] AVISO: Object name não encontrado - processamento normal")
+            # Processamento normal se não conseguir obter object_name
+            self._processar_router_normal()
+    
+    def _processar_router_normal(self):
+        """Processa adição de router sem detecção YOLO (fallback)"""
+        router_para_inventario = self.router_selection
+        
+        # Se é placeholder, criar um caminho de equipamento válido baseado no ID
+        if router_para_inventario.startswith("PLACEHOLDER_"):
+            placeholder_id = router_para_inventario.split("_")[-1]
+            router_filename = f"Equipment_{placeholder_id}.png"
+            
+            base_equipments = detect_player_inventory_base_dir()
+            color_mapping = {
+                "red": "Red",
+                "blue": "Blue", 
+                "green": "Green",
+                "yellow": "Yellow"
+            }
+            player_color_title = color_mapping.get(self.player_color.lower(), "Red")
+            
+            router_para_inventario = os.path.join(
+                base_equipments, 
+                "Equipments", 
+                "Residential-level", 
+                player_color_title, 
+                router_filename
+            )
+        
         # Adicionar router ao inventário do jogador
         if "equipments" not in self.inventario:
             self.inventario["equipments"] = []
@@ -10591,6 +18266,97 @@ class PlayerDashboard(tk.Toplevel):
         
         # Voltar ao PlayerDashboard
         self._voltar_playerdashboard_apos_router_selection()
+    
+    def _execute_detection_with_router_continuation(self, object_name, loading_window, router_path):
+        """
+        Executa detecção YOLO com continuação específica para router selection.
+        
+        Args:
+            object_name: Nome do objeto para detecção
+            loading_window: Loading screen ativo
+            router_path: Caminho do router adicionado ao inventário
+            
+        Returns:
+            True se iniciou com sucesso, False caso contrário
+        """
+        try:
+            # Usar os utilitários universais para detectar ambiente e caminhos
+            universal_paths = get_universal_paths()
+            
+            if universal_paths['environment'] != 'raspberry_pi':
+                print(f"DEBUG: [ADD_ROUTER_DETECTION] Simulando execução do script (ambiente: {universal_paths['environment']}): ./detection_fullscreen.sh {object_name}")
+                # Simular delay e fechar loading screen
+                if loading_window:
+                    def close_loading_and_return():
+                        loading_window.destroy()
+                        self._voltar_playerdashboard_apos_router_selection()
+                    self.after(3000, close_loading_and_return)
+                return True
+            
+            # Usar o caminho do script detectado automaticamente
+            script_path = universal_paths['detection_script']
+            
+            # Verificar se existe
+            if not os.path.exists(script_path):
+                alternative_paths = get_possible_raspberry_pi_paths("object_detection/detection_fullscreen.sh")
+                alternative_paths.extend(get_possible_raspberry_pi_paths("detection_fullscreen.sh"))
+                
+                script_path = None
+                for path in alternative_paths:
+                    if os.path.exists(path):
+                        script_path = path
+                        break
+                
+                if not script_path:
+                    print(f"DEBUG: [ADD_ROUTER_DETECTION] Script não encontrado")
+                    return False
+            
+            print(f"DEBUG: [ADD_ROUTER_DETECTION] Executando: {script_path} {object_name}")
+            
+            # Tornar o script executável
+            subprocess.run(['chmod', '+x', script_path], check=True)
+            
+            # Executar script em background
+            process = subprocess.Popen([script_path, object_name])
+            
+            print(f"DEBUG: [ADD_ROUTER_DETECTION] Script iniciado (PID: {process.pid})")
+            
+            # Monitorar script com loading screen
+            if loading_window:
+                def check_yolo_initialization():
+                    poll_result = process.poll()
+                    if poll_result is None:
+                        # YOLO deve estar inicializado - fechar loading screen
+                        print(f"DEBUG: [ADD_ROUTER_DETECTION] Fechando loading screen - YOLO inicializando")
+                        loading_window.destroy()
+                        self.withdraw()  # Esconder interface Python
+                        
+                        # Monitorar conclusão
+                        def check_script_completion():
+                            poll_result = process.poll()
+                            if poll_result is None:
+                                self.after(1000, check_script_completion)
+                            else:
+                                print(f"DEBUG: [ADD_ROUTER_DETECTION] YOLO terminou - voltando ao PlayerDashboard")
+                                self.deiconify()
+                                self._voltar_playerdashboard_apos_router_selection()
+                        
+                        self.after(1000, check_script_completion)
+                    else:
+                        # Script terminou antes de inicializar
+                        loading_window.destroy()
+                        self._voltar_playerdashboard_apos_router_selection()
+                
+                # Aguardar 4.5 segundos para YOLO inicializar
+                self.after(4500, check_yolo_initialization)
+            
+            return True
+            
+        except Exception as e:
+            print(f"DEBUG: [ADD_ROUTER_DETECTION] Erro: {e}")
+            if loading_window:
+                loading_window.destroy()
+            return False
     
     def _voltar_playerdashboard_apos_router_selection(self):
         """Volta ao PlayerDashboard após seleção/cancelamento de router"""
@@ -11028,7 +18794,8 @@ class PlayerDashboard(tk.Toplevel):
                         img = ImageTk.PhotoImage(Image.open(carta_path).resize((card_w, card_h)))
                         print(f"DEBUG: [show_inventory_matrix] Carta {carta_tipo} normal: {os.path.basename(carta_path)}")
                         
-                except Exception:
+                except Exception as e:
+                    print(f"DEBUG: [show_inventory_matrix] ERRO ao processar carta {os.path.basename(carta_path)}: {e}")
                     continue
                 carta_lbl = tk.Label(matriz_frame, image=img, bg="black", cursor="hand2")
                 carta_lbl.image = img  # type: ignore[attr-defined]
@@ -11899,19 +19666,26 @@ class PlayerDashboard(tk.Toplevel):
                                     # CORREÇÃO: Verificar se é duração variável
                                     if duration_turns == "variable":
                                         print(f"DEBUG: [FULLSCREEN] Event com duração variável da BD - ainda não expirou")
+                                        print(f"DEBUG: [FULLSCREEN]   Event com duração 'variable' NÃO deve expirar até dado ser lançado")
                                         is_event_expirado = False
                                     else:
-                                        # Assumir que começou no turno 1 se não há tracking
-                                        start_turn = 1
-                                        turns_elapsed = current_turn - start_turn
-                                        is_event_expirado = (turns_elapsed >= duration_turns)
+                                        # CORREÇÃO CRÍTICA: Para Events com duração fixa SEM tracking,
+                                        # não assumir que começaram no turno 1. Em vez disso, 
+                                        # considerar que NÃO devem expirar sem tracking válido
+                                        print(f"DEBUG: [FULLSCREEN] Event com duração fixa ({duration_turns}) mas SEM tracking válido")
+                                        print(f"DEBUG: [FULLSCREEN]   CORREÇÃO: Events sem tracking NÃO devem expirar automaticamente")
+                                        print(f"DEBUG: [FULLSCREEN]   Isto evita expiração incorreta de Events com duração variável já processados")
+                                        is_event_expirado = False
                                         
-                                        print(f"DEBUG: [FULLSCREEN] Event sem tracking - dados obtidos da BD:")
-                                        print(f"DEBUG: [FULLSCREEN]   Duration: {duration_turns}")
-                                        print(f"DEBUG: [FULLSCREEN]   Turnos decorridos estimados: {turns_elapsed}")
-                                        print(f"DEBUG: [FULLSCREEN]   Expira neste turno? {is_event_expirado}")
+                                        # DEBUG: Mostrar o que seria a lógica antiga (incorreta)
+                                        old_start_turn = 1
+                                        old_turns_elapsed = current_turn - old_start_turn
+                                        old_would_expire = (old_turns_elapsed >= duration_turns)
+                                        print(f"DEBUG: [FULLSCREEN]   LÓGICA ANTIGA (incorreta): start_turn={old_start_turn}, elapsed={old_turns_elapsed}, would_expire={old_would_expire}")
+                                        print(f"DEBUG: [FULLSCREEN]   LÓGICA NOVA (correta): Event não expira sem tracking válido")
                         except Exception as e:
                             print(f"DEBUG: [FULLSCREEN] Erro ao obter dados do Event da BD: {e}")
+                            is_event_expirado = False
                 
                 if is_event_expirado:
                     print(f"DEBUG: [FULLSCREEN] Event no turno de expiração detectado: {os.path.basename(carta_path)}")
@@ -12191,8 +19965,44 @@ class PlayerDashboard(tk.Toplevel):
                                                     # Atualizar tracking de duração se Event já está ativo
                                                     if (hasattr(self, '_event_duration_tracking') and 
                                                         carta_path in self._event_duration_tracking):
+                                                        # CORREÇÃO CRÍTICA: PRESERVAR start_turn original - apenas atualizar duration e expires_turn
+                                                        # O start_turn deve permanecer como o turno quando o Event foi realmente ativado
+                                                        existing_tracking = self._event_duration_tracking[carta_path]
+                                                        start_turn_original = existing_tracking.get('start_turn', 0)
+                                                        
+                                                        # Só atualizar duration_turns e expires_turn baseado no start_turn ORIGINAL
                                                         self._event_duration_tracking[carta_path]['duration_turns'] = final_result
-                                                        print(f"DEBUG: [VARIABLE_DURATION] Tracking de duração atualizado")
+                                                        # NÃO atualizar start_turn - manter o original!
+                                                        # self._event_duration_tracking[carta_path]['start_turn'] = turno_atual  # REMOVIDO!
+                                                        self._event_duration_tracking[carta_path]['expires_turn'] = start_turn_original + final_result
+                                                        
+                                                        print(f"DEBUG: [VARIABLE_DURATION] Tracking de duração atualizado:")
+                                                        print(f"DEBUG: [VARIABLE_DURATION]   start_turn: {start_turn_original} (PRESERVADO - turno original quando Event foi ativado)")
+                                                        print(f"DEBUG: [VARIABLE_DURATION]   duration_turns: {final_result}")
+                                                        print(f"DEBUG: [VARIABLE_DURATION]   expires_turn: {start_turn_original + final_result}")
+                                                    else:
+                                                        # CORREÇÃO: Se não há tracking, criar agora com turno atual
+                                                        turno_atual = max(
+                                                            getattr(self, '_current_turn', 0),
+                                                            getattr(self, '_current_turn_number', 0),
+                                                            getattr(self, '_current_turn_id', 0)
+                                                        )
+                                                        
+                                                        if not hasattr(self, '_event_duration_tracking'):
+                                                            self._event_duration_tracking = {}
+                                                        
+                                                        self._event_duration_tracking[carta_path] = {
+                                                            'start_turn': turno_atual,
+                                                            'duration_turns': final_result,
+                                                            'expires_turn': turno_atual + final_result,
+                                                            'is_active': True
+                                                        }
+                                                        
+                                                        print(f"DEBUG: [VARIABLE_DURATION] Tracking criado para Event de duração variável:")
+                                                        print(f"DEBUG: [VARIABLE_DURATION]   start_turn: {turno_atual} (turno atual - quando dado foi lançado)")
+                                                        print(f"DEBUG: [VARIABLE_DURATION]   duration_turns: {final_result}")
+                                                        print(f"DEBUG: [VARIABLE_DURATION]   expires_turn: {turno_atual + final_result}")
+                                                        print(f"DEBUG: [VARIABLE_DURATION]   is_active: True")
                                                     
                                                     # Aguardar 2 segundos antes de fechar
                                                     def fechar_overlay():
@@ -12510,8 +20320,44 @@ class PlayerDashboard(tk.Toplevel):
                                                 # Atualizar tracking de duração se Event já está ativo
                                                 if (hasattr(self, '_event_duration_tracking') and 
                                                     carta_path in self._event_duration_tracking):
+                                                    # CORREÇÃO CRÍTICA: PRESERVAR start_turn original - apenas atualizar duration e expires_turn
+                                                    # O start_turn deve permanecer como o turno quando o Event foi realmente ativado
+                                                    existing_tracking = self._event_duration_tracking[carta_path]
+                                                    start_turn_original = existing_tracking.get('start_turn', 0)
+                                                    
+                                                    # Só atualizar duration_turns e expires_turn baseado no start_turn ORIGINAL
                                                     self._event_duration_tracking[carta_path]['duration_turns'] = final_result
-                                                    print(f"DEBUG: [VARIABLE_DURATION] Tracking de duração atualizado")
+                                                    # NÃO atualizar start_turn - manter o original!
+                                                    # self._event_duration_tracking[carta_path]['start_turn'] = turno_atual  # REMOVIDO!
+                                                    self._event_duration_tracking[carta_path]['expires_turn'] = start_turn_original + final_result
+                                                    
+                                                    print(f"DEBUG: [VARIABLE_DURATION] Tracking de duração atualizado:")
+                                                    print(f"DEBUG: [VARIABLE_DURATION]   start_turn: {start_turn_original} (PRESERVADO - turno original quando Event foi ativado)")
+                                                    print(f"DEBUG: [VARIABLE_DURATION]   duration_turns: {final_result}")
+                                                    print(f"DEBUG: [VARIABLE_DURATION]   expires_turn: {start_turn_original + final_result}")
+                                                else:
+                                                    # CORREÇÃO: Se não há tracking, criar agora com turno atual
+                                                    turno_atual = max(
+                                                        getattr(self, '_current_turn', 0),
+                                                        getattr(self, '_current_turn_number', 0),
+                                                        getattr(self, '_current_turn_id', 0)
+                                                    )
+                                                    
+                                                    if not hasattr(self, '_event_duration_tracking'):
+                                                        self._event_duration_tracking = {}
+                                                    
+                                                    self._event_duration_tracking[carta_path] = {
+                                                        'start_turn': turno_atual,
+                                                        'duration_turns': final_result,
+                                                        'expires_turn': turno_atual + final_result,
+                                                        'is_active': True
+                                                    }
+                                                    
+                                                    print(f"DEBUG: [VARIABLE_DURATION] Tracking criado para Event de duração variável:")
+                                                    print(f"DEBUG: [VARIABLE_DURATION]   start_turn: {turno_atual} (turno atual - quando dado foi lançado)")
+                                                    print(f"DEBUG: [VARIABLE_DURATION]   duration_turns: {final_result}")
+                                                    print(f"DEBUG: [VARIABLE_DURATION]   expires_turn: {turno_atual + final_result}")
+                                                    print(f"DEBUG: [VARIABLE_DURATION]   is_active: True")
                                                 
                                                 # Aguardar 2 segundos antes de fechar
                                                 def fechar_overlay():
@@ -13109,7 +20955,7 @@ class PlayerDashboard(tk.Toplevel):
                     print(f"DEBUG: [show_inventory_for_sell] Carta {carta_tipo} ATIVA - VIRADA PARA CIMA (NÃO pode ser vendida): {os.path.basename(carta_path)}")
                 else:
                     # Carta inativa: virada para baixo (PODE ser vendida)
-                    back_card_path = os.path.join(IMG_DIR, "cartas", "back_card.png")
+                    back_card_path = os.path.join(IMG_DIR, "cartas", f"back_card_{self.player_color.lower()}.png")
                     if os.path.exists(back_card_path):
                         img = ImageTk.PhotoImage(Image.open(back_card_path).resize((card_w, card_h)))
                         print(f"DEBUG: [show_inventory_for_sell] Carta {carta_tipo} INATIVA - VIRADA PARA BAIXO (pode ser vendida): {os.path.basename(carta_path)}")
@@ -13382,7 +21228,7 @@ class PlayerDashboard(tk.Toplevel):
                     print(f"DEBUG: [show_inventory_for_sell_after_sale] Carta {carta_tipo} ATIVA - VIRADA PARA CIMA (NÃO pode ser vendida): {os.path.basename(carta_path)}")
                 else:
                     # Carta inativa - mostrar virada para baixo (pode ser vendida)
-                    back_card_path = os.path.join(IMG_DIR, "cartas", "back_card.png")
+                    back_card_path = os.path.join(IMG_DIR, "cartas", f"back_card_{self.player_color.lower()}.png")
                     if os.path.exists(back_card_path):
                         img = ImageTk.PhotoImage(Image.open(back_card_path).resize((card_w, card_h)))
                         print(f"DEBUG: [show_inventory_for_sell_after_sale] Carta {carta_tipo} INATIVA - VIRADA PARA BAIXO (pode ser vendida): {os.path.basename(carta_path)}")
@@ -13931,6 +21777,29 @@ class PlayerDashboard(tk.Toplevel):
         self.update_idletasks()
         self.update()
 
+    def _voltar_inventario_apos_ativacao(self, tipos, page):
+        """Método auxiliar para voltar ao inventário após ativação"""
+        try:
+            # Recriar a TopBar
+            screen_width = self.winfo_screenwidth()
+            topbar_img_path = os.path.join(IMG_DIR, f"TopBar_{self.player_color.lower()}.png")
+            try:
+                img = Image.open(topbar_img_path).convert("RGBA")
+                img = img.resize((screen_width, 60), Image.Resampling.LANCZOS)
+                topbar_img = ImageTk.PhotoImage(img)
+                self.topbar_label = tk.Label(self, image=topbar_img, bg="black", borderwidth=0, highlightthickness=0)
+                self.topbar_label.image = topbar_img
+                self.topbar_label.pack(side="top", fill="x")
+                print("DEBUG: TopBar recriada após ativação")
+            except Exception as e:
+                print(f"DEBUG: Erro ao recriar TopBar: {e}")
+            
+            # Voltar para a página de inventário
+            self.show_inventory_matrix(tipos, page)
+            
+        except Exception as e:
+            print(f"DEBUG: Erro ao voltar ao inventário: {e}")
+
     def show_activation_confirmation(self, carta_path, carta_tipo, tipos, page):
         """Mostra uma página de confirmação para ativação de carta com a carta como fundo"""
         print(f"DEBUG: Mostrando confirmação de ativação para {carta_path}")
@@ -13982,25 +21851,65 @@ class PlayerDashboard(tk.Toplevel):
         def confirmar():
             print(f"DEBUG: Confirmando ativação da carta {carta_path}")
             try:
-                # Ativar a carta
-                self.activate_card(carta_tipo, carta_path)
-                
-                # Recriar a TopBar antes de voltar ao inventário
-                screen_width = self.winfo_screenwidth()
-                topbar_img_path = os.path.join(IMG_DIR, f"TopBar_{self.player_color.lower()}.png")
-                try:
-                    img = Image.open(topbar_img_path).convert("RGBA")
-                    img = img.resize((screen_width, 60), Image.Resampling.LANCZOS)
-                    topbar_img = ImageTk.PhotoImage(img)
-                    self.topbar_label = tk.Label(self, image=topbar_img, bg="black", borderwidth=0, highlightthickness=0)
-                    self.topbar_label.image = topbar_img
-                    self.topbar_label.pack(side="top", fill="x")
-                    print("DEBUG: TopBar recriada após confirmar ativação")
-                except Exception as e:
-                    print(f"DEBUG: Erro ao recriar TopBar: {e}")
-                
-                # Voltar para a página de inventário
-                self.show_inventory_matrix(tipos, page)
+                # CORREÇÃO CRÍTICA: Para cartas Equipment, mostrar loading screen IMEDIATAMENTE
+                if carta_tipo in ["equipment", "equipments"]:
+                    print(f"DEBUG: [ACTIVATION] Carta Equipment detectada - mostrando loading screen IMEDIATAMENTE")
+                    
+                    # Obter object_name da carta
+                    object_name = get_equipment_object_name(carta_path, self.card_database)
+                    
+                    if object_name:
+                        print(f"DEBUG: [ACTIVATION] Criando loading screen para object: {object_name}")
+                        
+                        # CRIAR LOADING SCREEN IMEDIATAMENTE - ANTES DE TUDO
+                        loading_window = create_yolo_loading_screen(self, object_name)
+                        
+                        if loading_window:
+                            print(f"DEBUG: [ACTIVATION] Loading screen criado - executando ativação em background")
+                            
+                            # Função para processar ativação depois do loading screen estar ativo
+                            def processar_ativacao_com_yolo():
+                                try:
+                                    # Ativar a carta
+                                    self.activate_card(carta_tipo, carta_path)
+                                    print(f"DEBUG: [ACTIVATION] Carta ativada - iniciando YOLO")
+                                    
+                                    # Executar script YOLO (sem criar loading screen novamente)
+                                    detection_success = execute_detection_script_direct(object_name, self, loading_window)
+                                    
+                                    if detection_success:
+                                        print(f"DEBUG: [ACTIVATION] Script YOLO iniciado com sucesso")
+                                    else:
+                                        print(f"DEBUG: [ACTIVATION] AVISO: Script YOLO falhou - fechando loading screen")
+                                        if loading_window:
+                                            loading_window.destroy()
+                                        # Voltar ao inventário em caso de erro
+                                        self._voltar_inventario_apos_ativacao(tipos, page)
+                                        
+                                except Exception as e:
+                                    print(f"DEBUG: [ACTIVATION] ERRO na ativação: {e}")
+                                    if loading_window:
+                                        loading_window.destroy()
+                                    self._voltar_inventario_apos_ativacao(tipos, page)
+                            
+                            # Executar ativação após 100ms (loading screen já está visível)
+                            self.after(100, processar_ativacao_com_yolo)
+                            
+                        else:
+                            print(f"DEBUG: [ACTIVATION] ERRO: Loading screen não foi criado - continuando normalmente")
+                            # Fallback: ativação normal se loading screen falhar
+                            self.activate_card(carta_tipo, carta_path)
+                            self._voltar_inventario_apos_ativacao(tipos, page)
+                    else:
+                        print(f"DEBUG: [ACTIVATION] AVISO: Object name não encontrado - ativação normal")
+                        # Ativação normal se não conseguir obter object_name
+                        self.activate_card(carta_tipo, carta_path)
+                        self._voltar_inventario_apos_ativacao(tipos, page)
+                else:
+                    # Para cartas não-Equipment, ativação normal
+                    print(f"DEBUG: [ACTIVATION] Carta não-Equipment - ativação normal")
+                    self.activate_card(carta_tipo, carta_path)
+                    self._voltar_inventario_apos_ativacao(tipos, page)
                 
             except Exception as e:
                 print(f"DEBUG: Erro ao confirmar ativação: {e}")
@@ -14111,25 +22020,65 @@ class PlayerDashboard(tk.Toplevel):
         def confirmar():
             print(f"DEBUG: Confirmando desativação da carta {carta_path}")
             try:
-                # Desativar a carta
-                self.deactivate_card(carta_path, carta_tipo)
+                # NOVA FUNCIONALIDADE: Criar loading screen ANTES de qualquer ação para Equipment
+                if carta_tipo in ["equipment", "equipments"]:
+                    print(f"DEBUG: [DEACTIVATION] Carta Equipment detectada - criando loading screen")
+                    
+                    # Obter object_name da carta
+                    object_name = get_equipment_object_name(carta_path, self.card_database)
+                    
+                    if object_name:
+                        print(f"DEBUG: [DEACTIVATION] Criando loading screen para object: {object_name}")
+                        
+                        # Criar loading screen imediatamente
+                        loading_window = create_yolo_loading_screen(self, object_name)
+                        
+                        if loading_window:
+                            print(f"DEBUG: [DEACTIVATION] Loading screen criado com sucesso")
+                            
+                            # Desativar a carta
+                            self.deactivate_card(carta_path, carta_tipo)
+                            
+                            # Executar script de detecção diretamente com loading screen existente
+                            detection_success = execute_detection_script_direct(object_name, self, loading_window)
+                            
+                            if detection_success:
+                                print(f"DEBUG: [DEACTIVATION] Script de detecção executado com sucesso")
+                            else:
+                                print(f"DEBUG: [DEACTIVATION] AVISO: Script de detecção falhou")
+                                # Fechar loading screen em caso de erro
+                                if loading_window:
+                                    loading_window.destroy()
+                        else:
+                            print(f"DEBUG: [DEACTIVATION] ERRO: Não foi possível criar loading screen")
+                            # Fallback sem loading screen
+                            self.deactivate_card(carta_path, carta_tipo)
+                    else:
+                        print(f"DEBUG: [DEACTIVATION] AVISO: Object name não encontrado para carta Equipment")
+                        # Fallback sem detecção
+                        self.deactivate_card(carta_path, carta_tipo)
+                else:
+                    # Para cartas que não são Equipment, desativar normalmente
+                    self.deactivate_card(carta_path, carta_tipo)
                 
-                # Recriar a TopBar antes de voltar ao inventário
-                screen_width = self.winfo_screenwidth()
-                topbar_img_path = os.path.join(IMG_DIR, f"TopBar_{self.player_color.lower()}.png")
-                try:
-                    img = Image.open(topbar_img_path).convert("RGBA")
-                    img = img.resize((screen_width, 60), Image.Resampling.LANCZOS)
-                    topbar_img = ImageTk.PhotoImage(img)
-                    self.topbar_label = tk.Label(self, image=topbar_img, bg="black", borderwidth=0, highlightthickness=0)
-                    self.topbar_label.image = topbar_img
-                    self.topbar_label.pack(side="top", fill="x")
-                    print("DEBUG: TopBar recriada após confirmar desativação")
-                except Exception as e:
-                    print(f"DEBUG: Erro ao recriar TopBar: {e}")
-                
-                # Voltar para a página de inventário
-                self.show_inventory_matrix(tipos, page)
+                # Para cartas não-Equipment, recriar TopBar e voltar ao inventário
+                if carta_tipo not in ["equipment", "equipments"]:
+                    # Recriar a TopBar antes de voltar ao inventário
+                    screen_width = self.winfo_screenwidth()
+                    topbar_img_path = os.path.join(IMG_DIR, f"TopBar_{self.player_color.lower()}.png")
+                    try:
+                        img = Image.open(topbar_img_path).convert("RGBA")
+                        img = img.resize((screen_width, 60), Image.Resampling.LANCZOS)
+                        topbar_img = ImageTk.PhotoImage(img)
+                        self.topbar_label = tk.Label(self, image=topbar_img, bg="black", borderwidth=0, highlightthickness=0)
+                        self.topbar_label.image = topbar_img
+                        self.topbar_label.pack(side="top", fill="x")
+                        print("DEBUG: TopBar recriada após confirmar desativação")
+                    except Exception as e:
+                        print(f"DEBUG: Erro ao recriar TopBar: {e}")
+                    
+                    # Voltar para a página de inventário
+                    self.show_inventory_matrix(tipos, page)
                 
             except Exception as e:
                 print(f"DEBUG: Erro ao confirmar desativação: {e}")
@@ -14540,7 +22489,7 @@ class PlayerDashboard(tk.Toplevel):
         # Mensagem principal
         message_text = f"Router {router_id} is going to be downgraded"
         tk.Label(confirm_frame, text=message_text, 
-                font=("Helvetica", 16), fg="white", bg="black").pack(pady=(0, 20))
+                font=("Helvetica", 14), fg="white", bg="black").pack(pady=(0, 20))
         
         # Frame para os botões
         btns_frame = tk.Frame(confirm_frame, bg="black")
@@ -14625,7 +22574,7 @@ class PlayerDashboard(tk.Toplevel):
                 font=("Helvetica", 16, "bold"), fg="yellow", bg="black").pack(pady=(40, 20))
         
         # Mensagem principal com specific_id
-        message_text = f"Do you want to remove the link {link_id}?"
+        message_text = f"Link {link_id} is going to be removed"
         tk.Label(confirm_frame, text=message_text, 
                 font=("Helvetica", 16), fg="white", bg="black").pack(pady=(0, 10))
         
@@ -14846,6 +22795,30 @@ class PlayerDashboard(tk.Toplevel):
     # Corrigir aceitação de carta Challenge/Activity para adicionar ao carrossel
     def aceitar_carta_challenge_activity(self, carta_path, carta_tipo):
         # Chamar isto ao aceitar uma carta Challenge/Activity
+        
+        # CORREÇÃO CRÍTICA: Registar turno de início se for Challenge
+        if carta_tipo == 'challenges' or 'Challenge' in os.path.basename(carta_path):
+            # CORREÇÃO CRÍTICA RASPBERRY PI: Detectar se estamos em ambiente Pi e ajustar turno se necessário
+            universal_paths = get_universal_paths()
+            is_raspberry_pi = universal_paths['environment'] == 'raspberry_pi'
+            
+            # CORREÇÃO ESPECÍFICA: Se no Pi o turno parece estar 1 à frente do esperado, ajustar
+            turno_aceitacao = self._current_turn_number
+            
+            if is_raspberry_pi:
+                # No Raspberry Pi, verificar se o turno atual parece estar incrementado demais
+                # Correção para Raspberry Pi: garantir que o turno registado é o turno atual real
+                print(f"DEBUG: [ACEITAR_CHALLENGE_ACTIVITY] RASPBERRY PI - Turno atual: {turno_aceitacao}")
+                print(f"DEBUG: [ACEITAR_CHALLENGE_ACTIVITY] RASPBERRY PI - Mantendo turno correto para registo")
+                
+                # CORREÇÃO: No Raspberry Pi, usar o turno atual tal como está
+                # O problema anterior era que estávamos a subtrair 1, causando registo incorreto
+                print(f"DEBUG: [ACEITAR_CHALLENGE_ACTIVITY] RASPBERRY PI - TURNO MANTIDO: {turno_aceitacao}")
+                print(f"DEBUG: [ACEITAR_CHALLENGE_ACTIVITY] RASPBERRY PI - Challenge será registado com turno {turno_aceitacao}")
+            
+            self._register_challenge_start_turn(carta_path, turno_especifico=turno_aceitacao)
+            print(f"DEBUG: [aceitar_carta_challenge_activity] Challenge {os.path.basename(carta_path)} registado para turno {turno_aceitacao} (original: {self._current_turn_number})")
+        
         self.adicionar_carta_carrossel(carta_path, carta_tipo)
         # ... resto do fluxo de aceitação ...
         self.playerdashboard_interface(self.player_name, self.saldo, self.other_players)
@@ -14902,92 +22875,8 @@ class PlayerDashboard(tk.Toplevel):
         btns_frame.pack(pady=30)
         
         def confirmar_upgrade():
-            print(f"DEBUG: [LINK_UPGRADE_CONFIRM] Confirmando upgrade do link {link_id}")
-            try:
-                # Mapeamento: Long Link -> Short Link
-                equipment_mapping = {
-                    1: ("Equipment_10.png", "Equipment_7.png"),  # Long Link 1 -> Short Link 1
-                    2: ("Equipment_11.png", "Equipment_8.png"),  # Long Link 2 -> Short Link 2
-                    3: ("Equipment_12.png", "Equipment_9.png"),  # Long Link 3 -> Short Link 3
-                }
-                
-                if link_id not in equipment_mapping:
-                    print(f"DEBUG: [LINK_UPGRADE_CONFIRM] Link ID {link_id} não suportado")
-                    return
-                
-                long_link, short_link = equipment_mapping[link_id]
-                
-                # Verificar se o jogador já tem o Short Link correspondente no inventário
-                equipments_inventory = self.inventario.get("equipments", [])
-                short_link_exists = any(os.path.basename(eq) == short_link for eq in equipments_inventory)
-                
-                if short_link_exists:
-                    print(f"DEBUG: [LINK_UPGRADE_CONFIRM] ERROR: {short_link} já existe no inventário - upgrade não aplicado")
-                    # Limpar flags e voltar à página de inventário de Equipments
-                    self._in_link_upgrade_context = False
-                    self._link_upgrade_target_id = None
-                    # REABILITAR BOTÃO BACK quando Ok é clicado
-                    if hasattr(self, '_back_button') and self._back_button.winfo_exists():
-                        self._back_button.config(state='normal', bg="#808080")
-                        print(f"DEBUG: [LINK_UPGRADE] Botão Back REABILITADO após clicar Ok")
-                    self._voltar_ao_inventario_equipments(tipos, page)
-                    return
-                
-                # Remover Long Link do inventário
-                if "equipments" in self.inventario and carta_path in self.inventario["equipments"]:
-                    self.inventario["equipments"].remove(carta_path)
-                    print(f"DEBUG: [LINK_UPGRADE_CONFIRM] Long Link removido do inventário")
-                    
-                    # Construir caminho para Short Link (usar mesma estrutura de diretório)
-                    base_dir = os.path.dirname(carta_path)
-                    short_link_path = os.path.join(base_dir, short_link)
-                    
-                    # Adicionar Short Link ao inventário (fica inativo por padrão)
-                    self.inventario["equipments"].append(short_link_path)
-                    print(f"DEBUG: [LINK_UPGRADE_CONFIRM] {short_link} adicionado ao inventário (inativo)")
-                    
-                    # Enviar Long Link para a Store
-                    if hasattr(self, 'store_window') and self.store_window:
-                        try:
-                            self.store_window.adicionar_carta_ao_baralho(carta_path, "equipments", "neutral")
-                            print(f"DEBUG: [LINK_UPGRADE_CONFIRM] Long Link enviado para Store")
-                        except Exception as e:
-                            print(f"DEBUG: [LINK_UPGRADE_CONFIRM] Erro ao enviar Long Link para Store: {e}")
-                    
-                    # Limpar flags do contexto LINK UPGRADE
-                    self._in_link_upgrade_context = False
-                    self._link_upgrade_target_id = None
-                    
-                    # REABILITAR BOTÃO BACK quando Ok é clicado
-                    if hasattr(self, '_back_button') and self._back_button.winfo_exists():
-                        self._back_button.config(state='normal', bg="#808080")
-                        print(f"DEBUG: [LINK_UPGRADE] Botão Back REABILITADO após clicar Ok")
-                    
-                    # Voltar à página de inventário de Equipments
-                    print(f"DEBUG: [LINK_UPGRADE_CONFIRM] SUCCESS: Link Upgrade aplicado com sucesso!")
-                    print(f"DEBUG: [LINK_UPGRADE_CONFIRM] Voltando à página de inventário de Equipments")
-                    self._voltar_ao_inventario_equipments(tipos, page)
-                else:
-                    print(f"DEBUG: [LINK_UPGRADE_CONFIRM] ERRO: Long Link não encontrado no inventário")
-                    # Limpar flags e voltar à página de inventário de Equipments
-                    self._in_link_upgrade_context = False
-                    self._link_upgrade_target_id = None
-                    # REABILITAR BOTÃO BACK quando Ok é clicado
-                    if hasattr(self, '_back_button') and self._back_button.winfo_exists():
-                        self._back_button.config(state='normal', bg="#808080")
-                        print(f"DEBUG: [LINK_UPGRADE] Botão Back REABILITADO após clicar Ok")
-                    self._voltar_ao_inventario_equipments(tipos, page)
-                    
-            except Exception as e:
-                print(f"DEBUG: [LINK_UPGRADE_CONFIRM] Erro ao confirmar upgrade: {e}")
-                # Limpar flags e voltar à página de inventário de Equipments
-                self._in_link_upgrade_context = False
-                self._link_upgrade_target_id = None
-                # REABILITAR BOTÃO BACK quando Ok é clicado (mesmo em caso de erro)
-                if hasattr(self, '_back_button') and self._back_button.winfo_exists():
-                    self._back_button.config(state='normal', bg="#808080")
-                    print(f"DEBUG: [LINK_UPGRADE] Botão Back REABILITADO após clicar Ok (erro)")
-                self._voltar_ao_inventario_equipments(tipos, page)
+            print(f"DEBUG: [LINK_UPGRADE_CONFIRM] Ok clicado - executando upgrade com detecção YOLO")
+            self._executar_link_upgrade(carta_path, link_id)
         
         # Apenas botão Ok
         btn_ok = tk.Button(btns_frame, text="Ok", font=("Helvetica", 14, "bold"), 
@@ -15498,12 +23387,28 @@ class PlayerDashboard(tk.Toplevel):
 
     # --- Carrossel: começa vazio e só adiciona Activities/Challenges aceites ---
     def adicionar_carta_carrossel(self, carta_path, carta_tipo):
+        # CORREÇÃO CRÍTICA: Remover duplo registo de Challenge
+        # O tracking do Challenge já foi feito em aceitar_carta_challenge_activity
+        # Este método deve apenas adicionar ao carrossel visual, não registar novamente
+        
+        # Inicializar carrossel se não existir
+        if not hasattr(self, 'carrossel'):
+            self.carrossel = []
+            print("DEBUG: [CARROSSEL] self.carrossel inicializado como lista vazia")
+        
         if carta_tipo in ["activities", "challenges"] and carta_path not in self.carrossel:
             self.carrossel.append(carta_path)
+            print(f"DEBUG: [CARROSSEL] Carta adicionada à lista: {os.path.basename(carta_path)}")
             
-            # REGISTRO TEMPORAL: Se for Challenge, registar turno de início
+            # CORREÇÃO: Reset dos valores quando carta é adicionada ao carrossel
+            posicao_carrossel = len(self.carrossel) - 1  # Última posição adicionada
+            self._reset_card_values_on_activation(carta_path, posicao_carrossel)
+            
+            # CORREÇÃO CRÍTICA: NÃO registar Challenge novamente aqui!
+            # O tracking já foi feito em aceitar_carta_challenge_activity
             if carta_tipo == "challenges":
-                self._register_challenge_start_turn(carta_path)
+                print(f"DEBUG: [CARROSSEL] Challenge {os.path.basename(carta_path)} TRACKING JÁ FEITO - não registar novamente")
+                print(f"DEBUG: [CARROSSEL] Tracking atual: {self._challenge_start_turns}")
             
             self.atualizar_carrossel()
 
@@ -16335,31 +24240,33 @@ class PlayerDashboard(tk.Toplevel):
                 
                 # REGISTRO TEMPORAL: Se for Challenge sendo aceite, registar turno de início
                 if "Challenge" in os.path.basename(carta_path):
-                    self._register_challenge_start_turn(carta_path)
+                    turno_aceitacao = self._current_turn_number
+                    print(f"DEBUG: [ACEITAR_CARROSSEL_COLOCACAO] Challenge aceite - registando turno {turno_aceitacao}")
+                    self._register_challenge_start_turn(carta_path, turno_especifico=turno_aceitacao)
+                
+                # CORREÇÃO PROBLEMA 2: SEMPRE resetar valores ao reativar carta no carrossel
+                # Isto garante que To send = message_size, Rxd = 0, Lost = 0
+                self._reset_card_values_on_activation(carta_path, idx)
+                print(f"DEBUG: [ACEITAR_CARROSSEL_COLOCACAO] CORREÇÃO APLICADA - Carta sempre resetada ao reativar")
                 
                 # CORREÇÃO CRÍTICA: Restaurar valores preservados se existirem
+                # NOTA: Este código será substituído pelo reset acima para garantir comportamento consistente
                 if (hasattr(self, '_activity_preserved_stats') and 
                     carta_path in self._activity_preserved_stats):
                     
                     preserved_stats = self._activity_preserved_stats[carta_path]
-                    if hasattr(self, 'card_stats') and idx < len(self.card_stats):
-                        self.card_stats[idx] = {
-                            "To send": preserved_stats["To send"],
-                            "Rxd": preserved_stats["Rxd"],
-                            "Lost": preserved_stats["Lost"]
-                        }
-                        print(f"DEBUG: [ACEITAR_CARROSSEL_COLOCACAO] SOBREPOSIÇÃO - Valores preservados restaurados para posição {idx}: To send={preserved_stats['To send']}, Rxd={preserved_stats['Rxd']}, Lost={preserved_stats['Lost']}")
-                        
-                        # Remover do mapeamento
-                        del self._activity_preserved_stats[carta_path]
-                        print(f"DEBUG: [ACEITAR_CARROSSEL_COLOCACAO] Activity removida do mapeamento de preservados")
-                        
-                        # Também remover do backup root se existir
-                        root = self.master
-                        if (hasattr(root, '_activity_preserved_stats') and 
-                            carta_path in root._activity_preserved_stats):
-                            del root._activity_preserved_stats[carta_path]
-                            print(f"DEBUG: [ACEITAR_CARROSSEL_COLOCACAO] Activity removida do backup root")
+                    print(f"DEBUG: [ACEITAR_CARROSSEL_COLOCACAO] IGNORANDO valores preservados - sempre resetar: To send={preserved_stats['To send']}, Rxd={preserved_stats['Rxd']}, Lost={preserved_stats['Lost']}")
+                    
+                    # Remover do mapeamento mesmo assim
+                    del self._activity_preserved_stats[carta_path]
+                    print(f"DEBUG: [ACEITAR_CARROSSEL_COLOCACAO] Activity removida do mapeamento de preservados")
+                    
+                    # Também remover do backup root se existir
+                    root = self.master
+                    if (hasattr(root, '_activity_preserved_stats') and 
+                        carta_path in root._activity_preserved_stats):
+                        del root._activity_preserved_stats[carta_path]
+                        print(f"DEBUG: [ACEITAR_CARROSSEL_COLOCACAO] Activity removida do backup root")
                 
                 # Remover carta do inventário
                 for t in tipos:
@@ -16404,50 +24311,35 @@ class PlayerDashboard(tk.Toplevel):
                     self.card_face_up_flags[idx] = True
                     print(f"DEBUG: [aceitar_carta_carrossel] TROCA - Flag posição {idx} atualizada para True (virada para cima)")
                 
-                # CORREÇÃO CRÍTICA: Inicializar card_stats com message_size correto para carta nova
-                print(f"DEBUG: [aceitar_carta_carrossel] CORREÇÃO TROCA - Inicializando card_stats para carta trocada na posição {idx}")
-                try:
-                    message_size = self._get_card_message_size_from_database(carta_path)
-                    new_stats = {"To send": message_size, "Rxd": 0, "Lost": 0}
-                    if hasattr(self, 'card_stats') and idx < len(self.card_stats):
-                        self.card_stats[idx] = new_stats
-                        print(f"DEBUG: [aceitar_carta_carrossel] CORREÇÃO TROCA - Carta {os.path.basename(carta_path)} inicializada: To send={message_size}, Rxd=0, Lost=0")
-                    else:
-                        print(f"DEBUG: [aceitar_carta_carrossel] ERRO TROCA - card_stats não inicializado ou índice inválido")
-                except Exception as e:
-                    print(f"DEBUG: [aceitar_carta_carrossel] ERRO TROCA ao obter message_size: {e}")
-                    # Fallback para valores padrão
-                    if hasattr(self, 'card_stats') and idx < len(self.card_stats):
-                        self.card_stats[idx] = {"To send": 0, "Rxd": 0, "Lost": 0}
+                # CORREÇÃO PROBLEMA 2: SEMPRE resetar valores ao reativar carta no carrossel (troca)
+                # Isto garante que To send = message_size, Rxd = 0, Lost = 0
+                self._reset_card_values_on_activation(carta_path, idx)
+                print(f"DEBUG: [ACEITAR_CARROSSEL_TROCA] CORREÇÃO APLICADA - Carta sempre resetada ao reativar (troca)")
                 
                 # REGISTRO TEMPORAL: Se for Challenge sendo aceite, registar turno de início
                 if "Challenge" in os.path.basename(carta_path):
-                    self._register_challenge_start_turn(carta_path)
+                    turno_aceitacao = self._current_turn_number
+                    print(f"DEBUG: [ACEITAR_CARROSSEL_TROCA] Challenge aceite - registando turno {turno_aceitacao}")
+                    self._register_challenge_start_turn(carta_path, turno_especifico=turno_aceitacao)
+                    print(f"DEBUG: [ACEITAR_CARROSSEL_TROCA] Challenge registado para tracking: {os.path.basename(carta_path)}")
                 
-                # CORREÇÃO CRÍTICA: Restaurar valores preservados da Activity se existirem
+                # CORREÇÃO CRÍTICA: IGNORAR valores preservados - sempre resetar
                 if (hasattr(self, '_activity_preserved_stats') and 
                     carta_path in self._activity_preserved_stats):
                     
                     preserved_stats = self._activity_preserved_stats[carta_path]
-                    # Atualizar card_stats com valores preservados (SOBRESCREVE os valores iniciais acima)
-                    if hasattr(self, 'card_stats') and idx < len(self.card_stats):
-                        self.card_stats[idx] = {
-                            "To send": preserved_stats["To send"],
-                            "Rxd": preserved_stats["Rxd"],
-                            "Lost": preserved_stats["Lost"]
-                        }
-                        print(f"DEBUG: [ACEITAR_CARROSSEL] SOBREPOSIÇÃO - Valores preservados restaurados para posição {idx}: To send={preserved_stats['To send']}, Rxd={preserved_stats['Rxd']}, Lost={preserved_stats['Lost']}")
-                        
-                        # Remover do mapeamento pois a carta está de volta ao carrossel
-                        del self._activity_preserved_stats[carta_path]
-                        print(f"DEBUG: [ACEITAR_CARROSSEL] Activity removida do mapeamento de preservados")
-                        
-                        # Também remover do backup root se existir
-                        root = self.master
-                        if (hasattr(root, '_activity_preserved_stats') and 
-                            carta_path in root._activity_preserved_stats):
-                            del root._activity_preserved_stats[carta_path]
-                            print(f"DEBUG: [ACEITAR_CARROSSEL] Activity removida do backup root")
+                    print(f"DEBUG: [ACEITAR_CARROSSEL_TROCA] IGNORANDO valores preservados - sempre resetar: To send={preserved_stats['To send']}, Rxd={preserved_stats['Rxd']}, Lost={preserved_stats['Lost']}")
+                    
+                    # Remover do mapeamento pois a carta está de volta ao carrossel
+                    del self._activity_preserved_stats[carta_path]
+                    print(f"DEBUG: [ACEITAR_CARROSSEL] Activity removida do mapeamento de preservados")
+                    
+                    # Também remover do backup root se existir
+                    root = self.master
+                    if (hasattr(root, '_activity_preserved_stats') and 
+                        carta_path in root._activity_preserved_stats):
+                        del root._activity_preserved_stats[carta_path]
+                        print(f"DEBUG: [ACEITAR_CARROSSEL] Activity removida do backup root")
                 
                 # 2. Remover a carta do inventário
                 for t in tipos:
@@ -16520,7 +24412,9 @@ class PlayerDashboard(tk.Toplevel):
             
             # REGISTRO TEMPORAL: Se for Challenge sendo aceite, registar turno de início
             if "Challenge" in os.path.basename(carta_path):
-                self._register_challenge_start_turn(carta_path)
+                turno_aceitacao = self._current_turn_number
+                print(f"DEBUG: [ACEITAR_CARROSSEL_SUBSTITUICAO] Challenge aceite - registando turno {turno_aceitacao}")
+                self._register_challenge_start_turn(carta_path, turno_especifico=turno_aceitacao)
             
             # CORREÇÃO CRÍTICA: Restaurar valores preservados da Activity se existirem (SOBRESCREVE valores iniciais)
             if (hasattr(self, '_activity_preserved_stats') and 
@@ -16816,28 +24710,9 @@ class PlayerDashboard(tk.Toplevel):
         player_color = self.player_color.lower()
         base_path = "/Users/joaop_27h1t5j/Desktop/IST/Bolsa/NetMaster"
         
-        # Verificar Actions
+        # Verificar Actions - NÃO ADICIONAR mais Actions, manter apenas Action_31.png e Action_46.png
         current_actions = len(self.inventario.get("actions", []))
-        if current_actions < min_actions:
-            print(f"DEBUG: [add_more_action_event_cards] Actions insuficientes ({current_actions}/{min_actions}), adicionando mais...")
-            actions_path = os.path.join(base_path, "Actions", "Residential-level")
-            if os.path.exists(actions_path):
-                try:
-                    # ESPECÍFICO: Só adicionar Action_66.png se não estiver presente
-                    action_66_path = os.path.join(actions_path, "Action_66.png")
-                    if os.path.exists(action_66_path):
-                        # Verificar se Action_66.png já está no inventário
-                        action_66_present = any("Action_66.png" in carta for carta in self.inventario.get("actions", []))
-                        if not action_66_present:
-                            self.inventario["actions"].append(action_66_path)
-                            print(f"DEBUG: [add_more_action_event_cards] Action adicionada: Action_66.png")
-                        else:
-                            print(f"DEBUG: [add_more_action_event_cards] Action_66.png já presente no inventário")
-                    else:
-                        print(f"DEBUG: [add_more_action_event_cards] Action_66.png não encontrada em {actions_path}")
-                
-                except Exception as e:
-                    print(f"DEBUG: [add_more_action_event_cards] Erro ao adicionar Actions: {e}")
+        print(f"DEBUG: [add_more_action_event_cards] Actions atuais: {current_actions} (mantendo apenas Action_31.png e Action_46.png, não adicionando mais)")
         
         # Verificar Events
         current_events = len(self.inventario.get("events", []))
@@ -16994,6 +24869,47 @@ class PlayerDashboard(tk.Toplevel):
         print(f"DEBUG: [processar_challenge_aceite] Botão Store desabilitado")
         
         try:
+            # REGISTRO TEMPORAL: Challenge aceite no turno atual
+            turno_aceitacao_real = self._current_turn_number
+            print(f"DEBUG: [processar_challenge_aceite] Registando Challenge com turno específico: {turno_aceitacao_real}")
+            self._register_challenge_start_turn(carta_challenge_path, turno_especifico=turno_aceitacao_real)
+            
+            print(f"DEBUG: [processar_challenge_aceite] Challenge {os.path.basename(carta_challenge_path)} registado para turno {turno_aceitacao_real}")
+            print(f"DEBUG: [processar_challenge_aceite] _current_turn_number atual: {self._current_turn_number}")
+            print(f"DEBUG: [processar_challenge_aceite] Turno de registo usado: {turno_aceitacao_real}")
+            
+            # BACKUP MÚLTIPLO E ROBUSTO para garantir persistência durante toda a operação
+            try:
+                # Backup no master
+                if hasattr(self, 'master') and self.master is not None:
+                    if not hasattr(self.master, '_challenge_start_turns_backup'):
+                        self.master._challenge_start_turns_backup = {}
+                    self.master._challenge_start_turns_backup[carta_challenge_path] = turno_aceitacao_real
+                    print(f"DEBUG: [processar_challenge_aceite] Challenge salvo no master backup com turno {turno_aceitacao_real}")
+                
+                # NOVO: Backup no root (principal)
+                if hasattr(self, 'winfo_toplevel'):
+                    root = self.winfo_toplevel()
+                    if root:
+                        if not hasattr(root, '_backup_challenge_tracking'):
+                            root._backup_challenge_tracking = {}
+                        root._backup_challenge_tracking[carta_challenge_path] = turno_aceitacao_real
+                        print(f"DEBUG: [processar_challenge_aceite] Challenge salvo no root backup com turno {turno_aceitacao_real}")
+                
+                # NOVO: Backup imediato no _backup_turn_counters para persistir durante reconstruções
+                if hasattr(self, 'master') and self.master is not None:
+                    if not hasattr(self.master, '_backup_turn_counters'):
+                        self.master._backup_turn_counters = {}
+                    if '_challenge_start_turns' not in self.master._backup_turn_counters:
+                        self.master._backup_turn_counters['_challenge_start_turns'] = {}
+                    self.master._backup_turn_counters['_challenge_start_turns'][carta_challenge_path] = turno_aceitacao_real
+                    print(f"DEBUG: [processar_challenge_aceite] Challenge salvo no _backup_turn_counters com turno {turno_aceitacao_real}")
+                
+                print(f"DEBUG: [processar_challenge_aceite] ✅ TRACKING TOTALMENTE PROTEGIDO com 3 backups independentes")
+                
+            except Exception as e:
+                print(f"DEBUG: [processar_challenge_aceite] Erro no backup múltiplo: {e}")
+            
             # Primeiro, garantir que Challenge está no inventário
             if 'challenges' not in self.inventario:
                 self.inventario['challenges'] = []
@@ -17077,6 +24993,111 @@ class PlayerDashboard(tk.Toplevel):
                 self.card_face_up_flags[idx_carrossel] = True
                 print(f"DEBUG: [_substituir_activity_por_challenge] Flag posição {idx_carrossel} atualizada para True (virada para cima)")
             
+            # CORREÇÃO CRÍTICA: GARANTIR REGISTO IMEDIATO E BACKUP SEGURO
+            print(f"DEBUG: [_substituir_activity_por_challenge] === VERIFICAÇÃO CRÍTICA DO TRACKING ===")
+            print(f"DEBUG: [_substituir_activity_por_challenge] Estado atual do tracking: {self._challenge_start_turns}")
+            print(f"DEBUG: [_substituir_activity_por_challenge] Procurando registo para: {os.path.basename(carta_challenge_path)}")
+            
+            # CORREÇÃO FUNDAMENTAL: Primeiro tentar recuperar do backup antes de verificar tracking local
+            turno_ja_registado = None
+            challenge_basename = os.path.basename(carta_challenge_path)
+            
+            # 1. Verificar tracking local
+            turno_ja_registado = self._challenge_start_turns.get(carta_challenge_path)
+            
+            # 2. Se não encontrou por caminho exato, procurar por basename
+            if turno_ja_registado is None:
+                for tracked_path, turno in self._challenge_start_turns.items():
+                    if os.path.basename(tracked_path) == challenge_basename:
+                        turno_ja_registado = turno
+                        print(f"DEBUG: [_substituir_activity_por_challenge] Challenge encontrado por basename: {turno}")
+                        # Migrar chave para caminho correto
+                        del self._challenge_start_turns[tracked_path]
+                        self._challenge_start_turns[carta_challenge_path] = turno
+                        print(f"DEBUG: [_substituir_activity_por_challenge] Chave migrada para caminho correto")
+                        break
+            
+            # 3. NOVO: Se não encontrou no tracking local, tentar recuperar dos backups
+            if turno_ja_registado is None:
+                print(f"DEBUG: [_substituir_activity_por_challenge] ⚠️ Challenge não encontrado no tracking local - tentando backups...")
+                
+                # Verificar backup no root
+                try:
+                    if hasattr(self, 'winfo_toplevel'):
+                        root = self.winfo_toplevel()
+                        if root and hasattr(root, '_backup_challenge_tracking'):
+                            for backup_path, backup_turno in root._backup_challenge_tracking.items():
+                                if os.path.basename(backup_path) == challenge_basename:
+                                    turno_ja_registado = backup_turno
+                                    print(f"DEBUG: [_substituir_activity_por_challenge] ✅ Challenge recuperado do backup ROOT: turno {backup_turno}")
+                                    break
+                except Exception as e:
+                    print(f"DEBUG: [_substituir_activity_por_challenge] Erro ao verificar backup ROOT: {e}")
+                
+                # Verificar backup no master
+                if turno_ja_registado is None:
+                    try:
+                        if hasattr(self, 'master') and hasattr(self.master, '_challenge_start_turns_backup'):
+                            for backup_path, backup_turno in self.master._challenge_start_turns_backup.items():
+                                if os.path.basename(backup_path) == challenge_basename:
+                                    turno_ja_registado = backup_turno
+                                    print(f"DEBUG: [_substituir_activity_por_challenge] ✅ Challenge recuperado do backup MASTER: turno {backup_turno}")
+                                    break
+                    except Exception as e:
+                        print(f"DEBUG: [_substituir_activity_por_challenge] Erro ao verificar backup MASTER: {e}")
+                
+                # Se encontrou nos backups, restaurar no tracking local
+                if turno_ja_registado is not None:
+                    self._challenge_start_turns[carta_challenge_path] = turno_ja_registado
+                    print(f"DEBUG: [_substituir_activity_por_challenge] ✅ Tracking restaurado dos backups: {challenge_basename} = turno {turno_ja_registado}")
+            
+            if turno_ja_registado is not None:
+                print(f"DEBUG: [_substituir_activity_por_challenge] ✅ Challenge {challenge_basename} tem tracking: turno {turno_ja_registado}")
+                print(f"DEBUG: [_substituir_activity_por_challenge] PRESERVANDO turno de registo existente - NÃO sobrescrever!")
+            else:
+                # FALLBACK CRÍTICO: Se não foi registado em lugar nenhum, registar AGORA com turno atual
+                print(f"DEBUG: [_substituir_activity_por_challenge] ❌ Challenge NÃO encontrado em local nenhum - REGISTANDO AGORA!")
+                
+                turno_aceitacao = self._current_turn_number
+                self._register_challenge_start_turn(carta_challenge_path, turno_especifico=turno_aceitacao)
+                turno_ja_registado = turno_aceitacao
+                print(f"DEBUG: [_substituir_activity_por_challenge] ✅ Challenge {challenge_basename} registado para turno {turno_aceitacao}")
+            
+            # BACKUP IMEDIATO APÓS VERIFICAÇÃO/REGISTO
+            print(f"DEBUG: [_substituir_activity_por_challenge] === BACKUP IMEDIATO PÓS-REGISTO ===")
+            print(f"DEBUG: [_substituir_activity_por_challenge] Tracking final antes do backup: {self._challenge_start_turns}")
+            print(f"DEBUG: [_substituir_activity_por_challenge] Challenge_13 no tracking: {carta_challenge_path in self._challenge_start_turns}")
+            if carta_challenge_path in self._challenge_start_turns:
+                print(f"DEBUG: [_substituir_activity_por_challenge] Turno registado: {self._challenge_start_turns[carta_challenge_path]}")
+            
+            # BACKUP ADICIONAL IMEDIATO no master/root para garantir persistência
+            try:
+                if hasattr(self, 'master') and self.master is not None:
+                    if not hasattr(self.master, '_challenge_start_turns_backup_imediato'):
+                        self.master._challenge_start_turns_backup_imediato = {}
+                    self.master._challenge_start_turns_backup_imediato[carta_challenge_path] = turno_ja_registado
+                    print(f"DEBUG: [_substituir_activity_por_challenge] ✅ BACKUP IMEDIATO no master: Challenge_13={turno_ja_registado}")
+                
+                if hasattr(self, 'winfo_toplevel'):
+                    root = self.winfo_toplevel()
+                    if root:
+                        if not hasattr(root, '_challenge_start_turns_backup_imediato'):
+                            root._challenge_start_turns_backup_imediato = {}
+                        root._challenge_start_turns_backup_imediato[carta_challenge_path] = turno_ja_registado
+                        print(f"DEBUG: [_substituir_activity_por_challenge] ✅ BACKUP IMEDIATO no root: Challenge_13={turno_ja_registado}")
+                
+                # BACKUP CRÍTICO ADICIONAL: Salvar também no _backup_turn_counters para garantir persistência durante reconstrução
+                if hasattr(self, 'master') and self.master is not None:
+                    if not hasattr(self.master, '_backup_turn_counters'):
+                        self.master._backup_turn_counters = {}
+                    if '_challenge_start_turns' not in self.master._backup_turn_counters:
+                        self.master._backup_turn_counters['_challenge_start_turns'] = {}
+                    self.master._backup_turn_counters['_challenge_start_turns'][carta_challenge_path] = turno_ja_registado
+                    print(f"DEBUG: [_substituir_activity_por_challenge] ✅ BACKUP ADICIONAL no _backup_turn_counters: {carta_challenge_path}={turno_ja_registado}")
+                
+            except Exception as e:
+                print(f"DEBUG: [_substituir_activity_por_challenge] ERRO no backup imediato: {e}")
+            
             print(f"DEBUG: [_substituir_activity_por_challenge] Challenge colocado no carrossel posição {idx_carrossel}")
             print(f"DEBUG: [_substituir_activity_por_challenge] Passo 4: Challenge colocado")
             
@@ -17145,8 +25166,53 @@ class PlayerDashboard(tk.Toplevel):
             print(f"DEBUG: [_substituir_activity_por_challenge] Estado de seleção limpo")
             print(f"DEBUG: [_substituir_activity_por_challenge] Passo 7: Estado limpo")
             
-            # 8. ATUALIZAR INTERFACE (se estiver visível)
-            print(f"DEBUG: [_substituir_activity_por_challenge] Passo 8: Atualizando interface...")
+            # 8. BACKUP CRÍTICO DOS CONTADORES ANTES DA RECONSTRUÇÃO
+            print(f"DEBUG: [_substituir_activity_por_challenge] Passo 8a: BACKUP CRÍTICO dos contadores...")
+            self._backup_turn_counters_before_reconstruction()
+            print(f"DEBUG: [_substituir_activity_por_challenge] Backup dos contadores concluído")
+            
+            # 8b. ATUALIZAR INTERFACE (se estiver visível)
+            print(f"DEBUG: [_substituir_activity_por_challenge] Passo 8b: Atualizando interface...")
+            
+            # CORREÇÃO CRÍTICA RASPBERRY PI: Sistema de backup múltiplas camadas
+            # Garantir que o Challenge recém-registado é preservado antes da reconstrução da interface
+            print(f"DEBUG: [_substituir_activity_por_challenge] === BACKUP EMERGENCY MÚLTIPLAS CAMADAS ===")
+            print(f"DEBUG: [_substituir_activity_por_challenge] Tracking antes da interface: {self._challenge_start_turns}")
+            
+            # CAMADA 1: Emergency backup no master (original)
+            if hasattr(self, 'master') and self.master is not None:
+                if not hasattr(self.master, '_challenge_tracking_emergency_backup'):
+                    self.master._challenge_tracking_emergency_backup = {}
+                self.master._challenge_tracking_emergency_backup.update(self._challenge_start_turns)
+                print(f"DEBUG: [_substituir_activity_por_challenge] CAMADA 1: Emergency backup no master: {len(self.master._challenge_tracking_emergency_backup)} itens")
+            
+            # CAMADA 2: Super backup no master
+            if hasattr(self, 'master') and hasattr(self.master, '_super_challenge_backup'):
+                self.master._super_challenge_backup.update(self._challenge_start_turns)
+                print(f"DEBUG: [_substituir_activity_por_challenge] CAMADA 2: Super backup no master: {len(self.master._super_challenge_backup)} itens")
+            
+            # CAMADA 3: Super backup no root
+            try:
+                if hasattr(self.master.master, '_super_challenge_backup'):
+                    self.master.master._super_challenge_backup.update(self._challenge_start_turns)
+                    print(f"DEBUG: [_substituir_activity_por_challenge] CAMADA 3: Super backup no root: {len(self.master.master._super_challenge_backup)} itens")
+            except:
+                print("DEBUG: [_substituir_activity_por_challenge] CAMADA 3: Root não acessível, pulando")
+            
+            # CAMADA 4: Backup registry na instância
+            if hasattr(self, '_challenge_backup_registry'):
+                self._challenge_backup_registry.update(self._challenge_start_turns)
+                print(f"DEBUG: [_substituir_activity_por_challenge] CAMADA 4: Backup registry na instância: {len(self._challenge_backup_registry)} itens")
+            
+            # CAMADA 5: Variável temporária global (último recurso)
+            import builtins
+            if not hasattr(builtins, '_global_challenge_backup'):
+                builtins._global_challenge_backup = {}
+            builtins._global_challenge_backup.update(self._challenge_start_turns)
+            print(f"DEBUG: [_substituir_activity_por_challenge] CAMADA 5: Backup global: {len(builtins._global_challenge_backup)} itens")
+            
+            print(f"DEBUG: [_substituir_activity_por_challenge] TODAS AS CAMADAS DE BACKUP CRIADAS COM SUCESSO")
+            
             if hasattr(self, 'card_labels') and self.card_labels:
                 try:
                     print(f"DEBUG: [_substituir_activity_por_challenge] Chamando playerdashboard_interface...")
@@ -17160,6 +25226,8 @@ class PlayerDashboard(tk.Toplevel):
             else:
                 print(f"DEBUG: [_substituir_activity_por_challenge] Não há card_labels - criando interface diretamente...")
                 try:
+                    # BACKUP CRÍTICO DOS CONTADORES ANTES DA CRIAÇÃO
+                    self._backup_turn_counters_before_reconstruction()
                     self.playerdashboard_interface(self.player_name, self.saldo, self.other_players)
                     print(f"DEBUG: [_substituir_activity_por_challenge] Interface criada diretamente")
                 except Exception as e:

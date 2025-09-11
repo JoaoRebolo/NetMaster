@@ -4,6 +4,8 @@ import os
 import re
 import traceback
 from card_integration import IntegratedCardDatabase
+# Importar utilitários para detecção de Raspberry Pi
+from raspberry_pi_utils import get_universal_paths, find_existing_path
 try:
     import RPi.GPIO as GPIO
 except ImportError:
@@ -25,27 +27,25 @@ except ImportError:
 import random
 import glob
 
-IMG_DIR = os.path.join(os.path.dirname(__file__), "img")
+# Obter caminhos universais usando os utilitários
+universal_paths = get_universal_paths()
+IMG_DIR = universal_paths['img_dir']
 
 # Detectar automaticamente onde estão as cartas
 def detect_cartas_base_dir():
-    """Detecta automaticamente o diretório base das cartas"""
-    possible_dirs = [
-        # Raspberry Pi
-        "/home/joao_rebolo/netmaster_menu/img/cartas",
-        # Desenvolvimento local
-        "/Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level",
-        # Fallback local
-        os.path.join(os.path.dirname(__file__), "img", "cartas")
-    ]
+    """Detecta automaticamente o diretório base das cartas usando caminhos universais"""
+    # CORREÇÃO: Para Raspberry Pi, usar o diretório base, não o diretório de cartas
+    # No Raspberry Pi: base_dir/img/cartas/equipments/...
+    # No desenvolvimento: base_dir/Equipments/...
     
-    for dir_path in possible_dirs:
-        if os.path.exists(dir_path):
-            print(f"DEBUG: Usando diretório de cartas: {dir_path}")
-            return dir_path
-    
-    print("DEBUG: Nenhum diretório de cartas encontrado!")
-    return possible_dirs[0]  # fallback
+    if universal_paths['environment'] == 'raspberry_pi':
+        # No Raspberry Pi, as cartas estão organizadas dentro do diretório base
+        print(f"DEBUG: Ambiente Raspberry Pi - usando diretório base: {universal_paths['base_dir']}")
+        return universal_paths['base_dir']
+    else:
+        # No desenvolvimento, usar o diretório base também
+        print(f"DEBUG: Ambiente desenvolvimento - usando diretório base: {universal_paths['base_dir']}")
+        return universal_paths['base_dir']
 
 CARTAS_BASE_DIR = detect_cartas_base_dir()
 COIN_IMG = os.path.join(IMG_DIR, "picoin.png")
@@ -115,58 +115,86 @@ def check_gpio_key(root):
         root.destroy()
     root.after(100, lambda: check_gpio_key(root))
 
-# Carregar baralhos adaptado à nova estrutura: cartas/[tipo]/Residential-level/[cor]/
+# Carregar baralhos adaptado à nova estrutura - usando mesma lógica do card_integration.py
 def preparar_baralhos():
     baralhos = {}
+    
+    # Obter caminhos universais para garantir consistência
+    universal_paths_local = get_universal_paths()
+    environment = universal_paths_local['environment']
+    base_dir = universal_paths_local['base_dir']
+    
+    print(f"DEBUG: preparar_baralhos - ambiente: {environment}, base_dir: {base_dir}")
+    
     for cor in COLORS:
         baralhos[cor] = {}
         for tipo in CARD_TYPES:
             cartas = []
             
-            # Tentar múltiplas estruturas de pastas
+            # Usar EXATAMENTE a mesma lógica do card_integration.py
             possible_paths = []
             
             # Para cartas que têm cores específicas (equipments, services, users, activities)
             if tipo in ["equipments", "services", "users", "activities"]:
-                # Mapear cor do jogador para diferentes formatos de nome
-                color_variants = []
-                if cor == "blue":
-                    color_variants = ["Blue", "blue", "BLUE"]
-                elif cor == "green": 
-                    color_variants = ["Green", "green", "GREEN"]
-                elif cor == "red":
-                    color_variants = ["Red", "red", "RED"]
-                elif cor == "yellow":
-                    color_variants = ["Yellow", "yellow", "YELLOW"]
-                else:  # neutral - adicionar todas as cores
-                    color_variants = ["Blue", "Green", "Red", "Yellow", "blue", "green", "red", "yellow"]
-                
                 if cor != "neutral":
-                    # Estruturas possíveis para cores específicas:
-                    for color_var in color_variants:
-                        # 1. cartas/[tipo]/Residential-level/[cor]/
-                        possible_paths.append(os.path.join(CARTAS_BASE_DIR, tipo, "Residential-level", color_var))
-                        # 2. cartas/Residential-[tipo]-[cor]/
-                        possible_paths.append(os.path.join(CARTAS_BASE_DIR, f"Residential-{tipo}-{color_var}"))
-                        # 3. cartas/[tipo]/[cor]/
-                        possible_paths.append(os.path.join(CARTAS_BASE_DIR, tipo, color_var))
+                    # Mapear cor para formato capitalizado (Red, Blue, etc.)
+                    color_capitalized = cor.capitalize()
+                    
+                    if environment == "raspberry_pi":
+                        # Raspberry Pi: base_dir/img/cartas/[tipo]/Residential-level/[Cor]
+                        card_path = os.path.join(base_dir, "img", "cartas", tipo, "Residential-level", color_capitalized)
+                        possible_paths.append(card_path)
+                    else:
+                        # Desenvolvimento: base_dir/[Tipo]/Residential-level/[Cor]  (tipo capitalizado)
+                        tipo_capitalized = tipo.capitalize()
+                        if tipo == "equipments":
+                            tipo_capitalized = "Equipments"
+                        elif tipo == "activities":
+                            tipo_capitalized = "Activities"
+                        elif tipo == "services":
+                            tipo_capitalized = "Services"
+                        elif tipo == "users":
+                            tipo_capitalized = "Users"
+                        
+                        card_path = os.path.join(base_dir, tipo_capitalized, "Residential-level", color_capitalized)
+                        possible_paths.append(card_path)
                 else:
                     # Para neutral, tentar todas as cores
-                    for color_var in color_variants:
-                        possible_paths.append(os.path.join(CARTAS_BASE_DIR, tipo, "Residential-level", color_var))
-                        possible_paths.append(os.path.join(CARTAS_BASE_DIR, f"Residential-{tipo}-{color_var}"))
-                        possible_paths.append(os.path.join(CARTAS_BASE_DIR, tipo, color_var))
+                    for color_name in ["Red", "Blue", "Green", "Yellow"]:
+                        if environment == "raspberry_pi":
+                            card_path = os.path.join(base_dir, "img", "cartas", tipo, "Residential-level", color_name)
+                            possible_paths.append(card_path)
+                        else:
+                            tipo_capitalized = tipo.capitalize()
+                            if tipo == "equipments":
+                                tipo_capitalized = "Equipments"
+                            elif tipo == "activities":
+                                tipo_capitalized = "Activities"
+                            elif tipo == "services":
+                                tipo_capitalized = "Services"
+                            elif tipo == "users":
+                                tipo_capitalized = "Users"
+                            
+                            card_path = os.path.join(base_dir, tipo_capitalized, "Residential-level", color_name)
+                            possible_paths.append(card_path)
             else:
                 # Para cartas sem cor específica (challenges, events, actions)
-                # Estruturas possíveis:
-                possible_paths = [
-                    # 1. cartas/[tipo]/Residential-level/
-                    os.path.join(CARTAS_BASE_DIR, tipo, "Residential-level"),
-                    # 2. cartas/Residential-[tipo]/
-                    os.path.join(CARTAS_BASE_DIR, f"Residential-{tipo}"),
-                    # 3. cartas/[tipo]/
-                    os.path.join(CARTAS_BASE_DIR, tipo)
-                ]
+                if environment == "raspberry_pi":
+                    # Raspberry Pi: base_dir/img/cartas/[tipo]/Residential-level/
+                    card_path = os.path.join(base_dir, "img", "cartas", tipo, "Residential-level")
+                    possible_paths.append(card_path)
+                else:
+                    # Desenvolvimento: base_dir/[Tipo]/Residential-level/
+                    tipo_capitalized = tipo.capitalize()
+                    if tipo == "challenges":
+                        tipo_capitalized = "Challenges"
+                    elif tipo == "actions":
+                        tipo_capitalized = "Actions"
+                    elif tipo == "events":
+                        tipo_capitalized = "Events"
+                    
+                    card_path = os.path.join(base_dir, tipo_capitalized, "Residential-level")
+                    possible_paths.append(card_path)
             
             # Tentar encontrar cartas em qualquer uma das estruturas possíveis
             for path in possible_paths:
@@ -176,7 +204,7 @@ def preparar_baralhos():
                                     if f.lower().endswith((".png", ".jpg", ".jpeg"))]
                         if card_files:
                             cartas.extend(card_files)
-                            print(f"DEBUG: Found {len(card_files)} cards at {path}")
+                            print(f"DEBUG: Found {len(card_files)} cards for {tipo}/{cor} at {path}")
                     except Exception as e:
                         print(f"DEBUG: Error reading {path}: {e}")
                         continue
@@ -193,12 +221,13 @@ def preparar_baralhos():
             if cartas:
                 random.shuffle(cartas)
                 baralhos[cor][tipo] = cartas.copy()
-                print(f"DEBUG: Total {len(cartas)} cards for '{tipo}' color '{cor}'")
+                print(f"DEBUG: Total {len(cartas)} cards loaded for '{tipo}' color '{cor}'")
             else:
                 baralhos[cor][tipo] = []
-                print(f"DEBUG: No cards found for type '{tipo}' color '{cor}'")
-                print(f"DEBUG: Tried paths: {possible_paths}")
+                if tipo in ["equipments", "services", "users", "activities"] and cor != "neutral":
+                    print(f"DEBUG: No cards found for type '{tipo}' color '{cor}' - tried paths: {possible_paths}")
     
+    print("DEBUG: preparar_baralhos completed")
     print("Cartas neutral/actions:", len(baralhos.get("neutral", {}).get("actions", [])))
     return baralhos
 
@@ -5586,6 +5615,28 @@ class StoreWindow(tk.Toplevel):
             
             # CRÍTICO: Limpar COMPLETAMENTE o estado da Store para evitar reaparição da página de substituição
             self._limpar_estado_completo_store()
+            
+            # =============================================================================
+            # BACKUP IMEDIATO STORE: PRESERVAR TRACKING DE CHALLENGES ANTES DA INTERFACE
+            # =============================================================================
+            print(f"DEBUG: [BACKUP STORE] *** INICIANDO BACKUP IMEDIATO DE CHALLENGES ***")
+            
+            # 1. Fazer backup do _challenge_start_turns no master root
+            root = self.dashboard.master
+            if hasattr(self.dashboard, '_challenge_start_turns') and self.dashboard._challenge_start_turns:
+                # Criar backup no root se não existir
+                if not hasattr(root, '_backup_challenge_start_turns'):
+                    root._backup_challenge_start_turns = {}
+                
+                # CORREÇÃO CRÍTICA: Usar caminho completo, não basename
+                # Fazer backup de cada Challenge ativo usando caminho completo (consistente com outros backups)
+                for challenge_path, turn_number in self.dashboard._challenge_start_turns.items():
+                    root._backup_challenge_start_turns[challenge_path] = turn_number
+                    print(f"DEBUG: [BACKUP STORE] Challenge '{os.path.basename(challenge_path)}' (caminho: {challenge_path}) -> turno {turn_number} GUARDADO no backup root")
+                
+                print(f"DEBUG: [BACKUP STORE] Total de {len(self.dashboard._challenge_start_turns)} Challenges guardados no backup root")
+            else:
+                print(f"DEBUG: [BACKUP STORE] Nenhum Challenge ativo para fazer backup")
             
             # Mostrar o PlayerDashboard
             self.dashboard.deiconify()

@@ -114,12 +114,13 @@ class EquipmentCard:
     # Campos comuns
     buy_cost: int             # Preço de compra em picoins
     sell_cost: int            # Preço de venda em picoins
+    object_name: Optional[str] = None  # Nome do objeto para deteção (ex: "router_simples_vermelho")
 
     def __str__(self):
         if self.category == "Router":
-            return f"EquipmentCard(id={self.equipment_id}, {self.model}, queue={self.queue_size})"
+            return f"EquipmentCard(id={self.equipment_id}, {self.model}, queue={self.queue_size}, object={self.object_name})"
         else:
-            return f"EquipmentCard(id={self.equipment_id}, {self.model}, rate={self.link_rate}, length={self.link_length})"
+            return f"EquipmentCard(id={self.equipment_id}, {self.model}, rate={self.link_rate}, length={self.link_length}, object={self.object_name})"
 
 @dataclass
 class ServiceCard:
@@ -354,6 +355,34 @@ class UserDatabase:
             
         }
         
+        # Dicionário de mapeamento para object_names usados na deteção de objetos
+        # Formato: "tipo_cor" -> "nome_do_objeto_para_detecao"
+        object_names = {
+            # Small Routers
+            "small_router_red": "router_simples_vermelho",
+            "small_router_green": "router_simples_verde", 
+            "small_router_blue": "router_simples_azul",
+            "small_router_yellow": "router_simples_amarelo",
+            
+            # Medium Routers  
+            "medium_router_red": "router_medio_vermelho",
+            "medium_router_green": "router_medio_verde",
+            "medium_router_blue": "router_medio_azul", 
+            "medium_router_yellow": "router_medio_amarelo",
+            
+            # Short Links
+            "short_link_red": "link_curto_vermelho",
+            "short_link_green": "link_curto_verde",
+            "short_link_blue": "link_curto_azul",
+            "short_link_yellow": "link_curto_amarelo",
+            
+            # Long Links
+            "long_link_red": "link_longo_vermelho", 
+            "long_link_green": "link_longo_verde",
+            "long_link_blue": "link_longo_azul",
+            "long_link_yellow": "link_longo_amarelo",
+        }
+        
         # Small Router (Equipment_1 a Equipment_3)
         for i in range(1, 4):
             for color in colors:
@@ -362,6 +391,9 @@ class UserDatabase:
                 
                 # Obter valores do dicionário ou usar valores padrão
                 costs = equipment_costs.get(base_id, {"buy": 100 + (i * 50), "sell": 50 + (i * 25), "queue_size": 2 + i})
+                
+                # Obter object_name baseado no tipo e cor
+                object_name = object_names.get(f"small_router_{color}")
                 
                 equipment_card = EquipmentCard(
                     equipment_id=equipment_id,
@@ -374,7 +406,8 @@ class UserDatabase:
                     link_rate=None,
                     link_length=None,
                     buy_cost=costs["buy"],
-                    sell_cost=costs["sell"]
+                    sell_cost=costs["sell"],
+                    object_name=object_name
                 )
                 
                 self.equipments[equipment_id] = equipment_card
@@ -388,6 +421,9 @@ class UserDatabase:
                 # Obter valores do dicionário ou usar valores padrão
                 costs = equipment_costs.get(base_id, {"buy": 200 + ((i-4) * 75), "sell": 100 + ((i-4) * 37), "queue_size": 5 + (i-4)})
                 
+                # Obter object_name baseado no tipo e cor
+                object_name = object_names.get(f"medium_router_{color}")
+                
                 equipment_card = EquipmentCard(
                     equipment_id=equipment_id,
                     equipment_type=EquipmentType.MEDIUM_ROUTER,
@@ -399,7 +435,8 @@ class UserDatabase:
                     link_rate=None,
                     link_length=None,
                     buy_cost=costs["buy"],
-                    sell_cost=costs["sell"]
+                    sell_cost=costs["sell"],
+                    object_name=object_name
                 )
                 
                 self.equipments[equipment_id] = equipment_card
@@ -413,6 +450,9 @@ class UserDatabase:
                 # Obter valores do dicionário ou usar valores padrão
                 costs = equipment_costs.get(base_id, {"buy": 150 + ((i-8) * 50), "sell": 75 + ((i-8) * 25), "link_length": 2 + (i-8)})
                 
+                # Obter object_name baseado no tipo e cor
+                object_name = object_names.get(f"short_link_{color}")
+                
                 equipment_card = EquipmentCard(
                     equipment_id=equipment_id,
                     equipment_type=EquipmentType.SHORT_LINK,
@@ -424,7 +464,8 @@ class UserDatabase:
                     link_rate="1 packet per turn",
                     link_length=costs["link_length"],  # Comprimento do link
                     buy_cost=costs["buy"],
-                    sell_cost=costs["sell"]
+                    sell_cost=costs["sell"],
+                    object_name=object_name
                 )
                 
                 self.equipments[equipment_id] = equipment_card
@@ -438,6 +479,9 @@ class UserDatabase:
                 # Obter valores do dicionário ou usar valores padrão
                 costs = equipment_costs.get(base_id, {"buy": 250 + ((i-12) * 75), "sell": 125 + ((i-12) * 37), "link_length": 5 + (i-12)})
                 
+                # Obter object_name baseado no tipo e cor
+                object_name = object_names.get(f"long_link_{color}")
+                
                 equipment_card = EquipmentCard(
                     equipment_id=equipment_id,
                     equipment_type=EquipmentType.LONG_LINK,
@@ -449,7 +493,8 @@ class UserDatabase:
                     link_rate="1 packet per turn",
                     link_length=costs["link_length"],  # Comprimento do link
                     buy_cost=costs["buy"],
-                    sell_cost=costs["sell"]
+                    sell_cost=costs["sell"],
+                    object_name=object_name
                 )
                 
                 self.equipments[equipment_id] = equipment_card
