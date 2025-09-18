@@ -131,16 +131,19 @@ class ServiceCard:
     title: str                  # "BANDWIDTH", "DATA VOLUME", "TEMPORARY"
     description: str            # Descrição do serviço
     valid_for: str             # "1 Residential User" (sempre o mesmo)
-    service_conditions: str    #Condições específicas: "up to 1 packet per turn", "5 packets", "4 turns"
-    service_turns: Optional[int]          # Número de turnos que o serviço é válido
     buy_cost: int              # Preço de compra em picoins
     sell_cost: int             # Preço de venda em picoins (sempre 0 nas cartas físicas)
+    # Campos opcionais (com valores padrão)
+    service_user_id: Optional[int] = None  # ID do utilizador associado (1 a 4) ou None para "1 Residential User"
+    service_packet_turn: Optional[int] = None        # Número de pacotes por turno (apenas para BANDWIDTH)
+    service_packets: Optional[int] = None        # Número de pacotes que o serviço é válido (apenas para DATA_VOLUME)
+    service_turns: Optional[int] = None          # Número de turnos que o serviço é válido
     # Campos de metadados fixos
     collection: str = "Packet Switching Collection"
     level: str = "Level I"
 
     def __str__(self):
-        return f"ServiceCard(id={self.service_id}, {self.title}, conditions={self.service_conditions}, buy={self.buy_cost})"
+        return f"ServiceCard(id={self.service_id}, {self.title}, type={self.service_type}, buy={self.buy_cost})"
 
 @dataclass
 @dataclass
@@ -359,28 +362,28 @@ class UserDatabase:
         # Formato: "tipo_cor" -> "nome_do_objeto_para_detecao"
         object_names = {
             # Small Routers
-            "small_router_red": "router_simples_vermelho",
-            "small_router_green": "router_simples_verde", 
-            "small_router_blue": "router_simples_azul",
-            "small_router_yellow": "router_simples_amarelo",
+            "small_router_red": "small_router_red",
+            "small_router_green": "small_router_green", 
+            "small_router_blue": "small_router_blue",
+            "small_router_yellow": "small_router_yellow",
             
             # Medium Routers  
-            "medium_router_red": "router_medio_vermelho",
-            "medium_router_green": "router_medio_verde",
-            "medium_router_blue": "router_medio_azul", 
-            "medium_router_yellow": "router_medio_amarelo",
+            "medium_router_red": "medium_router_red",
+            "medium_router_green": "medium_router_green",
+            "medium_router_blue": "medium_router_blue", 
+            "medium_router_yellow": "medium_router_yellow",
             
             # Short Links
-            "short_link_red": "link_curto_vermelho",
-            "short_link_green": "link_curto_verde",
-            "short_link_blue": "link_curto_azul",
-            "short_link_yellow": "link_curto_amarelo",
+            "short_link_red": "short_link_red",
+            "short_link_green": "short_link_green",
+            "short_link_blue": "short_link_blue",
+            "short_link_yellow": "short_link_yellow",
             
             # Long Links
-            "long_link_red": "link_longo_vermelho", 
-            "long_link_green": "link_longo_verde",
-            "long_link_blue": "link_longo_azul",
-            "long_link_yellow": "link_longo_amarelo",
+            "long_link_red": "long_link_red", 
+            "long_link_green": "long_link_green",
+            "long_link_blue": "long_link_blue",
+            "long_link_yellow": "long_link_yellow",
         }
         
         # Small Router (Equipment_1 a Equipment_3)
@@ -508,41 +511,41 @@ class UserDatabase:
         service_costs = {
             # Bandwidth Services (1 por cor)
             "bandwidth_1": {
-                "service_conditions": "up to 1 packet per turn",
+                "service_packets_turn": 1,  # 1 packet per turn (valor máximo para "up to")
                 "buy_price": 80,
                 "sell_price": 0
             },
             
             # Data Volume Services (3 por cor)
             "data_volume_1": {
-                "service_conditions": "5 packets",
+                "service_packets": 5,
                 "buy_price": 5,
                 "sell_price": 0
             },
             "data_volume_2": {
-                "service_conditions": "10 packets",
+                "service_packets": 10,
                 "buy_price": 8,
                 "sell_price": 0
             },
             "data_volume_3": {
-                "service_conditions": "20 packets",
+                "service_packets": 20,
                 "buy_price": 15,
                 "sell_price": 0
             },
             
             # Temporary Services (3 por cor)
             "temporary_1": {
-                "service_conditions": "4 turns",
+                "service_turns": 4,
                 "buy_price": 4,
                 "sell_price": 0
             },
             "temporary_2": {
-                "service_conditions": "8 turns",
+                "service_turns": 8,
                 "buy_price": 7,
                 "sell_price": 0
             },
             "temporary_3": {
-                "service_conditions": "16 turns",
+                "service_turns": 16,
                 "buy_price": 14,
                 "sell_price": 0
             }
@@ -604,26 +607,36 @@ class UserDatabase:
             }
         ]
         
+        # Contador global sequencial para IDs simples
+        service_counter = 1
+        
         # Criar cartas para cada cor
         for color in colors:
-            for idx, template in enumerate(service_templates):
-                service_id = f"service_{template['type'].value}_{idx+1}_{color}"
+            for template in service_templates:
+                # ID simples sequencial: Service_1, Service_2, etc.
+                service_id = f"Service_{service_counter}"
                 base_key = template["base_key"]
+                
+                # Incrementar contador global
+                service_counter += 1
                 
                 # Obter valores do dicionário usando a chave correta
                 costs = service_costs.get(base_key, {
-                    "service_conditions": "up to 1 packet per turn",
                     "buy_price": 80,
                     "sell_price": 0  # Services sempre têm sell_price = 0
                 })
                 
-                # Extrair service_turns das condições para serviços TEMPORARY
+                # Extrair valores específicos baseados no tipo de serviço
+                service_packet_turn_value = None
+                service_packets_value = None
                 service_turns_value = None
-                if template["type"] == ServiceType.TEMPORARY:
-                    import re
-                    match = re.search(r'(\d+) turns', costs["service_conditions"])
-                    if match:
-                        service_turns_value = int(match.group(1))
+                
+                if template["type"] == ServiceType.BANDWIDTH:
+                    service_packet_turn_value = costs.get("service_packets_turn", 1)
+                elif template["type"] == ServiceType.DATA_VOLUME:
+                    service_packets_value = costs.get("service_packets", 5)
+                elif template["type"] == ServiceType.TEMPORARY:
+                    service_turns_value = costs.get("service_turns", 4)
                 
                 service_card = ServiceCard(
                     service_id=service_id,
@@ -632,8 +645,9 @@ class UserDatabase:
                     title=template["title"],
                     description=template["description"],
                     valid_for="1 Residential User",
-                    service_conditions=costs["service_conditions"],
-                    service_turns=service_turns_value,  # CORRIGIDO: Extrair valor dos turnos para TEMPORARY
+                    service_packet_turn=service_packet_turn_value,
+                    service_packets=service_packets_value,
+                    service_turns=service_turns_value,
                     buy_cost=costs["buy_price"],
                     sell_cost=0  # Services sempre têm sell_cost = 0
                 )

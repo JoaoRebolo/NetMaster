@@ -215,27 +215,22 @@ class CardFileManager:
                             card_number = int(filename.replace("Service_", "").replace(".png", ""))
                             full_path = os.path.join(services_dir, filename)
                             
-                            # Mapear números de cartas para serviços específicos
-                            service_mapping = {
-                                1: "service_bandwidth_1", 2: "service_data_volume_2", 
-                                3: "service_data_volume_3", 4: "service_data_volume_4",
-                                5: "service_temporary_5", 6: "service_temporary_6", 
-                                7: "service_temporary_7"
-                            }
+                            # Mapear números de cartas para os novos IDs simples
+                            # Service_1.png -> Service_1, Service_2.png -> Service_2, etc.
+                            service_id = f"Service_{card_number}"
                             
-                            if card_number in service_mapping:
-                                service_type = service_mapping[card_number]
-                                card_id = f"{service_type}_{color_lower}"
-                                mappings["services"][card_id] = {
+                            # Verificar se este service_id existe na base de dados
+                            if card_number >= 1 and card_number <= 28:  # Temos 28 services no total
+                                mappings["services"][service_id] = {
                                     "path": full_path,
                                     "color": color_lower,
                                     "number": card_number,
                                     "filename": filename,
-                                    "service_type": service_type
+                                    "service_id": service_id
                                 }
-                                print(f"Mapeado: Service ID {card_id} -> {filename} ({color})")
+                                print(f"Mapeado: Service ID {service_id} -> {filename} ({color})")
                             else:
-                                print(f"Número de service não reconhecido: {card_number}")
+                                print(f"Número de service fora do range (1-28): {card_number}")
                         except ValueError:
                             print(f"Não foi possível extrair ID de: {filename}")
                             continue
