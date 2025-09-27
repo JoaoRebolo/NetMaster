@@ -14,6 +14,8 @@ import socket
 import json
 import asyncio
 import uuid
+import __main__
+from asyncio import Queue
 try:
     import websockets
 except ImportError:
@@ -38,7 +40,34 @@ except ImportError:
         def cleanup(): pass
     GPIO = MockGPIO()
 import random
-from Store_v2 import StoreWindow
+from Store import StoreWindow
+
+def normalize_session_state(session):
+    """
+    CORREÇÃO CRÍTICA: Normaliza o campo 'state' da sessão para string
+    Resolve problema onde servidor pode enviar enum em vez de string
+    """
+    if not isinstance(session, dict):
+        return session
+        
+    state = session.get('state')
+    if state is None:
+        return session
+    
+    # Se é enum, extrair o value
+    if hasattr(state, 'value'):
+        session['state'] = str(state.value)
+        print(f"[DEBUG] ENUM CONVERTIDO: {state} -> '{state.value}'")
+    elif hasattr(state, 'name'):
+        session['state'] = str(state.name)
+        print(f"[DEBUG] ENUM CONVERTIDO (name): {state} -> '{state.name}'")
+    elif not isinstance(state, str):
+        session['state'] = str(state)
+        print(f"[DEBUG] TIPO CONVERTIDO: {type(state)} -> '{str(state)}'")
+    else:
+        print(f"[DEBUG] ✓ STATE JÁ É STRING: '{state}'")
+    
+    return session
 
 # MENU INTEGRATION VARIABLES
 LOCAL_PORT = 5050
@@ -67,6 +96,10 @@ class MenuPlayer:
 class NetMasterClient:
     """Cliente WebSocket para conectar ao servidor NetMaster"""
     
+    # Variáveis de classe para handlers globais compartilhados
+    _global_handlers = {}
+    _global_dashboard_setter = None
+    
     def __init__(self, server_url="ws://netmaster.vps.tecnico.ulisboa.pt:8000"):
         self.server_url = server_url
         self.websocket = None
@@ -76,44 +109,158 @@ class NetMasterClient:
         self.message_handlers = {}
         self.connection_status_callback = None
         
+        # NOVO: Sistema de queue para evitar conflito de corrotinas
+        self.message_queue = None
+        self.reader_task = None
+        self.processor_task = None
+        self._reading_lock = asyncio.Lock()
+        
+        # Flag para controle de join de sessões
+        self.is_joining_session = False
+        
+        # *** NOVO: Registrar handlers globais automaticamente em TODAS as instâncias ***
+        print(f"[NETMASTER_CLIENT] Nova instância criada - registrando handlers globais...")
+        print(f"[NETMASTER_CLIENT] DEBUG: NetMasterClient._global_handlers = {NetMasterClient._global_handlers}")
+        print(f"[NETMASTER_CLIENT] DEBUG: NetMasterClient._global_dashboard_setter = {NetMasterClient._global_dashboard_setter}")
+        
+        for handler_type, handler_func in NetMasterClient._global_handlers.items():
+            self.message_handlers[handler_type] = handler_func
+            print(f"[NETMASTER_CLIENT] ✓ Handler global registrado: {handler_type}")
+        
+        # Registrar método set_active_dashboard se disponível
+        if NetMasterClient._global_dashboard_setter:
+            self.set_active_dashboard = NetMasterClient._global_dashboard_setter
+            print(f"[NETMASTER_CLIENT] ✓ set_active_dashboard registrado")
+        
+        print(f"[NETMASTER_CLIENT] FINAL: self.message_handlers = {list(self.message_handlers.keys())}")
+        
     def set_connection_status_callback(self, callback):
         """Define callback para mudanças no status de conexão"""
         self.connection_status_callback = callback
         
     def set_message_handler(self, message_type, handler):
         """Define handler para tipos específicos de mensagem"""
+        print(f"[SET_HANDLER] Registrando handler: {message_type}")
+        print(f"[SET_HANDLER] Handler function: {handler}")
         self.message_handlers[message_type] = handler
+        print(f"[SET_HANDLER] Handlers após registo: {list(self.message_handlers.keys())}")
+        
+        # Armazenar referência para dashboard se o handler pertence a uma
+        try:
+            if hasattr(handler, '__self__') and hasattr(handler.__self__, 'on_multiplayer_turn_changed'):
+                self._dashboard_ref = handler.__self__
+                print(f"[HANDLER_REF] Dashboard reference armazenada: {type(self._dashboard_ref)}")
+        except:
+            pass
+    
+    @classmethod
+    def register_global_handler(cls, message_type, handler):
+        """Registra handler global que será aplicado a TODAS as instâncias"""
+        print(f"[NETMASTER_CLIENT] REGISTER_GLOBAL_HANDLER: Registrando {message_type}")
+        print(f"[NETMASTER_CLIENT] REGISTER_GLOBAL_HANDLER: Handler function: {handler}")
+        cls._global_handlers[message_type] = handler
+        print(f"[NETMASTER_CLIENT] REGISTER_GLOBAL_HANDLER: _global_handlers agora: {cls._global_handlers}")
+        
+        # Aplicar a todas as instâncias existentes também (se houver)
+        # Nota: Em Python, não há uma forma fácil de rastrear todas as instâncias
+        # mas como estamos registrando no __init__, isso não deveria ser problema
+    
+    @classmethod
+    def set_global_dashboard_setter(cls, setter_func):
+        """Define função global para set_active_dashboard"""
+        print(f"[NETMASTER_CLIENT] SET_GLOBAL_DASHBOARD_SETTER: Registrando dashboard setter")
+        print(f"[NETMASTER_CLIENT] SET_GLOBAL_DASHBOARD_SETTER: Setter function: {setter_func}")
+        cls._global_dashboard_setter = setter_func
     
     async def connect(self):
-        """Conecta ao servidor WebSocket"""
+        """Conecta ao servidor WebSocket com proteção contra múltiplas conexões"""
         try:
+            print(f"[CONNECTION] *** FUNCTION CONNECT() CHAMADA! ***")
+            
+            # Verificar se já estamos conectados
+            if self.connected and self.websocket and not self.websocket.closed:
+                print(f"[CONNECTION] *** JÁ CONECTADO - REUTILIZANDO CONEXÃO ***")
+                return True
+            
+            # Cancelar tasks anteriores se existirem - com verificação de loop
+            current_loop = asyncio.get_running_loop()
+            
+            if hasattr(self, 'reader_task') and self.reader_task and not self.reader_task.done():
+                print(f"[CONNECTION] *** CANCELANDO READER ANTERIOR ***")
+                if self.reader_task.get_loop() == current_loop:
+                    self.reader_task.cancel()
+                    try:
+                        await self.reader_task
+                    except asyncio.CancelledError:
+                        pass
+                else:
+                    print(f"[CONNECTION] *** READER EM LOOP DIFERENTE - IGNORANDO ***")
+            
+            if hasattr(self, 'processor_task') and self.processor_task and not self.processor_task.done():
+                print(f"[CONNECTION] *** CANCELANDO PROCESSOR ANTERIOR ***")
+                if self.processor_task.get_loop() == current_loop:
+                    self.processor_task.cancel()
+                    try:
+                        await self.processor_task
+                    except asyncio.CancelledError:
+                        pass
+                else:
+                    print(f"[CONNECTION] *** PROCESSOR EM LOOP DIFERENTE - IGNORANDO ***")
+            
+            if hasattr(self, '_heartbeat_task') and self._heartbeat_task and not self._heartbeat_task.done():
+                print(f"[CONNECTION] *** CANCELANDO HEARTBEAT ANTERIOR ***")
+                if self._heartbeat_task.get_loop() == current_loop:
+                    self._heartbeat_task.cancel()
+                    try:
+                        await self._heartbeat_task
+                    except asyncio.CancelledError:
+                        pass
+                else:
+                    print(f"[CONNECTION] *** HEARTBEAT EM LOOP DIFERENTE - IGNORANDO ***")
+            
             if websockets is None:
                 raise Exception("websockets library not available")
                 
-            print(f"🔗 Conectando ao servidor NetMaster: {self.server_url}")
+            print(f"[CONNECTION] Conectando ao servidor NetMaster: {self.server_url}")
+            
+            # Obter o loop de evento atual
+            loop = asyncio.get_running_loop()
+            print(f"[CONNECTION] *** LOOP OBTIDO: {loop} ***")
             
             # Configurar timeouts maiores para evitar disconnections
             self.websocket = await websockets.connect(
                 self.server_url,
-                ping_interval=30,  # Ping a cada 30 segundos
-                ping_timeout=20,   # Timeout de 20 segundos para pong
-                close_timeout=10   # Timeout de 10 segundos para fechar
+                ping_interval=25,  # Ping a cada 25 segundos (antes do heartbeat de 30s)
+                ping_timeout=30,   # Timeout de 30 segundos para pong (mais tolerante)
+                close_timeout=15   # Timeout de 15 segundos para fechar
             )
             self.connected = True
+            print(f"[CONNECTION] *** CONEXÃO ESTABELECIDA! *** WebSocket: {self.websocket}")
             
             if self.connection_status_callback:
                 self.connection_status_callback(True, "Conectado ao servidor")
             
-            # Iniciar loop de escuta de mensagens
-            asyncio.create_task(self.listen_for_messages())
+            # NOVO: Inicializar sistema de queue
+            self.message_queue = Queue()
             
+            # Iniciar single reader e message processor ÚNICOS
+            print(f"[CONNECTION] *** INICIANDO SINGLE READER ***")
+            self.reader_task = loop.create_task(self._single_websocket_reader())
+            print(f"[CONNECTION] *** READER TASK CRIADA: {self.reader_task} ***")
+            
+            print(f"[CONNECTION] *** INICIANDO MESSAGE PROCESSOR ***")
+            self.processor_task = loop.create_task(self._message_processor())
+            print(f"[CONNECTION] *** PROCESSOR TASK CRIADA: {self.processor_task} ***")
+
             # Iniciar loop de heartbeat
-            asyncio.create_task(self.start_heartbeat_loop())
-            
+            print(f"[CONNECTION] *** INICIANDO start_heartbeat_loop() ***")
+            self._heartbeat_task = loop.create_task(self.start_heartbeat_loop())
+            print(f"[CONNECTION] *** TASK start_heartbeat_loop() CRIADA: {self._heartbeat_task} ***")
+
             return True
             
         except Exception as e:
-            print(f"❌ Erro ao conectar: {e}")
+            print(f"Erro ao conectar: {e}")
             self.connected = False
             if self.connection_status_callback:
                 self.connection_status_callback(False, f"Erro de conexão: {str(e)}")
@@ -129,16 +276,16 @@ class NetMasterClient:
     
     async def send_message(self, message):
         """Envia mensagem para o servidor"""
-        print(f"📤 [DEBUG] send_message: conectado={self.connected}, websocket={self.websocket is not None}")
-        print(f"📤 [DEBUG] Enviando mensagem: {message}")
+        print(f"[DEBUG] send_message: conectado={self.connected}, websocket={self.websocket is not None}")
+        print(f"[DEBUG] Enviando mensagem: {message}")
         
         if not self.connected or not self.websocket:
-            print("❌ Não conectado ao servidor")
+            print("Não conectado ao servidor")
             return False
         
         try:
             message_str = json.dumps(message)
-            print(f"📤 [DEBUG] JSON serializado: {message_str}")
+            print(f"[DEBUG] JSON serializado: {message_str}")
             await self.websocket.send(message_str)
             print(f"[DEBUG] Mensagem enviada com sucesso")
             return True
@@ -148,87 +295,314 @@ class NetMasterClient:
             traceback.print_exc()
             return False
     
-    async def listen_for_messages(self):
-        """Escuta mensagens do servidor"""
+    async def _single_websocket_reader(self):
+        """Lê mensagens do WebSocket e as coloca na queue - ÚNICA CORROTINA LENDO"""
         message_count = 0
-        last_message_time = time.time()
         
         try:
-            print(f"🔊 [DEBUG] *** INICIANDO ESCUTA DE MENSAGENS ***")
-            print(f"🔊 [DEBUG] WebSocket ativo: {self.websocket is not None}")
-            print(f"🔊 [DEBUG] Conexão ativa: {self.connected}")
-            print(f"🔊 [DEBUG] Handlers registrados: {list(self.message_handlers.keys())}")
+            print(f"[SINGLE_READER] *** INICIANDO LEITURA ÚNICA DO WEBSOCKET ***")
             
             async for message in self.websocket:
-                try:
-                    message_count += 1
-                    current_time = time.time()
-                    time_since_last = current_time - last_message_time
-                    last_message_time = current_time
-                    
-                    print(f"📨 [DEBUG] *** MENSAGEM #{message_count} RECEBIDA! *** (Δt: {time_since_last:.2f}s)")
-                    print(f"📨 [DEBUG] Conteúdo: {message}")
-                    print(f"📨 [DEBUG] Timestamp: {current_time}")
-                    
-                    data = json.loads(message)
-                    message_type = data.get('type')
-                    print(f"[DEBUG] Tipo da mensagem: {message_type}")
-                    print(f"[DEBUG] Handlers disponíveis: {list(self.message_handlers.keys())}")
-                    
-                    # CRÍTICO: Handler universal PRIMEIRO para garantir que sempre é chamado
-                    if 'ALL_MESSAGES_DEBUG' in self.message_handlers:
-                        try:
-                            print(f"[DEBUG] *** CHAMANDO HANDLER UNIVERSAL PRIMEIRO ***")
-                            self.message_handlers['ALL_MESSAGES_DEBUG'](data)
-                        except Exception as e:
-                            print(f"[DEBUG] Erro no handler universal: {e}")
-                    
-                    # Chamar handler específico se existir
-                    if message_type in self.message_handlers:
-                        print(f"[DEBUG] Chamando handler para {message_type}")
-                        
-                        # Log especial para game_started
-                        if message_type == 'game_started':
-                            print(f"[DEBUG] *** RECEBENDO GAME_STARTED! ***")
-                            print(f"[DEBUG] Player ID: {self.player_id}")
-                            print(f"[DEBUG] Session ID: {self.session_id}")
-                            print(f"[DEBUG] Data: {data}")
-                        
-                        self.message_handlers[message_type](data)
-                    else:
-                        print(f"Mensagem não tratada: {message_type}")
-                        print(f"[DEBUG] Data completa: {data}")
-                        
-                        # Log especial para possíveis mensagens de join
-                        if 'join' in message_type.lower() or 'session' in message_type.lower():
-                            print(f"[DEBUG] POSSÍVEL MENSAGEM DE JOIN PERDIDA: {message_type}")
-                            print(f"[DEBUG] Dados: {data}")
-                        
-                        # Log especial para game_started não tratado
-                        if message_type == 'game_started':
-                            print(f"[DEBUG] *** GAME_STARTED NÃO TRATADO! ***")
-                            print(f"[DEBUG] Handlers disponíveis: {list(self.message_handlers.keys())}")
-                            print(f"[DEBUG] Player ID: {self.player_id}")
-                            print(f"[DEBUG] Session ID: {self.session_id}")
-                        
-                except json.JSONDecodeError:
-                    print(f"Mensagem JSON inválida: {message}")
-                    
-        except websockets.exceptions.ConnectionClosed:
-            print(f"Conexão fechada pelo servidor após {message_count} mensagens")
-            self.connected = False
-            if self.connection_status_callback:
-                self.connection_status_callback(False, "Conexão perdida")
+                message_count += 1
+                print(f"[SINGLE_READER] Mensagem #{message_count}: {message}")
+                
+                # CRITICAL: Log ALL messages during join
+                if self.is_joining_session:
+                    print(f"[JOIN_CRITICAL] *** MENSAGEM DURANTE JOIN #{message_count} ***")
+                    print(f"[JOIN_CRITICAL] MESSAGE: {message}")
+                    print(f"[JOIN_CRITICAL] TIMESTAMP: {time.time()}")
+                
+                # SPECIAL: Log para session_joined
+                if '"type": "session_joined"' in message:
+                    print(f"[SINGLE_READER] *** SESSION_JOINED DETECTADO NA MENSAGEM #{message_count}! ***")
+                    print(f"[SINGLE_READER] CONTENT: {message[:500]}...")
+                
+                # SPECIAL: Log para test_connectivity
+                if '"type": "test_connectivity"' in message:
+                    print(f"[SINGLE_READER] *** TEST_CONNECTIVITY DETECTADO NA MENSAGEM #{message_count}! ***")
+                    print(f"[SINGLE_READER] CONTENT: {message}")
+                
+                # ENHANCED: Log WebSocket state
+                print(f"[SINGLE_READER] WebSocket state: {self.websocket.state if hasattr(self.websocket, 'state') else 'unknown'}")
+                print(f"[SINGLE_READER] WebSocket closed: {self.websocket.closed if hasattr(self.websocket, 'closed') else 'unknown'}")
+                
+                # Colocar mensagem na queue para processamento
+                await self.message_queue.put(message)
+                print(f"[SINGLE_READER] Mensagem #{message_count} adicionada à queue")
+                
         except Exception as e:
-            print(f"❌ Erro ao escutar mensagens: {e}")
-            print(f"📊 [DEBUG] Total de mensagens recebidas: {message_count}")
+            print(f"[SINGLE_READER] Erro na leitura: {e}")
+            import traceback
+            print(f"[SINGLE_READER] Traceback: {traceback.format_exc()}")
+            self.connected = False
             
-        print(f"🔊 [DEBUG] *** ESCUTA FINALIZADA - Total: {message_count} mensagens ***")
+        print(f"[SINGLE_READER] *** LEITURA FINALIZADA - {message_count} mensagens ***")
+    
+    async def _message_processor(self):
+        """Processa mensagens da queue e executa handlers"""
+        processed_count = 0
+        
+        try:
+            print(f"[MESSAGE_PROCESSOR] *** INICIANDO PROCESSAMENTO DE MENSAGENS ***")
+            
+            while self.connected:
+                try:
+                    # Aguardar mensagem da queue com timeout
+                    message = await asyncio.wait_for(self.message_queue.get(), timeout=1.0)
+                    processed_count += 1
+                    
+                    print(f"[MESSAGE_PROCESSOR] Processando mensagem #{processed_count}: {message}")
+                    
+                    try:
+                        data = json.loads(message)
+                        message_type = data.get('type')
+                        
+                        print(f"[MESSAGE_PROCESSOR] Tipo: {message_type}")
+                        
+                        # DEBUG: Log ALL messages for join debugging
+                        print(f"[JOIN_DEBUG] *** MENSAGEM RECEBIDA ***")
+                        print(f"[JOIN_DEBUG] Tipo: {message_type}")
+                        print(f"[JOIN_DEBUG] Data completa: {data}")
+                        print(f"[JOIN_DEBUG] Timestamp: {time.time()}")
+                        
+                        # SPECIFIC: Debug session_joined messages
+                        if message_type == 'session_joined':
+                            print(f"[SESSION_JOINED_DEBUG] *** SESSION_JOINED DETECTADO! ***")
+                            print(f"[SESSION_JOINED_DEBUG] Handlers disponíveis: {list(self.message_handlers.keys())}")
+                            print(f"[SESSION_JOINED_DEBUG] Handler session_joined existe: {'session_joined' in self.message_handlers}")
+                            print(f"[SESSION_JOINED_DEBUG] Data recebida: {data}")
+                            
+                            # CRITICAL: Se handler existe mas não foi executado, forçar execução
+                            if 'session_joined' in self.message_handlers:
+                                print(f"[SESSION_JOINED_DEBUG] Handler encontrado, forçando execução...")
+                        
+                        # SPECIFIC: Debug test_connectivity messages
+                        if message_type == 'test_connectivity':
+                            print(f"[TEST_CONNECTIVITY_DEBUG] *** TEST_CONNECTIVITY DETECTADO! ***")
+                            print(f"[TEST_CONNECTIVITY_DEBUG] Data recebida: {data}")
+                            print(f"[TEST_CONNECTIVITY_DEBUG] Timestamp: {time.time()}")
+                        
+                        # CRITICAL: Detecção específica para game_started
+                        if message_type == 'game_started':
+                            print(f"[GAME_STARTED_CRITICAL] *** GAME_STARTED RECEBIDO! ***")
+                            print(f"[GAME_STARTED_CRITICAL] Data: {data}")
+                            print(f"[GAME_STARTED_CRITICAL] Timestamp: {time.time()}")
+                            print(f"[GAME_STARTED_CRITICAL] Processed count: {processed_count}")
+                            
+                            # Forçar execução imediata do handler
+                            if 'game_started' in self.message_handlers:
+                                try:
+                                    print(f"[GAME_STARTED_CRITICAL] Executando handler game_started...")
+                                    self.message_handlers['game_started'](data)
+                                    print(f"[GAME_STARTED_CRITICAL] Handler executado com sucesso!")
+                                except Exception as handler_error:
+                                    print(f"[GAME_STARTED_CRITICAL] ERRO no handler: {handler_error}")
+                                    import traceback
+                                    print(f"[GAME_STARTED_CRITICAL] Traceback: {traceback.format_exc()}")
+                            else:
+                                print(f"[GAME_STARTED_CRITICAL] ERRO: Handler não encontrado!")
+                                print(f"[GAME_STARTED_CRITICAL] Handlers disponíveis: {list(self.message_handlers.keys())}")
+                        
+                        # CRÍTICO: DETECÇÃO DE HANDLERS EM FALTA E RE-REGISTO AUTOMÁTICO
+                        if message_type == 'turn_changed' and 'turn_changed' not in self.message_handlers:
+                            print(f"[CRITICAL_FIX] *** HANDLER turn_changed EM FALTA! EMERGÊNCIA RE-REGISTO! ***")
+                            print(f"[CRITICAL_FIX] Handlers actuais: {list(self.message_handlers.keys())}")
+                            
+                            # Tentar encontrar a dashboard instance e re-registar handlers
+                            try:
+                                dashboard_ref = None
+                                
+                                # Primeiro: usar referência armazenada se existir
+                                if hasattr(self, '_dashboard_ref') and self._dashboard_ref:
+                                    dashboard_ref = self._dashboard_ref
+                                    print(f"[CRITICAL_FIX] Usando dashboard reference armazenada")
+                                
+                                # Segundo: procurar em __main__
+                                if not dashboard_ref:
+                                    import __main__
+                                    if hasattr(__main__, 'dashboard') and hasattr(__main__.dashboard, 'on_multiplayer_turn_changed'):
+                                        dashboard_ref = __main__.dashboard
+                                        print(f"[CRITICAL_FIX] Dashboard encontrada em __main__")
+                                
+                                # Terceiro: procurar via garbage collector
+                                if not dashboard_ref:
+                                    import gc
+                                    for obj in gc.get_objects():
+                                        if (hasattr(obj, 'on_multiplayer_turn_changed') and 
+                                            hasattr(obj, 'waiting_for_turn') and
+                                            callable(getattr(obj, 'on_multiplayer_turn_changed', None))):
+                                            dashboard_ref = obj
+                                            print(f"[CRITICAL_FIX] Dashboard encontrada via GC: {type(obj)}")
+                                            break
+                                
+                                if dashboard_ref and hasattr(dashboard_ref, 'on_multiplayer_turn_changed'):
+                                    print(f"[CRITICAL_FIX] *** RE-REGISTANDO HANDLERS CRÍTICOS ***")
+                                    self.set_message_handler('turn_changed', dashboard_ref.on_multiplayer_turn_changed)
+                                    self.set_message_handler('player_joined', getattr(dashboard_ref, 'on_player_joined', lambda x: None))
+                                    self.set_message_handler('player_left', getattr(dashboard_ref, 'on_player_left', lambda x: None))
+                                    self.set_message_handler('heartbeat_ack', getattr(dashboard_ref, 'on_heartbeat_ack', lambda x: None))
+                                    print(f"[CRITICAL_FIX] ✓ Handlers re-registados! Novos handlers: {list(self.message_handlers.keys())}")
+                                    
+                                    # Agora processar a mensagem turn_changed imediatamente
+                                    print(f"[CRITICAL_FIX] *** PROCESSANDO MENSAGEM turn_changed IMEDIATAMENTE ***")
+                                    dashboard_ref.on_multiplayer_turn_changed(data)
+                                    print(f"[CRITICAL_FIX] ✓ Mensagem turn_changed processada com sucesso!")
+                                else:
+                                    print(f"[CRITICAL_FIX] ❌ Não foi possível encontrar dashboard instance para re-registo")
+                                    
+                            except Exception as fix_error:
+                                print(f"[CRITICAL_FIX] ERRO no re-registo: {fix_error}")
+                                import traceback
+                                print(f"[CRITICAL_FIX] Traceback: {traceback.format_exc()}")
+                        
+                        # Chamar handler específico se existir
+                        if message_type in self.message_handlers:
+                            print(f"[MESSAGE_PROCESSOR] Executando handler para {message_type}")
+                            try:
+                                handler = self.message_handlers[message_type]
+                                print(f"[MESSAGE_PROCESSOR] Handler: {handler}")
+                                handler(data)
+                                print(f"[MESSAGE_PROCESSOR] Handler {message_type} executado com sucesso")
+                            except Exception as handler_error:
+                                print(f"[MESSAGE_PROCESSOR] *** ERRO NO HANDLER {message_type}: {handler_error}")
+                                import traceback
+                                print(f"[MESSAGE_PROCESSOR] Traceback: {traceback.format_exc()}")
+                        else:
+                            print(f"[MESSAGE_PROCESSOR] Nenhum handler para {message_type}")
+                            print(f"[MESSAGE_PROCESSOR] Handlers disponíveis: {list(self.message_handlers.keys())}")
+                            print(f"[MESSAGE_PROCESSOR] *** DEBUG: Verificando instância global também ***")
+                            
+                            # Tentar acessar a instância global via __main__
+                            try:
+                                import __main__
+                                if hasattr(__main__, 'netmaster_client') and hasattr(__main__.netmaster_client, 'message_handlers'):
+                                    print(f"[MESSAGE_PROCESSOR] Handlers globais: {list(__main__.netmaster_client.message_handlers.keys())}")
+                                    # Tentar usar handler global se existe
+                                    if message_type in __main__.netmaster_client.message_handlers:
+                                        handler = __main__.netmaster_client.message_handlers[message_type]
+                                        try:
+                                            print(f"[MESSAGE_PROCESSOR] *** USANDO HANDLER GLOBAL para {message_type} ***")
+                                            handler(data)
+                                            print(f"[MESSAGE_PROCESSOR] Handler global {message_type} executado com sucesso")
+                                            continue
+                                        except Exception as handler_error:
+                                            print(f"[MESSAGE_PROCESSOR] *** ERRO NO HANDLER GLOBAL {message_type}: {handler_error}")
+                                else:
+                                    print(f"[MESSAGE_PROCESSOR] Instância global não disponível ou sem message_handlers")
+                            except Exception as global_access_error:
+                                print(f"[MESSAGE_PROCESSOR] Erro acessando instância global: {global_access_error}")
+                            
+                            # Se é uma mensagem crítica que perdemos, log crítico
+                            if message_type in ['turn_changed', 'game_started', 'player_joined', 'player_left', 'timer_sync']:
+                                print(f"[MESSAGE_PROCESSOR] *** MENSAGEM CRÍTICA PERDIDA: {message_type} ***")
+                                print(f"[MESSAGE_PROCESSOR] *** RECOMENDAÇÃO: Verificar registo de handlers ***")
+                            
+                            # FALLBACK ESPECIAL: Se é pending_cards, tentar usar instância global diretamente
+                            if message_type == 'pending_cards':
+                                print(f"[MESSAGE_PROCESSOR] *** FALLBACK: pending_cards sem handler - tentando instância global ***")
+                                try:
+                                    # Importar instância global diretamente via __main__
+                                    import __main__
+                                    if hasattr(__main__, 'netmaster_client'):
+                                        global_client = __main__.netmaster_client
+                                        print(f"[MESSAGE_PROCESSOR] *** FALLBACK: Verificando instância global... ***")
+                                        
+                                        # Se a instância global tem o handler, usar diretamente
+                                        if hasattr(global_client, 'message_handlers') and 'pending_cards' in global_client.message_handlers:
+                                            handler = global_client.message_handlers['pending_cards']
+                                            print(f"[MESSAGE_PROCESSOR] *** FALLBACK: Usando handler da instância global! ***")
+                                            handler(data)
+                                            print(f"[MESSAGE_PROCESSOR] *** FALLBACK: pending_cards executado com sucesso via instância global! ***")
+                                            continue
+                                        else:
+                                            # Se não tem handler, registrar na instância global e usar diretamente
+                                            from PlayerDashboard import register_global_handlers
+                                            print(f"[MESSAGE_PROCESSOR] *** FALLBACK: Registrando handlers na instância global... ***")
+                                            register_global_handlers()
+                                            
+                                            # Agora usar o handler diretamente da instância global APÓS o registo
+                                            if hasattr(__main__, 'netmaster_client') and hasattr(__main__.netmaster_client, 'message_handlers') and 'pending_cards' in __main__.netmaster_client.message_handlers:
+                                                handler = __main__.netmaster_client.message_handlers['pending_cards']
+                                                print(f"[MESSAGE_PROCESSOR] *** FALLBACK: Handler registrado na instância global! Executando... ***")
+                                                handler(data)
+                                                print(f"[MESSAGE_PROCESSOR] *** FALLBACK: pending_cards executado com sucesso! ***")
+                                                continue
+                                            else:
+                                                print(f"[MESSAGE_PROCESSOR] *** FALLBACK: Falha completa - handler não disponível na instância global após registo ***")
+                                    else:
+                                        print(f"[MESSAGE_PROCESSOR] *** FALLBACK: Instância global não encontrada ***")
+                                            
+                                except Exception as fallback_error:
+                                    print(f"[MESSAGE_PROCESSOR] *** FALLBACK ERROR: {fallback_error} ***")
+                                    import traceback
+                                    print(f"[MESSAGE_PROCESSOR] *** FALLBACK TRACEBACK: {traceback.format_exc()} ***")
+                            
+                            # BACKUP: Verificar se é session_joined e tentar chamada direta
+                            if message_type == 'session_joined':
+                                print(f"[MESSAGE_PROCESSOR] *** BACKUP: Tentando chamar on_session_joined diretamente ***")
+                                try:
+                                    # Buscar instância do PlayerDashboard que tem o método
+                                    import __main__
+                                    if hasattr(__main__, 'dashboard') and hasattr(__main__.dashboard, 'on_session_joined'):
+                                        print(f"[MESSAGE_PROCESSOR] Encontrou dashboard.on_session_joined, executando...")
+                                        __main__.dashboard.on_session_joined(data)
+                                        print(f"[MESSAGE_PROCESSOR] BACKUP: on_session_joined executado com sucesso!")
+                                    else:
+                                        print(f"[MESSAGE_PROCESSOR] BACKUP: Não encontrou dashboard.on_session_joined")
+                                except Exception as backup_error:
+                                    print(f"[MESSAGE_PROCESSOR] BACKUP: Erro: {backup_error}")
+                                    import traceback
+                                    print(f"[MESSAGE_PROCESSOR] BACKUP: Traceback: {traceback.format_exc()}")
+                            
+                    except json.JSONDecodeError:
+                        print(f"[MESSAGE_PROCESSOR] JSON inválido: {message}")
+                    except Exception as e:
+                        print(f"[MESSAGE_PROCESSOR] Erro processando: {e}")
+                        import traceback
+                        print(f"[MESSAGE_PROCESSOR] Traceback: {traceback.format_exc()}")
+                    
+                    # Marcar task como concluída
+                    self.message_queue.task_done()
+                    
+                except asyncio.TimeoutError:
+                    # Timeout normal - continuar verificando
+                    continue
+                except Exception as e:
+                    print(f"[MESSAGE_PROCESSOR] Erro no loop: {e}")
+                    break
+                    
+        except Exception as e:
+            print(f"[MESSAGE_PROCESSOR] Erro geral: {e}")
+            import traceback
+            print(f"[MESSAGE_PROCESSOR] Traceback: {traceback.format_exc()}")
+            
+        print(f"[MESSAGE_PROCESSOR] *** PROCESSAMENTO FINALIZADO - {processed_count} mensagens ***")
+
+    async def listen_for_messages(self):
+        """DEPRECADO: Manter para compatibilidade - agora usa o sistema de queue"""
+        print(f"[DEPRECATED_LISTEN] Esta função foi substituída pelo sistema de queue")
+        print(f"[DEPRECATED_LISTEN] Reader task: {self.reader_task}")
+        print(f"[DEPRECATED_LISTEN] Processor task: {self.processor_task}")
+        
+        # Se as tasks não existem, criar elas
+        if not self.reader_task or self.reader_task.done():
+            print(f"[DEPRECATED_LISTEN] Criando reader task...")
+            self.reader_task = asyncio.create_task(self._single_websocket_reader())
+            
+        if not self.processor_task or self.processor_task.done():
+            print(f"[DEPRECATED_LISTEN] Criando processor task...")
+            self.processor_task = asyncio.create_task(self._message_processor())
+        
+        # Aguardar as tasks
+        try:
+            await asyncio.gather(self.reader_task, self.processor_task)
+        except Exception as e:
+            print(f"[DEPRECATED_LISTEN] Erro aguardando tasks: {e}")
     
     async def test_websocket_connectivity(self):
         """Testa se o WebSocket está realmente recebendo mensagens"""
         try:
-            print(f"🔍 [CONNECTIVITY_TEST] Iniciando teste de conectividade...")
+            print(f"[CONNECTIVITY_TEST] Iniciando teste de conectividade...")
             
             # Registrar handler temporário para detectar resposta
             test_received = False
@@ -238,33 +612,33 @@ class NetMasterClient:
                 msg_type = data.get('type', '')
                 if msg_type in ['sessions_list', 'welcome', 'sessions_list_update']:
                     test_received = True
-                    print(f"🔍 [CONNECTIVITY_TEST] ✅ Mensagem recebida: {msg_type}")
+                    print(f"[CONNECTIVITY_TEST] Mensagem recebida: {msg_type}")
             
             # Registrar handler temporário
             self.set_message_handler('CONNECTIVITY_TEST', temp_handler)
             
             # Enviar mensagem de teste
             result = await self.list_sessions()
-            print(f"🔍 [CONNECTIVITY_TEST] list_sessions enviado: {result}")
+            print(f"[CONNECTIVITY_TEST] list_sessions enviado: {result}")
             
             # Aguardar resposta por 3 segundos
             for i in range(30):  # 3 segundos (30 * 0.1s)
                 if test_received:
-                    print(f"🔍 [CONNECTIVITY_TEST] ✅ Teste PASSOU - WebSocket está recebendo mensagens")
+                    print(f"[CONNECTIVITY_TEST] Teste PASSOU - WebSocket está recebendo mensagens")
                     return True
                 await asyncio.sleep(0.1)
             
-            print(f"🔍 [CONNECTIVITY_TEST] ❌ Teste FALHOU - WebSocket NÃO está recebendo mensagens")
+            print(f"[CONNECTIVITY_TEST] Teste FALHOU - WebSocket NÃO está recebendo mensagens")
             return False
             
         except Exception as e:
-            print(f"🔍 [CONNECTIVITY_TEST] ❌ Erro no teste: {e}")
+            print(f"[CONNECTIVITY_TEST] Erro no teste: {e}")
             return False
         finally:
             # Remover handler temporário
             if hasattr(self, 'message_handlers') and 'CONNECTIVITY_TEST' in self.message_handlers:
                 del self.message_handlers['CONNECTIVITY_TEST']
-                print(f"🔍 [CONNECTIVITY_TEST] Handler temporário removido")
+                print(f"[CONNECTIVITY_TEST] Handler temporário removido")
     
     async def create_session(self, player_name, color, duration_minutes=30):
         """Cria nova sessão de jogo"""
@@ -278,13 +652,23 @@ class NetMasterClient:
     
     async def join_session(self, session_id, player_name, color):
         """Junta-se a uma sessão existente"""
+        print(f"[JOIN_SESSION] *** INICIANDO JOIN_SESSION ***")
+        print(f"[JOIN_SESSION] session_id: {session_id}")
+        print(f"[JOIN_SESSION] player_name: {player_name}")
+        print(f"[JOIN_SESSION] color: {color}")
+        print(f"[JOIN_SESSION] connected: {self.connected}")
+        print(f"[JOIN_SESSION] websocket: {self.websocket}")
+        
         message = {
             'type': 'join_session',
             'session_id': session_id,
             'player_name': player_name,
             'color': color
         }
-        return await self.send_message(message)
+        print(f"[JOIN_SESSION] Enviando: {message}")
+        result = await self.send_message(message)
+        print(f"[JOIN_SESSION] Resultado: {result}")
+        return result
     
     async def start_game(self):
         """Inicia o jogo (apenas host)"""
@@ -312,13 +696,13 @@ class NetMasterClient:
     
     async def list_sessions(self):
         """Solicita lista de sessões disponíveis"""
-        print(f"🔍 [DEBUG] list_sessions chamado, connected: {self.connected}")
+        print(f"[DEBUG] list_sessions chamado, connected: {self.connected}")
         message = {
             'type': 'list_sessions'
         }
-        print(f"🔍 [DEBUG] Enviando mensagem list_sessions: {message}")
+        print(f"[DEBUG] Enviando mensagem list_sessions: {message}")
         result = await self.send_message(message)
-        print(f"🔍 [DEBUG] Mensagem list_sessions enviada, resultado: {result}")
+        print(f"[DEBUG] Mensagem list_sessions enviada, resultado: {result}")
         return result
     
     async def send_heartbeat(self):
@@ -334,45 +718,282 @@ class NetMasterClient:
         
         try:
             result = await self.send_message(message)
+            player_name = getattr(self, 'player_name', 'Unknown')
             if self.player_id:
-                print(f"💓 [HEARTBEAT] Heartbeat enviado - player_id: {self.player_id}")
+                print(f"[HEARTBEAT] Heartbeat enviado - player_id: {self.player_id}, player_name: {player_name}")
+                print(f"[HEARTBEAT] *** HEARTBEAT DATA: {message} ***")
             else:
-                print(f"💓 [HEARTBEAT] Heartbeat enviado - sem player_id ainda")
+                print(f"[HEARTBEAT] *** WARNING: Heartbeat enviado sem player_id! ***")
+                print(f"[HEARTBEAT] *** HEARTBEAT DATA: {message} ***")
+                print(f"[HEARTBEAT] *** ESTE HEARTBEAT SERÁ IGNORADO PELO SERVIDOR! ***")
             return result
         except Exception as e:
-            print(f"❌ [HEARTBEAT] Erro ao enviar heartbeat: {e}")
+            print(f"[HEARTBEAT] Erro ao enviar heartbeat: {e}")
             return False
     
     async def start_heartbeat_loop(self):
         """Inicia o loop de heartbeat em background"""
-        print(f"💓 [HEARTBEAT] Iniciando loop de heartbeat...")
+        print(f"[HEARTBEAT] Iniciando loop de heartbeat...")
         
         while self.connected:
             try:
                 await self.send_heartbeat()
                 
-                # Aguardar 30 segundos antes do próximo heartbeat
-                # Dividir em 30 esperas de 1 segundo para permitir parada mais rápida
-                for _ in range(30):
+                # Aguardar 20 segundos antes do próximo heartbeat (mais frequente que ping_interval)
+                # Dividir em 20 esperas de 1 segundo para permitir parada mais rápida
+                for _ in range(20):
                     if not self.connected:
                         break
                     await asyncio.sleep(1)
                     
             except websockets.exceptions.ConnectionClosed:
-                print(f"💓 [HEARTBEAT] Conexão WebSocket fechada")
+                print(f"[HEARTBEAT] Conexão WebSocket fechada")
                 self.connected = False
                 break
             except Exception as e:
-                print(f"❌ [HEARTBEAT] Erro no loop de heartbeat: {e}")
+                print(f"[HEARTBEAT] Erro no loop de heartbeat: {e}")
                 # Tentar reconectar após erro
                 await asyncio.sleep(5)
                 if not self.connected:
                     break
         
-        print(f"💓 [HEARTBEAT] Loop de heartbeat finalizado")
+        print(f"[HEARTBEAT] Loop de heartbeat finalizado")
 
 # Instância global do cliente
 netmaster_client = NetMasterClient()
+
+# Função global para registar handlers básicos
+def register_global_handlers():
+    """Regista handlers globais que precisam estar sempre disponíveis"""
+    print("[GLOBAL_HANDLERS] *** REGISTANDO HANDLERS GLOBAIS ***")
+    print(f"[GLOBAL_HANDLERS] DEBUG: netmaster_client object: {netmaster_client}")
+    print(f"[GLOBAL_HANDLERS] DEBUG: netmaster_client type: {type(netmaster_client)}")
+    print(f"[GLOBAL_HANDLERS] DEBUG: netmaster_client has set_message_handler: {hasattr(netmaster_client, 'set_message_handler')}")
+    print(f"[GLOBAL_HANDLERS] DEBUG: netmaster_client.message_handlers before: {getattr(netmaster_client, 'message_handlers', 'NOT_FOUND')}")
+    
+    # Variável global para manter referência à instância ativa do PlayerDashboard
+    active_player_dashboard = None
+    
+    # Sistema de cartas em espera - PERSISTENTE entre execuções
+    import tempfile
+    import json
+    
+    # Arquivo temporário para persistir cartas em espera
+    temp_dir = tempfile.gettempdir()
+    pending_cards_file = os.path.join(temp_dir, "netmaster_pending_cards.json")
+    
+    def load_pending_cards():
+        """Carrega cartas pendentes do arquivo temporário"""
+        try:
+            if os.path.exists(pending_cards_file):
+                with open(pending_cards_file, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    print(f"[GLOBAL_HANDLERS] 📂 Carregadas {len(data)} cartas pendentes do arquivo")
+                    return data
+        except Exception as e:
+            print(f"[GLOBAL_HANDLERS] Erro ao carregar cartas pendentes: {e}")
+        return []
+    
+    def save_pending_cards(cards_queue):
+        """Salva cartas pendentes no arquivo temporário"""
+        try:
+            with open(pending_cards_file, 'w', encoding='utf-8') as f:
+                json.dump(cards_queue, f, indent=2, ensure_ascii=False)
+                print(f"[GLOBAL_HANDLERS] 💾 Salvadas {len(cards_queue)} cartas pendentes")
+        except Exception as e:
+            print(f"[GLOBAL_HANDLERS] Erro ao salvar cartas pendentes: {e}")
+    
+    def clear_pending_cards():
+        """Remove arquivo de cartas pendentes"""
+        try:
+            if os.path.exists(pending_cards_file):
+                os.remove(pending_cards_file)
+                print(f"[GLOBAL_HANDLERS] Arquivo de cartas pendentes removido")
+        except Exception as e:
+            print(f"[GLOBAL_HANDLERS] Erro ao remover arquivo de cartas pendentes: {e}")
+    
+    # Carregar cartas pendentes existentes (de execuções anteriores)
+    pending_cards_queue = load_pending_cards()
+    if pending_cards_queue:
+        print(f"[GLOBAL_HANDLERS] Sistema iniciado com {len(pending_cards_queue)} cartas pendentes de execuções anteriores")
+    
+    def set_active_dashboard(dashboard):
+        nonlocal active_player_dashboard, pending_cards_queue
+        active_player_dashboard = dashboard
+        dashboard_color = getattr(dashboard, 'player_color', 'UNKNOWN')
+        print(f"[GLOBAL_HANDLERS] PlayerDashboard ativo definido: {dashboard_color}")
+        
+        # Processar cartas que estavam em espera
+        if pending_cards_queue:
+            print(f"[GLOBAL_HANDLERS] Processando {len(pending_cards_queue)} cartas que estavam em espera...")
+            processed_count = 0
+            remaining_queue = []
+            
+            for queued_data in pending_cards_queue:
+                try:
+                    print(f"[GLOBAL_HANDLERS] ✓ Processando carta em espera para {dashboard_color}")
+                    dashboard.on_pending_cards_received(queued_data)
+                    processed_count += 1
+                except Exception as e:
+                    print(f"[GLOBAL_HANDLERS] ❌ Erro ao processar carta em espera: {e}")
+                    # Manter carta na fila se houver erro
+                    remaining_queue.append(queued_data)
+            
+            # Atualizar fila com cartas que não foram processadas
+            pending_cards_queue = remaining_queue
+            
+            if processed_count > 0:
+                print(f"[GLOBAL_HANDLERS] ✓ {processed_count} cartas em espera foram processadas com sucesso")
+                
+            if pending_cards_queue:
+                print(f"[GLOBAL_HANDLERS] {len(pending_cards_queue)} cartas permanecem em espera")
+                save_pending_cards(pending_cards_queue)
+            else:
+                print(f"[GLOBAL_HANDLERS] 🎉 Todas as cartas em espera foram processadas!")
+                clear_pending_cards()
+    
+    # Handlers globais básicos que funcionam sem instância do PlayerDashboard
+    def on_pending_cards_global(data):
+        """Handler global para cartas pendentes"""
+        print(f"[GLOBAL_HANDLERS] *** CARTAS PENDENTES RECEBIDAS ***")
+        print(f"[GLOBAL_HANDLERS] Data: {data}")
+        
+        # DEBUG: Verificar se há instância ativa
+        print(f"[GLOBAL_HANDLERS] Verificando instância ativa...")
+        print(f"[GLOBAL_HANDLERS] active_player_dashboard: {active_player_dashboard}")
+        
+        if active_player_dashboard:
+            print(f"[GLOBAL_HANDLERS] Tipo da instância: {type(active_player_dashboard)}")
+            print(f"[GLOBAL_HANDLERS] Cor do jogador: {getattr(active_player_dashboard, 'player_color', 'UNKNOWN')}")
+            print(f"[GLOBAL_HANDLERS] Tem método on_pending_cards_received: {hasattr(active_player_dashboard, 'on_pending_cards_received')}")
+        
+        # Tentar usar instância ativa se disponível
+        if active_player_dashboard and hasattr(active_player_dashboard, 'on_pending_cards_received'):
+            try:
+                print("[GLOBAL_HANDLERS] ✓ Redirecionando para PlayerDashboard ativo...")
+                active_player_dashboard.on_pending_cards_received(data)
+                print("[GLOBAL_HANDLERS] ✓ Redirecionamento concluído com sucesso!")
+                return
+            except Exception as e:
+                print(f"[GLOBAL_HANDLERS] ❌ Erro ao redirecionar para PlayerDashboard: {e}")
+                import traceback
+                print(f"[GLOBAL_HANDLERS] Traceback: {traceback.format_exc()}")
+        
+        # Sem instância ativa - adicionar à fila de espera PERSISTENTE
+        print("[GLOBAL_HANDLERS] PlayerDashboard não disponível - adicionando cartas à fila de espera persistente...")
+        pending_cards_queue.append(data)
+        save_pending_cards(pending_cards_queue)  # Salvar imediatamente no arquivo
+        print(f"[GLOBAL_HANDLERS] Total cartas em espera (persistente): {len(pending_cards_queue)}")
+        
+        # Processar as cartas globalmente (para debug)
+        cards = data.get('cards', [])
+        for card in cards:
+            card_path = card.get('card_path', card.get('card_id', 'unknown'))  # Suportar ambos os formatos
+            card_type = card.get('card_type', 'unknown')
+            from_player = card.get('from_player', 'unknown')
+            print(f"[GLOBAL_HANDLERS] 🎴 Carta em espera (PERSISTENTE): {os.path.basename(card_path)} ({card_type}) de {from_player}")
+        
+        print(f"[GLOBAL_HANDLERS] Cartas serão processadas quando PlayerDashboard for ativo (mesmo em execuções futuras!)")
+        
+    def on_card_returned_to_store_global(data):
+        """Handler global para cartas devolvidas"""
+        print(f"[GLOBAL_HANDLERS] Carta devolvida à loja: {data}")
+        
+        # Tentar usar instância ativa se disponível
+        if active_player_dashboard and hasattr(active_player_dashboard, 'on_card_returned_to_store'):
+            try:
+                print("[GLOBAL_HANDLERS] ✓ Redirecionando para PlayerDashboard ativo...")
+                active_player_dashboard.on_card_returned_to_store(data)
+                return
+            except Exception as e:
+                print(f"[GLOBAL_HANDLERS] Erro ao redirecionar para PlayerDashboard: {e}")
+                
+        print("[GLOBAL_HANDLERS] PlayerDashboard não disponível - carta devolvida processada globalmente")
+    
+    def on_timer_sync_global(data):
+        """Handler global para sincronização do timer"""
+        print(f"[GLOBAL_HANDLERS] *** TIMER_SYNC GLOBAL RECEBIDO ***")
+        print(f"[GLOBAL_HANDLERS] Data: {data}")
+        
+        nonlocal active_player_dashboard
+        if active_player_dashboard:
+            try:
+                print(f"[GLOBAL_HANDLERS] ✓ Redirecionando timer_sync para PlayerDashboard ativo")
+                active_player_dashboard.on_timer_sync(data)
+            except Exception as e:
+                print(f"[GLOBAL_HANDLERS] ❌ Erro ao processar timer_sync: {e}")
+        else:
+            print("[GLOBAL_HANDLERS] PlayerDashboard não disponível - timer_sync ignorado")
+    
+    def on_game_finished_global(data):
+        """Handler global para fim de jogo"""
+        print(f"[GLOBAL_HANDLERS] *** GAME_FINISHED GLOBAL RECEBIDO ***")
+        print(f"[GLOBAL_HANDLERS] Data: {data}")
+        
+        nonlocal active_player_dashboard
+        if active_player_dashboard:
+            try:
+                print(f"[GLOBAL_HANDLERS] ✓ Redirecionando game_finished para PlayerDashboard ativo")
+                # Chamar diretamente o método show_game_result_screen
+                if hasattr(active_player_dashboard, 'show_game_result_screen'):
+                    active_player_dashboard.show_game_result_screen(data)
+                else:
+                    print(f"[GLOBAL_HANDLERS] PlayerDashboard não tem método show_game_result_screen")
+            except Exception as e:
+                print(f"[GLOBAL_HANDLERS] ❌ Erro ao processar game_finished: {e}")
+        else:
+            print("[GLOBAL_HANDLERS] PlayerDashboard não disponível - game_finished ignorado")
+            
+    try:
+        # *** USAR MÉTODO DE CLASSE PARA REGISTRAR EM TODAS AS INSTÂNCIAS ***
+        NetMasterClient.register_global_handler('pending_cards', on_pending_cards_global)
+        NetMasterClient.register_global_handler('card_returned_to_store', on_card_returned_to_store_global)
+        NetMasterClient.register_global_handler('timer_sync', on_timer_sync_global)
+        NetMasterClient.register_global_handler('game_finished', on_game_finished_global)
+        NetMasterClient.set_global_dashboard_setter(set_active_dashboard)
+        
+        # Também registrar na instância global atual para compatibilidade
+        netmaster_client.set_message_handler('pending_cards', on_pending_cards_global)
+        netmaster_client.set_message_handler('card_returned_to_store', on_card_returned_to_store_global)
+        netmaster_client.set_message_handler('timer_sync', on_timer_sync_global)
+        netmaster_client.set_message_handler('game_finished', on_game_finished_global)
+        netmaster_client.set_active_dashboard = set_active_dashboard
+        
+        print("[GLOBAL_HANDLERS] ✓ Handlers globais registados com sucesso:")
+        print("[GLOBAL_HANDLERS]   - pending_cards (inteligente)")
+        print("[GLOBAL_HANDLERS]   - card_returned_to_store (inteligente)")
+        print("[GLOBAL_HANDLERS]   - timer_sync (inteligente)")
+        print("[GLOBAL_HANDLERS]   - game_finished (inteligente)")
+        
+        # DEBUG: Verificar se os handlers realmente foram registrados
+        print(f"[GLOBAL_HANDLERS] DEBUG: Verificando handlers registrados...")
+        print(f"[GLOBAL_HANDLERS] DEBUG: NetMasterClient._global_handlers: {NetMasterClient._global_handlers}")
+        print(f"[GLOBAL_HANDLERS] DEBUG: netmaster_client.message_handlers keys: {list(netmaster_client.message_handlers.keys())}")
+        print(f"[GLOBAL_HANDLERS] DEBUG: Handler 'pending_cards' existe: {'pending_cards' in netmaster_client.message_handlers}")
+        print(f"[GLOBAL_HANDLERS] DEBUG: Handler 'card_returned_to_store' existe: {'card_returned_to_store' in netmaster_client.message_handlers}")
+        print(f"[GLOBAL_HANDLERS] DEBUG: Handler 'timer_sync' existe: {'timer_sync' in netmaster_client.message_handlers}")
+        print(f"[GLOBAL_HANDLERS] DEBUG: Handler 'game_finished' existe: {'game_finished' in netmaster_client.message_handlers}")
+        
+    except Exception as e:
+        print(f"[GLOBAL_HANDLERS] ERROR: Erro ao registar handlers globais: {e}")
+        import traceback
+        print(f"[GLOBAL_HANDLERS] ERROR: Traceback: {traceback.format_exc()}")
+
+# Registar handlers globais imediatamente
+print("[INIT] *** CHAMANDO register_global_handlers() ***")
+print(f"[INIT] ANTES: NetMasterClient._global_handlers = {NetMasterClient._global_handlers}")
+print(f"[INIT] ANTES: NetMasterClient._global_dashboard_setter = {NetMasterClient._global_dashboard_setter}")
+
+register_global_handlers()
+
+print("[INIT] *** register_global_handlers() COMPLETADO ***")
+print(f"[INIT] DEPOIS: NetMasterClient._global_handlers = {NetMasterClient._global_handlers}")
+print(f"[INIT] DEPOIS: NetMasterClient._global_dashboard_setter = {NetMasterClient._global_dashboard_setter}")
+
+# Debug final
+print(f"[INIT] FINAL DEBUG: netmaster_client.message_handlers: {netmaster_client.message_handlers}")
+print(f"[INIT] FINAL DEBUG: Handlers disponíveis: {list(netmaster_client.message_handlers.keys())}")
+
 # Importar utilitários para detecção de Raspberry Pi
 from raspberry_pi_utils import get_universal_paths, find_existing_path, get_possible_raspberry_pi_paths
 # Importar sistema de integração da base de dados
@@ -762,7 +1383,7 @@ def create_yolo_loading_screen(parent_window, object_name):
         # Criar barra de progresso usando labels
         progress_bars = []
         for i in range(8):
-            bar = tk.Label(progress_frame, text="█", font=("Helvetica", 20), 
+            bar = tk.Label(progress_frame, text="■", font=("Helvetica", 20), 
                           fg="#333333", bg="black")
             bar.pack(side="left", padx=2)
             progress_bars.append(bar)
@@ -1305,12 +1926,15 @@ class IntegratedMenuSystem:
         # Carregar imagens do menu
         self.load_menu_images()
         
+        # Configurar handler global para heartbeat_ack
+        self.setup_heartbeat_handler()
+        
         # Preparar baralhos
         preparar_baralhos()
     
     def load_menu_images(self):
         """Carregar todas as imagens necessárias para o menu"""
-        print("🖼️ [DEBUG] Carregando imagens do menu...")
+        print("[IMAGE] [DEBUG] Carregando imagens do menu...")
         
         # Tentar carregar a imagem NetMaster de diferentes locais
         netmaster_image_loaded = False
@@ -1328,16 +1952,16 @@ class IntegratedMenuSystem:
                     )
                     self.use_netmaster_img = True
                     netmaster_image_loaded = True
-                    print(f"✅ [DEBUG] Logo NetMaster carregado: {netmaster_img_path}")
+                    print(f"[DEBUG] Logo NetMaster carregado: {netmaster_img_path}")
                     break
             except (FileNotFoundError, UnidentifiedImageError) as e:
-                print(f"⚠️ [DEBUG] Erro ao carregar logo NetMaster de {netmaster_img_path}: {e}")
+                print(f"[DEBUG] Erro ao carregar logo NetMaster de {netmaster_img_path}: {e}")
                 continue
         
         if not netmaster_image_loaded:
             self.netmaster_img = None
             self.use_netmaster_img = False
-            print("❌ [DEBUG] Logo NetMaster não encontrado")
+            print("[DEBUG] Logo NetMaster não encontrado")
 
         # Tentar carregar a imagem do padrão de rede
         network_pattern_loaded = False
@@ -1360,18 +1984,18 @@ class IntegratedMenuSystem:
                     )
                     self.use_network_pattern = True
                     network_pattern_loaded = True
-                    print(f"✅ [DEBUG] Network pattern carregado: {pattern_path}")
+                    print(f"[DEBUG] Network pattern carregado: {pattern_path}")
                     break
             except (FileNotFoundError, UnidentifiedImageError) as e:
-                print(f"⚠️ [DEBUG] Erro ao carregar network pattern de {pattern_path}: {e}")
+                print(f"[DEBUG] Erro ao carregar network pattern de {pattern_path}: {e}")
                 continue
         
         if not network_pattern_loaded:
             self.network_pattern_img = None
             self.use_network_pattern = False
-            print("❌ [DEBUG] Network pattern não encontrado")
+            print("[DEBUG] Network pattern não encontrado")
         
-        print(f"🏁 [DEBUG] Carregamento de imagens concluído:")
+        print(f"[DEBUG] Carregamento de imagens concluído:")
         print(f"   - NetMaster: {netmaster_image_loaded}")
         print(f"   - Network Pattern: {network_pattern_loaded}")
 
@@ -1411,9 +2035,23 @@ class IntegratedMenuSystem:
             self.remote_icon = None
             self.use_remote_icon = False
 
+    def setup_heartbeat_handler(self):
+        """Configura handler global para heartbeat_ack para manter watchdog atualizado"""
+        def on_heartbeat_ack(data):
+            """Handler para heartbeat_ack - mantém timestamp do watchdog atualizado"""
+            print(f"[HEARTBEAT] ACK recebido: {data.get('timestamp', 'sem timestamp')}")
+            # Atualizar timestamp do watchdog para evitar reconexões desnecessárias
+            if hasattr(self, '_last_message_time'):
+                import time
+                self._last_message_time = time.time()
+        
+        # Registar handler globalmente
+        netmaster_client.set_message_handler('heartbeat_ack', on_heartbeat_ack)
+        print("[HEARTBEAT] Handler heartbeat_ack registado com sucesso")
+
     def add_network_pattern_decorations(self, parent):
         """Adiciona padrão de rede na parte superior e inferior do ecrã"""
-        print(f"🌐 [DEBUG] add_network_pattern_decorations chamado:")
+        print(f"[NETWORK] [DEBUG] add_network_pattern_decorations chamado:")
         print(f"   - use_network_pattern: {getattr(self, 'use_network_pattern', False)}")
         print(f"   - network_pattern_img exists: {hasattr(self, 'network_pattern_img')}")
         print(f"   - network_pattern_img is not None: {getattr(self, 'network_pattern_img', None) is not None}")
@@ -1423,16 +2061,16 @@ class IntegratedMenuSystem:
                 # Padrão superior - posicionado mais acima
                 top_pattern = tk.Label(parent, image=self.network_pattern_img, bg="black")
                 top_pattern.place(x=0, y=-55, width=800, height=120, anchor="nw")
-                print("✅ [DEBUG] Top pattern adicionado com sucesso")
+                print("[DEBUG] Top pattern adicionado com sucesso")
                 
                 # Padrão inferior - posicionado mais para baixo no ecrã
                 bottom_pattern = tk.Label(parent, image=self.network_pattern_img, bg="black")
                 bottom_pattern.place(x=0, y=450, width=800, height=120, anchor="nw")
-                print("✅ [DEBUG] Bottom pattern adicionado com sucesso")
+                print("[DEBUG] Bottom pattern adicionado com sucesso")
             except Exception as e:
-                print(f"❌ [DEBUG] Erro ao adicionar network patterns: {e}")
+                print(f"[DEBUG] Erro ao adicionar network patterns: {e}")
         else:
-            print("⚠️ [DEBUG] Network patterns não adicionados - condições não atendidas")
+            print("[DEBUG] Network patterns não adicionados - condições não atendidas")
 
     def show_main_menu(self):
         """Mostrar menu principal integrado"""
@@ -1511,7 +2149,7 @@ class IntegratedMenuSystem:
                     command=lambda: self.open_name_input("search")
                 ).pack(side=tk.TOP, pady=10)
 
-        animate_typing(il1, "Welcome to NetMaster! 👋", delay=50,
+        animate_typing(il1, "Welcome to NetMaster! ", delay=50,
                        callback=lambda: animate_typing(il2, "What would you like to do today?", delay=40, callback=show_buttons))
 
     def open_name_input(self, flow_type="create"):
@@ -1664,11 +2302,133 @@ class IntegratedMenuSystem:
 
     def show_join_session_page(self, name):
         """Mostrar página Join Session para Search Game flow"""
+        # CRÍTICO: Salvar o nome do jogador para uso posterior
+        self.join_player_name = name
+        print(f"[DEBUG] Nome do jogador salvo: '{name}'")
+        
         # Limpar root
         for widget in self.root.winfo_children():
             widget.destroy()
         
         self.root.configure(bg="black")
+        
+        # *** CORREÇÃO CRÍTICA: REGISTRAR HANDLERS SESSIONS_LIST IMEDIATAMENTE ***
+        # Antes de qualquer auto-refresh ou polling começar!
+        
+        def on_session_list_received(data):
+            """Handler para quando recebemos a lista de sessões do servidor"""
+            print(f"[DEBUG] *** SESSION_LIST_RECEIVED DETALHADO ***")
+            print(f"[DEBUG] Data completa recebida: {data}")
+            print(f"[DEBUG] Tipo de data: {type(data)}")
+            print(f"[DEBUG] Keys em data: {list(data.keys()) if isinstance(data, dict) else 'N/A'}")
+            
+            sessions_list = data.get('sessions', [])
+            
+            # CORREÇÃO CRÍTICA: Normalizar states das sessões
+            print(f"[DEBUG] Normalizando states de {len(sessions_list)} sessões...")
+            for i, session in enumerate(sessions_list):
+                old_state = session.get('state')
+                session = normalize_session_state(session)
+                sessions_list[i] = session
+                new_state = session.get('state')
+                if str(old_state) != str(new_state):
+                    print(f"[DEBUG] Sessão {i+1}: {old_state} -> {new_state}")
+            
+            total_sessions = data.get('total_sessions', 0)
+            available_sessions = data.get('available_sessions', 0)
+            
+            print(f"[DEBUG] sessions_list extraída: {sessions_list}")
+            print(f"[DEBUG] total_sessions: {total_sessions}")
+            print(f"[DEBUG] available_sessions: {available_sessions}")
+            print(f"[DEBUG] Len sessions_list: {len(sessions_list)}")
+            
+            if sessions_list:
+                for i, session in enumerate(sessions_list):
+                    session_state = session.get('state')
+                    print(f"[DEBUG] Sessão {i+1}: ID={session.get('id')}, Host={session.get('host_player_id')}, Players={session.get('current_players')}")
+                    print(f"[DEBUG] CRITICAL - Sessão {i+1} STATE: '{session_state}' (tipo: {type(session_state)})")
+                    
+                    # Verificar se é enum vs string
+                    if hasattr(session_state, 'value'):
+                        print(f"[DEBUG] STATE É ENUM - valor: {session_state.value}")
+                    elif isinstance(session_state, str):
+                        print(f"[DEBUG] ✓ STATE É STRING - valor: '{session_state}'")
+                    else:
+                        print(f"[DEBUG] STATE É OUTRO TIPO: {type(session_state)}")
+            else:
+                print(f"[DEBUG] PROBLEMA: Lista de sessões está vazia mesmo com total_sessions={total_sessions}")
+            
+            self.current_sessions = sessions_list
+            # CRÍTICO: Atualizar sessions_data para polling check
+            self.sessions_data = sessions_list
+            print(f"[DEBUG] sessions_data atualizada com {len(sessions_list)} sessões")
+            
+            # CORREÇÃO CRÍTICA: FORÇAR atualização da UI sempre que sessions_list é recebida
+            print(f"[DEBUG] Forçando atualização da UI com {len(sessions_list)} sessões...")
+            try:
+                # Tentar usar display_sessions diretamente se existe
+                if hasattr(self, 'display_sessions'):
+                    print(f"[DEBUG] ✓ Chamando display_sessions diretamente...")
+                    self.root.after(0, lambda: self.display_sessions(sessions_list))
+                # Fallback para função salva
+                elif hasattr(self, '_display_sessions_func'):
+                    print(f"[DEBUG] ✓ Chamando _display_sessions_func...")
+                    self.root.after(0, lambda: self._display_sessions_func(sessions_list))
+                else:
+                    print(f"[DEBUG] Nenhuma função display_sessions disponível - sessões recebidas mas UI não atualizada")
+            except Exception as e:
+                print(f"[DEBUG] ❌ Erro ao atualizar UI: {e}")
+                
+        def on_sessions_list_update(data):
+            """Handler para quando recebemos updates da lista de sessões"""
+            print(f"[DEBUG] on_sessions_list_update chamado com data: {data}")
+            sessions_list = data.get('sessions', [])
+            
+            # CORREÇÃO CRÍTICA: Normalizar states das sessões no update
+            print(f"[DEBUG] Normalizando states de {len(sessions_list)} sessões (update)...")
+            for i, session in enumerate(sessions_list):
+                old_state = session.get('state')
+                session = normalize_session_state(session)
+                sessions_list[i] = session
+                new_state = session.get('state')
+                if str(old_state) != str(new_state):
+                    print(f"[DEBUG] Update Sessão {i+1}: {old_state} -> {new_state}")
+            
+            print(f"[DEBUG] sessions_list update extraída: {sessions_list}")
+            
+            # CRITICAL DEBUG: Verificar state de cada sessão no update
+            if sessions_list:
+                for i, session in enumerate(sessions_list):
+                    session_state = session.get('state')
+                    print(f"[DEBUG] UPDATE - Sessão {i+1} STATE: '{session_state}' (tipo: {type(session_state)})")
+            
+            self.current_sessions = sessions_list
+            # CRÍTICO: Atualizar sessions_data para updates também
+            self.sessions_data = sessions_list
+            print(f"[DEBUG] sessions_data atualizada com {len(sessions_list)} sessões (via update)")
+            
+            # CORREÇÃO CRÍTICA: FORÇAR atualização da UI sempre que sessions_list_update é recebida
+            print(f"[DEBUG] Forçando atualização da UI via UPDATE com {len(sessions_list)} sessões...")
+            try:
+                # Tentar usar display_sessions diretamente se existe
+                if hasattr(self, 'display_sessions'):
+                    print(f"[DEBUG] ✓ Chamando display_sessions diretamente (UPDATE)...")
+                    self.root.after(0, lambda: self.display_sessions(sessions_list))
+                # Fallback para função salva
+                elif hasattr(self, '_display_sessions_func'):
+                    print(f"[DEBUG] ✓ Chamando _display_sessions_func (UPDATE)...")
+                    self.root.after(0, lambda: self._display_sessions_func(sessions_list))
+                else:
+                    print(f"[DEBUG] Nenhuma função display_sessions disponível - UPDATE recebido mas UI não atualizada")
+            except Exception as e:
+                print(f"[DEBUG] ❌ Erro ao atualizar UI (UPDATE): {e}")
+        
+        # REGISTRAR HANDLERS IMEDIATAMENTE - ANTES de qualquer auto-refresh!
+        print(f"[CRITICAL] Registando handlers sessions_list IMEDIATAMENTE...")
+        netmaster_client.set_message_handler('session_list', on_session_list_received)
+        netmaster_client.set_message_handler('sessions_list', on_session_list_received)  # Nome correto do servidor
+        netmaster_client.set_message_handler('sessions_list_update', on_sessions_list_update)
+        print(f"[CRITICAL] Handlers sessions_list registrados com SUCESSO!")
 
         # Adicionar padrões de rede para Search Game flow
         self.add_network_pattern_decorations(self.root)
@@ -1699,11 +2459,60 @@ class IntegratedMenuSystem:
             # Variável para armazenar as sessões recebidas
             self.current_sessions = []
             self.sessions_frame_ref = sessions_frame
+            self.auto_refresh_active = True  # Flag para controlar auto-refresh
+            
+            # CRÍTICO: Registar handler global ANTES de qualquer outra operação
+            print(f"[SEARCH] [DEBUG] Registando handler global ANTES de buscar sessões...")
+            try:
+                netmaster_client.set_message_handler('sessions_list_update', self.on_global_sessions_list_update)
+                print(f"[SEARCH] [DEBUG] Handler global registado com SUCESSO!")
+            except Exception as e:
+                print(f"[SEARCH] [ERROR] Erro ao registar handler: {e}")
+
+            # FUNÇÃO DE CONEXÃO DEDICADA (movida para fora da thread)
+            async def ensure_connection_and_handler():
+                try:
+                    if not netmaster_client.connected:
+                        print(f"[SEARCH] [CRITICAL] Cliente não conectado - conectando agora...")
+                        success = await netmaster_client.connect()
+                        print(f"[SEARCH] [CRITICAL] Conexão resultado: {success}")
+                    
+                    # FORÇA registo múltiplo do handler para garantir
+                    print(f"[SEARCH] [CRITICAL] Forçando registo TRIPLO do handler...")
+                    netmaster_client.set_message_handler('sessions_list_update', self.on_global_sessions_list_update)
+                    netmaster_client.set_message_handler('session_list_update', self.on_global_sessions_list_update)
+                    
+                    # CORREÇÃO CRÍTICA: SEMPRE registrar sessions_list handler!
+                    # O problema era que este handler estava comentado, causando perda de mensagens sessions_list
+                    print(f"[SEARCH] [CRITICAL] CORRIGINDO: Registrando sessions_list handler obrigatório...")
+                    netmaster_client.set_message_handler('sessions_list', self.on_global_sessions_list_update)
+                    print(f"[SEARCH] [CRITICAL] ✓ sessions_list handler REGISTRADO com sucesso!")
+                    
+                    # CORREÇÃO CRÍTICA 2: REGISTRAR welcome handler para cliente procurador!
+                    # Cliente procurador também precisa receber welcome message para funcionar corretamente
+                    print(f"[SEARCH] [CRITICAL] CORRIGINDO: Registrando welcome handler obrigatório...")
+                    netmaster_client.set_message_handler('welcome', self.on_server_welcome)
+                    print(f"[SEARCH] [CRITICAL] ✓ welcome handler REGISTRADO com sucesso!")
+                    
+                    print(f"[SEARCH] [CRITICAL] Handler registado com TRIPLA PROTEÇÃO!")
+                    print(f"[SEARCH] [CRITICAL] ✓ sessions_list handler agora ativo para receber respostas do servidor")
+                    print(f"[SEARCH] [CRITICAL] ✓ welcome handler agora ativo para receber mensagem de boas-vindas")
+                    
+                    # FORÇA list_sessions imediato para "anunciar" presença ao servidor
+                    print(f"[SEARCH] [CRITICAL] Enviando list_sessions para anunciar presença...")
+                    await netmaster_client.list_sessions()
+                    print(f"[SEARCH] [CRITICAL] Presença anunciada ao servidor!")
+                    
+                except Exception as e:
+                    print(f"[SEARCH] [ERROR] Erro na conexão/registo crítico: {e}")
+
+            # ✓ CONEXÃO SIMPLES: Usar fetch_sessions_sync existente sem threads extras
+            print(f"[SEARCH] [SIMPLE] *** USANDO CONEXÃO SIMPLES SEM THREADS EXTRAS ***")
             
             def display_sessions(sessions_list):
                 """Exibe a lista de sessões recebida do servidor"""
-                print(f"🎯 [DEBUG] display_sessions chamado com {len(sessions_list) if sessions_list else 0} sessões")
-                print(f"🎯 [DEBUG] sessions_list completa: {sessions_list}")
+                print(f"[DEBUG] display_sessions chamado com {len(sessions_list) if sessions_list else 0} sessões")
+                print(f"[DEBUG] sessions_list completa: {sessions_list}")
                 
                 # Verificar se sessions_frame ainda existe
                 try:
@@ -1711,18 +2520,45 @@ class IntegratedMenuSystem:
                     for widget in sessions_frame.winfo_children():
                         widget.destroy()
                 except tk.TclError:
-                    print("🎯 [DEBUG] sessions_frame foi destruído, retornando")
+                    print("[DEBUG] sessions_frame foi destruído, retornando")
                     return
                 
                 if not sessions_list:
-                    print(f"🎯 [DEBUG] Nenhuma sessão disponível, mostrando mensagem")
-                    no_sessions_lbl = tk.Label(sessions_frame, text="No sessions available at the moment.", 
+                    print(f"[DEBUG] Nenhuma sessão disponível, mostrando mensagem")
+                    
+                    # Criar indicador animado de busca
+                    loading_container = tk.Frame(sessions_frame, bg="black")
+                    loading_container.pack(pady=20)
+                    
+                    no_sessions_lbl = tk.Label(loading_container, text="Searching for available sessions...", 
                                              font=("Helvetica", 14), bg="black", fg="#999999")
-                    no_sessions_lbl.pack(pady=20)
+                    no_sessions_lbl.pack(pady=(0, 10))
+                    
+                    hint_lbl = tk.Label(loading_container, text="New sessions will appear automatically", 
+                                      font=("Helvetica", 11), bg="black", fg="#666666")
+                    hint_lbl.pack()
+                    
+                    # Adicionar animação pulsante ao texto de busca
+                    def animate_search_text():
+                        if hasattr(self, 'auto_refresh_active') and self.auto_refresh_active and no_sessions_lbl.winfo_exists():
+                            current_text = no_sessions_lbl.cget("text")
+                            if current_text.endswith("..."):
+                                no_sessions_lbl.config(text="Searching for available sessions")
+                            else:
+                                no_sessions_lbl.config(text="Searching for available sessions...")
+                            # Repetir animação a cada 1 segundo
+                            self.root.after(1000, animate_search_text)
+                    
+                    # Iniciar animação
+                    self.root.after(500, animate_search_text)
                 else:
-                    print(f"🎯 [DEBUG] Processando {len(sessions_list)} sessões...")
+                    print(f"[DEBUG] Processando {len(sessions_list)} sessões...")
                     for i, session in enumerate(sessions_list):
-                        print(f"🎯 [DEBUG] Processando sessão {i+1}: {session}")
+                        # CORREÇÃO CRÍTICA: Normalizar state da sessão antes de processar
+                        session = normalize_session_state(session)
+                        sessions_list[i] = session
+                        
+                        print(f"[DEBUG] Processando sessão {i+1}: {session}")
                         # Extrair informações da sessão
                         host_name = None
                         current_players = session.get('current_players', 0)
@@ -1743,11 +2579,11 @@ class IntegratedMenuSystem:
                             else:
                                 host_name = "Unknown Host"
                         
-                        print(f"🎯 [DEBUG] Criando botão para sessão: {host_name} ({current_players}/{max_players})")
+                        print(f"[DEBUG] Criando botão para sessão: {host_name} ({current_players}/{max_players})")
                         
                         session_btn = tk.Button(
                             sessions_frame,
-                            text=f"{host_name}'s Game\n({current_players}/{max_players} players)\n⏱️ {duration_minutes}min",
+                            text=f"{host_name}'s Game\n({current_players}/{max_players} players)\n{duration_minutes}min",
                             font=("Helvetica", 11, "bold"),
                             bg="#2196F3",
                             fg="white",
@@ -1756,45 +2592,29 @@ class IntegratedMenuSystem:
                             command=lambda s=session: self.join_selected_session(name, s)
                         )
                         session_btn.pack(pady=5)
-                        print(f"🎯 [DEBUG] Botão criado para sessão {session_id}")
+                        print(f"[DEBUG] Botão criado para sessão {session_id}")
                 
                 # Botão Refresh
                 refresh_btn = tk.Button(
                     sessions_frame,
-                    text="🔄 Refresh",
+                    text="Refresh",
                     font=("Helvetica", 12),
                     bg="#555555",
                     fg="white",
                     command=lambda: self.refresh_sessions()
                 )
                 refresh_btn.pack(pady=10)
-                print(f"🎯 [DEBUG] display_sessions concluído")
+                print(f"[DEBUG] display_sessions concluído")
             
-            def on_session_list_received(data):
-                """Handler para quando recebemos a lista de sessões do servidor"""
-                print(f"🔍 [DEBUG] on_session_list_received chamado com data: {data}")
-                sessions_list = data.get('sessions', [])
-                print(f"🔍 [DEBUG] sessions_list extraída: {sessions_list}")
-                self.current_sessions = sessions_list
-                # CRÍTICO: Atualizar sessions_data para polling check
-                self.sessions_data = sessions_list
-                print(f"🔍 [DEBUG] sessions_data atualizada com {len(sessions_list)} sessões")
-                # Atualizar a UI na thread principal
-                self.root.after(0, lambda: display_sessions(sessions_list))
+            # *** ARMAZENAR referência para os handlers poderem usar display_sessions ***
+            self._display_sessions_func = display_sessions
             
-            def on_sessions_list_update(data):
-                """Handler para quando recebemos updates da lista de sessões"""
-                print(f"🔍 [DEBUG] on_sessions_list_update chamado com data: {data}")
-                sessions_list = data.get('sessions', [])
-                print(f"🔍 [DEBUG] sessions_list update extraída: {sessions_list}")
-                self.current_sessions = sessions_list
-                # Atualizar a UI na thread principal
-                self.root.after(0, lambda: display_sessions(sessions_list))
+            # *** HANDLERS JÁ FORAM REGISTRADOS NO INÍCIO DA FUNÇÃO show_join_session_page ***
+            # Código duplicado de handlers removido para evitar conflitos
             
-            # Configurar handlers para lista de sessões
-            netmaster_client.set_message_handler('session_list', on_session_list_received)
-            netmaster_client.set_message_handler('sessions_list', on_session_list_received)  # Nome correto do servidor
-            netmaster_client.set_message_handler('sessions_list_update', on_sessions_list_update)
+            # CRUCIAL: Também configurar auto-refresh imediato para não depender só do broadcast
+            print(f"[AUTO-REFRESH] Iniciando auto-refresh imediato para capturar sessões criadas...")
+            self.schedule_immediate_auto_refresh()
             
             # IMPORTANTE: Configurar handlers para join session desde o início
             # Isso garante que quando o jogador fizer join, os handlers já estão configurados
@@ -1805,9 +2625,8 @@ class IntegratedMenuSystem:
             netmaster_client.set_message_handler('join_error', self.on_join_error)
             netmaster_client.set_message_handler('error', self.on_join_error)  # Fallback para erros
             
-            # CRÍTICO: Configurar handler para game_started desde o início
-            # Isso garante que quando o host iniciar o jogo, este jogador receba a mensagem
-            netmaster_client.set_message_handler('game_started', self.on_game_started)
+            # NOTA: Handler game_started será registrado apenas na waiting room
+            # para evitar conflitos de múltiplas registrações
             netmaster_client.set_message_handler('turn_changed', self.on_multiplayer_turn_changed)
             
             # Tentar buscar sessões do servidor
@@ -1815,46 +2634,51 @@ class IntegratedMenuSystem:
                 """Função síncrona que executa a busca de sessões"""
                 async def fetch_sessions():
                     try:
-                        print(f"🔍 [DEBUG] fetch_sessions iniciado...")
-                        print(f"🔍 [DEBUG] netmaster_client.connected: {netmaster_client.connected}")
+                        print(f"[DEBUG] fetch_sessions iniciado...")
+                        print(f"[DEBUG] netmaster_client.connected: {netmaster_client.connected}")
                         
                         # Conectar ao NetMaster server se ainda não conectado
                         if not netmaster_client.connected:
-                            print(f"🔍 [DEBUG] Cliente não conectado, tentando conectar...")
+                            print(f"[DEBUG] Cliente não conectado, tentando conectar...")
                             success = await netmaster_client.connect()
-                            print(f"🔍 [DEBUG] Resultado da conexão: {success}")
+                            print(f"[DEBUG] Resultado da conexão: {success}")
                             if not success:
                                 raise Exception("Failed to connect to server")
+                        
+                        # IMPORTANTE: Registar handler global para receber broadcasts
+                        print(f"[DEBUG] Registando handler global sessions_list_update...")
+                        netmaster_client.set_message_handler('sessions_list_update', self.on_global_sessions_list_update)
+                        print(f"[DEBUG] Handler global registado com sucesso!")
                         
                         # Limpar sessões existentes antes de solicitar
                         self.sessions_data = []
                         
                         # Solicitar lista de sessões
-                        print(f"🔍 [DEBUG] Solicitando lista de sessões...")
+                        print(f"[DEBUG] Solicitando lista de sessões...")
                         result = await netmaster_client.list_sessions()
-                        print(f"🔍 [DEBUG] Resultado de list_sessions: {result}")
-                        print(f"🔍 [DEBUG] Solicitação de lista enviada com sucesso")
+                        print(f"[DEBUG] Resultado de list_sessions: {result}")
+                        print(f"[DEBUG] Solicitação de lista enviada com sucesso")
                         
                         # Aguardar resposta do servidor (dar tempo para processar)
-                        print(f"🔍 [DEBUG] Aguardando resposta do servidor...")
+                        print(f"[DEBUG] Aguardando resposta do servidor...")
                         for i in range(10):  # Aguardar até 5 segundos
                             await asyncio.sleep(0.5)
                             if hasattr(self, 'sessions_data') and self.sessions_data:
-                                print(f"🔍 [DEBUG] Sessões recebidas após {(i+1)*0.5}s: {len(self.sessions_data)}")
+                                print(f"[DEBUG] Sessões recebidas após {(i+1)*0.5}s: {len(self.sessions_data)}")
                                 self.root.after(0, lambda: display_sessions(self.sessions_data))
                                 return
-                            print(f"🔍 [DEBUG] Aguardando... tentativa {i+1}/10")
+                            print(f"[DEBUG] Aguardando... tentativa {i+1}/10")
                         
-                        print(f"🔍 [DEBUG] Timeout aguardando resposta - usando resultado direto se houver")
+                        print(f"[DEBUG] Timeout aguardando resposta - usando resultado direto se houver")
                         if result and hasattr(self, 'sessions_data') and self.sessions_data:
-                            print(f"🔍 [DEBUG] Usando sessions_data: {len(self.sessions_data)} sessões")
+                            print(f"[DEBUG] Usando sessions_data: {len(self.sessions_data)} sessões")
                             self.root.after(0, lambda: display_sessions(self.sessions_data))
                         else:
-                            print(f"🔍 [DEBUG] Nenhuma sessão encontrada")
+                            print(f"[DEBUG] Nenhuma sessão encontrada")
                             self.root.after(0, lambda: display_sessions([]))
                         
                     except Exception as e:
-                        print(f"🔍 [DEBUG] Error fetching sessions: {e}")
+                        print(f"[DEBUG] Error fetching sessions: {e}")
                         import traceback
                         traceback.print_exc()
                         # Mostrar mensagem de erro e fallback para "no sessions"
@@ -1863,15 +2687,15 @@ class IntegratedMenuSystem:
                 # Executar em thread separada com loop de eventos
                 def run_async():
                     try:
-                        print(f"🔍 [DEBUG] run_async iniciado...")
+                        print(f"[DEBUG] run_async iniciado...")
                         # Tentar usar loop existente se houver
                         try:
                             loop = asyncio.get_running_loop()
-                            print(f"🔍 [DEBUG] Loop existente encontrado, criando task...")
+                            print(f"[DEBUG] Loop existente encontrado, criando task...")
                             # Se já há um loop, agendar a task
                             loop.create_task(fetch_sessions())
                         except RuntimeError:
-                            print(f"🔍 [DEBUG] Nenhum loop ativo, criando novo...")
+                            print(f"[DEBUG] Nenhum loop ativo, criando novo...")
                             # Não há loop ativo, criar um novo
                             loop = asyncio.new_event_loop()
                             asyncio.set_event_loop(loop)
@@ -1881,21 +2705,21 @@ class IntegratedMenuSystem:
                             task = loop.create_task(fetch_sessions())
                             try:
                                 loop.run_until_complete(task)
-                                print(f"🔍 [DEBUG] Fetch sessions concluído - mantendo loop ativo")
+                                print(f"[DEBUG] Fetch sessions concluído - mantendo loop ativo")
                                 # NÃO fechar o loop - pode ser reutilizado para join_session
                             except Exception as e:
-                                print(f"❌ [DEBUG] Erro no fetch sessions: {e}")
+                                print(f"[ERROR] [DEBUG] Erro no fetch sessions: {e}")
                                 loop.close()
                                 raise
                     except Exception as e:
-                        print(f"🔍 [DEBUG] Error in async execution: {e}")
+                        print(f"[DEBUG] Error in async execution: {e}")
                         import traceback
                         traceback.print_exc()
                         self.root.after(0, lambda: display_sessions([]))
                 
                 # Executar em thread separada para não bloquear UI
                 import threading
-                print(f"🔍 [DEBUG] Iniciando thread para busca de sessões...")
+                print(f"[DEBUG] Iniciando thread para busca de sessões...")
                 thread = threading.Thread(target=run_async, daemon=True)
                 thread.start()
             
@@ -1905,53 +2729,458 @@ class IntegratedMenuSystem:
             loading_lbl.pack(pady=20)
             
             # Executar busca de sessões
-            print(f"🔍 [DEBUG] Chamando fetch_sessions_sync...")
+            print(f"[DEBUG] Chamando fetch_sessions_sync...")
             fetch_sessions_sync()
+            
+            # *** IMPLEMENTAR AUTO-REFRESH CONTÍNUO ***
+            def auto_refresh_sessions():
+                """Função que verifica automaticamente por novas sessões"""
+                if not hasattr(self, 'auto_refresh_active') or not self.auto_refresh_active:
+                    print(f"[AUTO-REFRESH] Auto-refresh desativado, parando...")
+                    return
+                
+                if not hasattr(self, 'sessions_frame_ref') or not self.sessions_frame_ref.winfo_exists():
+                    print(f"[AUTO-REFRESH] Frame de sessões não existe mais, parando...")
+                    return
+                
+                print(f"[AUTO-REFRESH] *** VERIFICANDO NOVAS SESSÕES ***")
+                
+                # Função assíncrona para buscar sessões em background
+                async def background_fetch():
+                    try:
+                        if netmaster_client.connected:
+                            success = await netmaster_client.list_sessions()
+                            print(f"[AUTO-REFRESH] list_sessions result: {success}")
+                            # Aguardar um pouco para resposta
+                            await asyncio.sleep(0.5)
+                        else:
+                            print(f"[AUTO-REFRESH] Cliente não conectado, tentando reconectar...")
+                            await netmaster_client.connect()
+                    except Exception as e:
+                        print(f"[AUTO-REFRESH] Erro: {e}")
+                
+                # Executar em background sem bloquear
+                def run_background_fetch():
+                    try:
+                        loop = asyncio.new_event_loop()
+                        asyncio.set_event_loop(loop)
+                        loop.run_until_complete(background_fetch())
+                        loop.close()
+                    except Exception as e:
+                        print(f"[AUTO-REFRESH] Erro na thread: {e}")
+                
+                # Executar em thread separada
+                import threading
+                thread = threading.Thread(target=run_background_fetch, daemon=True)
+                thread.start()
+                
+                # Agendar próxima verificação em 3 segundos
+                self.root.after(3000, auto_refresh_sessions)
+            
+            # Iniciar auto-refresh após 2 segundos da busca inicial
+            print(f"[AUTO-REFRESH] Agendando auto-refresh automático...")
+            self.root.after(2000, auto_refresh_sessions)
 
         animate_typing(title_lbl, "Available Game Sessions", delay=50,
                        callback=lambda: animate_typing(subtitle_lbl, "Select a session to join:", delay=40, callback=show_sessions_list))
 
-    def refresh_sessions(self):
-        """Atualiza a lista de sessões"""
-        def refresh_sessions_sync():
-            """Função síncrona que executa a atualização de sessões"""
-            async def fetch_sessions():
+    def schedule_immediate_auto_refresh(self):
+        """Agenda auto-refresh imediato para capturar sessões criadas por outros"""
+        print(f"[AUTO-REFRESH] *** SCHEDULE_IMMEDIATE_AUTO_REFRESH INICIADO ***")
+        
+        # NOVA FUNCIONALIDADE: Rastreamento de broadcast para fallback agressivo
+        self.last_broadcast_time = 0
+        self.broadcast_missed_count = 0
+        
+        def immediate_refresh():
+            """Executa refresh imediato"""
+            if not hasattr(self, 'auto_refresh_active') or not self.auto_refresh_active:
+                print(f"[AUTO-REFRESH] Auto-refresh não ativo, cancelando")
+                return
+                
+            print(f"[AUTO-REFRESH] Executando refresh imediato...")
+            
+            # Função assíncrona para buscar
+            async def immediate_fetch():
                 try:
                     if netmaster_client.connected:
                         await netmaster_client.list_sessions()
-                    else:
-                        # Reconectar se necessário
-                        success = await netmaster_client.connect()
-                        if success:
-                            await netmaster_client.list_sessions()
+                        print(f"[AUTO-REFRESH] Refresh imediato executado")
                 except Exception as e:
-                    print(f"Error refreshing sessions: {e}")
+                    print(f"[AUTO-REFRESH] Erro no refresh imediato: {e}")
+            
+            # Executar em thread
+            def run_immediate():
+                try:
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    loop.run_until_complete(immediate_fetch())
+                    loop.close()
+                except Exception as e:
+                    print(f"[AUTO-REFRESH] Erro na thread imediata: {e}")
+            
+            import threading
+            thread = threading.Thread(target=run_immediate, daemon=True)
+            thread.start()
+            
+            # NOVA LÓGICA: Determinar intervalo baseado em broadcast recebidos
+            import time
+            current_time = time.time()
+            time_since_last_broadcast = current_time - self.last_broadcast_time
+            
+            # Se não recebeu broadcast há mais de 5 segundos, usar polling agressivo
+            if time_since_last_broadcast > 5:
+                self.broadcast_missed_count += 1
+                interval = 1000  # 1 segundo - polling agressivo
+                print(f"[AUTO-REFRESH] SEM BROADCAST há {time_since_last_broadcast:.1f}s - POLLING AGRESSIVO (1s)")
+            else:
+                self.broadcast_missed_count = 0
+                interval = 3000  # 3 segundos - polling normal
+                print(f"[AUTO-REFRESH] Broadcast recente - polling normal (3s)")
+            
+            # Agendar próximo refresh
+            self.root.after(interval, immediate_refresh)
+        
+        # Iniciar refresh imediato após 1 segundo
+        self.root.after(1000, immediate_refresh)
+
+    def refresh_sessions(self):
+        """Atualiza a lista de sessões com retry logic robusto"""
+        print(f"[DEBUG] *** REFRESH_SESSIONS CHAMADO ***")
+        print(f"[DEBUG] netmaster_client.connected: {netmaster_client.connected}")
+        print(f"[DEBUG] Handlers ativos: {list(netmaster_client.message_handlers.keys())}")
+        
+        # Evitar múltiplos refreshes simultâneos
+        if hasattr(self, 'is_refreshing') and self.is_refreshing:
+            print(f"[DEBUG] Refresh já em andamento, ignorando...")
+            return
+        
+        self.is_refreshing = True
+        
+        # Função para encontrar o frame de sessões e atualizar display
+        def update_sessions_display(sessions_list):
+            """Atualiza o display de sessões no frame existente"""
+            try:
+                print(f"[DEBUG] update_sessions_display chamado com {len(sessions_list)} sessões")
+                if hasattr(self, 'sessions_frame_ref') and self.sessions_frame_ref.winfo_exists():
+                    sessions_frame = self.sessions_frame_ref
+                    print(f"[DEBUG] Atualizando display com {len(sessions_list)} sessões")
+                    
+                    # Limpar frame atual
+                    for widget in sessions_frame.winfo_children():
+                        widget.destroy()
+                    
+                    if not sessions_list:
+                        print(f"[DEBUG] Nenhuma sessão disponível após refresh")
+                        no_sessions_lbl = tk.Label(sessions_frame, text="No sessions available. Click Refresh to try again.", 
+                                                 font=("Helvetica", 14), bg="black", fg="#999999")
+                        no_sessions_lbl.pack(pady=20)
+                    else:
+                        print(f"[DEBUG] Processando {len(sessions_list)} sessões no refresh...")
+                        for i, session in enumerate(sessions_list):
+                            print(f"[DEBUG] Refresh - Processando sessão {i+1}: {session}")
+                            # Extrair informações da sessão
+                            host_name = None
+                            current_players = session.get('current_players', 0)
+                            max_players = session.get('max_players', 4)
+                            duration_minutes = session.get('duration_minutes', 30)
+                            session_id = session.get('id', 'Unknown')
+                            
+                            # Tentar encontrar o nome do host
+                            players = session.get('players', {})
+                            host_player_id = session.get('host_player_id')
+                            if host_player_id and host_player_id in players:
+                                host_name = players[host_player_id].get('name', 'Unknown Host')
+                            else:
+                                # Se não conseguir encontrar o host, usar o primeiro jogador
+                                if players:
+                                    first_player = list(players.values())[0]
+                                    host_name = first_player.get('name', 'Unknown Host')
+                                else:
+                                    host_name = "Unknown Host"
+                            
+                            print(f"[DEBUG] Refresh - Criando botão para sessão: {host_name} ({current_players}/{max_players})")
+                            
+                            session_btn = tk.Button(
+                                sessions_frame,
+                                text=f"{host_name}'s Game\n({current_players}/{max_players} players)\n{duration_minutes}min",
+                                font=("Helvetica", 11, "bold"),
+                                bg="#2196F3",
+                                fg="white",
+                                width=25,
+                                height=3,
+                                command=lambda s=session: self.join_selected_session(self.player_name, s)
+                            )
+                            session_btn.pack(pady=5)
+                            print(f"[DEBUG] Refresh - Botão criado para sessão {session_id}")
+                    
+                    # Re-adicionar botão Refresh
+                    refresh_btn = tk.Button(
+                        sessions_frame,
+                        text="Refresh",
+                        font=("Helvetica", 12),
+                        bg="#555555",
+                        fg="white",
+                        command=lambda: self.refresh_sessions()
+                    )
+                    refresh_btn.pack(pady=10)
+                    print(f"[DEBUG] Display refresh concluído")
+                    
+                else:
+                    print(f"[DEBUG] sessions_frame_ref não existe mais")
+            except Exception as e:
+                print(f"[DEBUG] Erro ao atualizar display: {e}")
+                import traceback
+                traceback.print_exc()
+        
+        # Primeiro: Tentar usar o handler global se já há sessões em cache
+        if hasattr(self, 'sessions_data') and self.sessions_data:
+            print(f"[DEBUG] *** USANDO CACHE DE SESSÕES: {len(self.sessions_data)} ***")
+            update_sessions_display(self.sessions_data)
+            
+        # Marcar que estamos fazendo refresh para o handler global detectar
+        self.is_refreshing = True
+        
+        # Implementar robust retry mechanism
+        def refresh_sessions_sync():
+            """Função síncrona que executa a atualização de sessões com retry logic"""
+            async def robust_fetch_sessions():
+                try:
+                    print(f"[DEBUG] *** ROBUST FETCH_SESSIONS INICIADO ***")
+                    print(f"[DEBUG] netmaster_client.connected: {netmaster_client.connected}")
+                    
+                    # Garantir conexão ativa
+                    if not netmaster_client.connected:
+                        print(f"[DEBUG] Tentando reconectar...")
+                        success = await netmaster_client.connect()
+                        if not success:
+                            print(f"[DEBUG] ERRO: Falha na reconexão")
+                            self.is_refreshing = False
+                            return
+                    
+                    # RETRY LOGIC ROBUSTO: Tentar múltiplas vezes até conseguir resposta válida
+                    max_retries = 5
+                    retry_delay = 0.5  # Iniciar com 0.5s
+                    
+                    for attempt in range(max_retries):
+                        print(f"[DEBUG] *** TENTATIVA {attempt + 1}/{max_retries} ***")
+                        
+                        # Limpar data antes de cada tentativa
+                        initial_sessions_count = len(self.sessions_data) if hasattr(self, 'sessions_data') else 0
+                        
+                        # Enviar solicitação
+                        success = await netmaster_client.list_sessions()
+                        print(f"[DEBUG] list_sessions result: {success}")
+                        
+                        if success:
+                            # Aguardar resposta com timeout progressivo
+                            wait_time = retry_delay * (attempt + 1)
+                            print(f"[DEBUG] Aguardando resposta por {wait_time}s...")
+                            await asyncio.sleep(wait_time)
+                            
+                            # Verificar se recebemos dados
+                            current_sessions_count = len(self.sessions_data) if hasattr(self, 'sessions_data') else 0
+                            print(f"[DEBUG] Sessions count - Antes: {initial_sessions_count}, Depois: {current_sessions_count}")
+                            
+                            # SUCESSO: Se dados mudaram ou se encontramos sessões
+                            if current_sessions_count > 0 or current_sessions_count != initial_sessions_count:
+                                print(f"[DEBUG] *** SUCESSO! Encontradas {current_sessions_count} sessões ***")
+                                self.root.after(0, lambda: update_sessions_display(self.sessions_data))
+                                self.is_refreshing = False
+                                return
+                            
+                            # Se ainda não temos dados, tentar próxima tentativa
+                            print(f"[DEBUG] Tentativa {attempt + 1} falhou - sem dados válidos")
+                        else:
+                            print(f"[DEBUG] Tentativa {attempt + 1} falhou - erro na comunicação")
+                        
+                        # Aguardar antes da próxima tentativa
+                        if attempt < max_retries - 1:
+                            print(f"[DEBUG] Aguardando {retry_delay}s antes da próxima tentativa...")
+                            await asyncio.sleep(retry_delay)
+                            retry_delay *= 1.5  # Aumentar delay exponencialmente
+                    
+                    # Se todas as tentativas falharam
+                    print(f"[DEBUG] *** TODAS AS TENTATIVAS FALHARAM - USANDO FALLBACK ***")
+                    fallback_sessions = self.sessions_data if hasattr(self, 'sessions_data') else []
+                    self.root.after(0, lambda: update_sessions_display(fallback_sessions))
+                    self.is_refreshing = False
+                    
+                except Exception as e:
+                    print(f"[DEBUG] Erro no robust fetch: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    self.is_refreshing = False
+                try:
+                    print(f"[DEBUG] *** REFRESH fetch_sessions iniciado ***")
+                    print(f"[DEBUG] netmaster_client.connected: {netmaster_client.connected}")
+                    
+                    # Conectar ao NetMaster server se ainda não conectado
+                    if not netmaster_client.connected:
+                        print(f"[DEBUG] Cliente não conectado, tentando conectar...")
+                        success = await netmaster_client.connect()
+                        print(f"[DEBUG] Resultado da conexão: {success}")
+                        if not success:
+                            raise Exception("Failed to connect to server")
+                    
+                    print(f"[DEBUG] *** ENVIANDO LIST_SESSIONS ***")
+                    
+                    # Solicitar lista de sessões
+                    print(f"[DEBUG] Refresh - Solicitando lista de sessões...")
+                    result = await netmaster_client.list_sessions()
+                    print(f"[DEBUG] Refresh - Resultado de list_sessions: {result}")
+                    
+                    print(f"[DEBUG] *** AGUARDANDO RESPOSTA DO SERVIDOR ***")
+                    
+                    # Aguardar resposta do servidor (dar tempo para processar)
+                    print(f"[DEBUG] Refresh - Aguardando resposta do servidor...")
+                    found_sessions = False
+                    for i in range(20):  # Aguardar até 10 segundos (mais tempo)
+                        await asyncio.sleep(0.5)
+                        if hasattr(self, 'sessions_data') and self.sessions_data is not None:
+                            print(f"[DEBUG] *** SESSÕES ENCONTRADAS APÓS {(i+1)*0.5}s: {len(self.sessions_data)} ***")
+                            self.root.after(0, lambda: update_sessions_display(self.sessions_data))
+                            found_sessions = True
+                            break
+                        print(f"[DEBUG] Refresh - Aguardando... tentativa {i+1}/20")
+                    
+                    if not found_sessions:
+                        print(f"[DEBUG] *** TIMEOUT - MOSTRANDO LISTA VAZIA ***")
+                        # Se não recebeu resposta, mostrar lista vazia
+                        self.root.after(0, lambda: update_sessions_display([]))
+                        
+                    # Reset flag
+                    self.is_refreshing = False
+                        
+                except Exception as e:
+                    print(f"[DEBUG] *** ERRO NO REFRESH: {e} ***")
+                    import traceback
+                    traceback.print_exc()
+                    # Mostrar mensagem de erro e fallback para "no sessions"
+                    self.root.after(0, lambda: update_sessions_display([]))
+                    self.is_refreshing = False
             
             # Executar em thread separada com loop de eventos
             def run_async():
                 try:
+                    print(f"[DEBUG] *** REFRESH run_async iniciado ***")
                     # Tentar usar loop existente se houver
                     try:
                         loop = asyncio.get_running_loop()
+                        print(f"[DEBUG] Refresh - Loop existente encontrado, criando task...")
                         # Se já há um loop, agendar a task
-                        loop.create_task(fetch_sessions())
+                        loop.create_task(robust_fetch_sessions())
                     except RuntimeError:
+                        print(f"[DEBUG] Refresh - Nenhum loop ativo, criando novo...")
                         # Não há loop ativo, criar um novo
                         loop = asyncio.new_event_loop()
                         asyncio.set_event_loop(loop)
-                        loop.run_until_complete(fetch_sessions())
+                        loop.run_until_complete(robust_fetch_sessions())
                 except Exception as e:
-                    print(f"Error in refresh async execution: {e}")
+                    print(f"[DEBUG] *** ERRO NO REFRESH ASYNC: {e} ***")
+                    import traceback
+                    traceback.print_exc()
+                    self.root.after(0, lambda: update_sessions_display([]))
+                    self.is_refreshing = False
             
             # Executar em thread separada para não bloquear UI
             import threading
+            print(f"[DEBUG] *** INICIANDO THREAD PARA REFRESH ***")
             thread = threading.Thread(target=run_async, daemon=True)
             thread.start()
         
         refresh_sessions_sync()
 
+    def refresh_display_with_sessions(self, sessions_list):
+        """Atualiza o display de sessões diretamente com lista fornecida"""
+        def update_ui():
+            try:
+                print(f"[DEBUG] refresh_display_with_sessions chamado com {len(sessions_list)} sessões")
+                if hasattr(self, 'sessions_frame_ref') and self.sessions_frame_ref.winfo_exists():
+                    sessions_frame = self.sessions_frame_ref
+                    
+                    # Limpar frame atual
+                    for widget in sessions_frame.winfo_children():
+                        widget.destroy()
+                    
+                    if not sessions_list:
+                        print(f"[DEBUG] Nenhuma sessão para mostrar")
+                        no_sessions_lbl = tk.Label(sessions_frame, text="No sessions available. Click Refresh to try again.", 
+                                                 font=("Helvetica", 14), bg="black", fg="#999999")
+                        no_sessions_lbl.pack(pady=20)
+                    else:
+                        print(f"[DEBUG] Processando {len(sessions_list)} sessões...")
+                        for i, session in enumerate(sessions_list):
+                            print(f"[DEBUG] Auto-refresh - Processando sessão {i+1}: {session.get('id')}")
+                            # Extrair informações da sessão
+                            host_name = None
+                            current_players = session.get('current_players', 0)
+                            max_players = session.get('max_players', 4)
+                            duration_minutes = session.get('duration_minutes', 30)
+                            session_id = session.get('id', 'Unknown')
+                            
+                            # Tentar encontrar o nome do host
+                            players = session.get('players', {})
+                            host_player_id = session.get('host_player_id')
+                            if host_player_id and host_player_id in players:
+                                host_name = players[host_player_id].get('name', 'Unknown Host')
+                            else:
+                                # Se não conseguir encontrar o host, usar o primeiro jogador
+                                if players:
+                                    first_player = list(players.values())[0]
+                                    host_name = first_player.get('name', 'Unknown Host')
+                                else:
+                                    host_name = "Unknown Host"
+                            
+                            print(f"[DEBUG] Auto-refresh - Criando botão para: {host_name} ({current_players}/{max_players})")
+                            
+                            session_btn = tk.Button(
+                                sessions_frame,
+                                text=f"{host_name}'s Game\n({current_players}/{max_players} players)\n{duration_minutes}min",
+                                font=("Helvetica", 11, "bold"),
+                                bg="#2196F3",
+                                fg="white",
+                                width=25,
+                                height=3,
+                                command=lambda s=session: self.join_selected_session(getattr(self, 'join_player_name', 'Player'), s)
+                            )
+                            session_btn.pack(pady=5)
+                    
+                    # Re-adicionar botão Refresh
+                    refresh_btn = tk.Button(
+                        sessions_frame,
+                        text="Refresh",
+                        font=("Helvetica", 12),
+                        bg="#555555",
+                        fg="white",
+                        command=lambda: self.refresh_sessions()
+                    )
+                    refresh_btn.pack(pady=10)
+                    print(f"[DEBUG] Auto-refresh display concluído")
+                    
+                else:
+                    print(f"[DEBUG] sessions_frame_ref não existe para auto-refresh")
+            except Exception as e:
+                print(f"[DEBUG] Erro no auto-refresh display: {e}")
+                import traceback
+                traceback.print_exc()
+        
+        # Executar na thread principal do tkinter
+        self.root.after(0, update_ui)
+
+    def stop_auto_refresh(self):
+        """Para o auto-refresh automático de sessões"""
+        if hasattr(self, 'auto_refresh_active'):
+            print(f"[AUTO-REFRESH] Parando auto-refresh...")
+            self.auto_refresh_active = False
+        else:
+            print(f"[AUTO-REFRESH] Auto-refresh já estava inativo")
+
     def join_selected_session(self, name, session):
         """Processar seleção de sessão e ir para seleção de cor"""
+        # Parar auto-refresh quando selecionamos uma sessão
+        self.stop_auto_refresh()
+        
         self.selected_session = session
         # Ir para seleção de cor após selecionar sessão
         self.show_color_selection_page(name, "local")
@@ -1965,6 +3194,9 @@ class IntegratedMenuSystem:
 
     def show_color_selection_page_create(self, name):
         """Mostrar seleção de cor para Create Game flow"""
+        # Parar auto-refresh quando mudamos de página
+        self.stop_auto_refresh()
+        
         # Limpar root
         for widget in self.root.winfo_children():
             widget.destroy()
@@ -2140,6 +3372,9 @@ class IntegratedMenuSystem:
 
     def show_color_selection_page(self, name, game_type):
         """Mostrar seleção de cor para Search Game flow"""
+        # Parar auto-refresh quando mudamos de página
+        self.stop_auto_refresh()
+        
         # Limpar root
         for widget in self.root.winfo_children():
             widget.destroy()
@@ -2172,11 +3407,11 @@ class IntegratedMenuSystem:
             available_colors = []
             if hasattr(self, 'selected_session') and self.selected_session:
                 available_colors = self.selected_session.get('available_colors', ["red", "green", "blue", "yellow"])
-                print(f"🎨 [DEBUG] Cores disponíveis na sessão: {available_colors}")
+                print(f"[STYLE] [DEBUG] Cores disponíveis na sessão: {available_colors}")
             else:
                 # Fallback para todas as cores se não há sessão selecionada
                 available_colors = ["red", "green", "blue", "yellow"]
-                print(f"🎨 [DEBUG] Usando todas as cores (sem sessão selecionada)")
+                print(f"[STYLE] [DEBUG] Usando todas as cores (sem sessão selecionada)")
             
             # Mapear cores para ícones
             color_icons = [
@@ -2205,7 +3440,7 @@ class IntegratedMenuSystem:
                     btn.image = icon  # Keep reference
                     btn.pack(side=tk.LEFT, padx=10)
                     self.color_buttons.append(btn)
-                    print(f"🎨 [DEBUG] Adicionado botão para cor: {color_name}")
+                    print(f"[STYLE] [DEBUG] Adicionado botão para cor: {color_name}")
 
         animate_typing(lbl1, name, delay=50,
                        callback=lambda: animate_typing(lbl2,
@@ -2214,7 +3449,7 @@ class IntegratedMenuSystem:
 
     def handle_color_selection(self, color, name, game_type, button_frame):
         """Handle color selection with button disabling and joining state"""
-        print(f"🎯 [DEBUG] Color selected: {color}, disabling buttons...")
+        print(f"[TARGET] [DEBUG] Color selected: {color}, disabling buttons...")
         
         # Obter nome do host da sessão selecionada
         host_name = "Host"  # Default
@@ -2224,7 +3459,7 @@ class IntegratedMenuSystem:
             if host_player_id and host_player_id in players:
                 host_name = players[host_player_id].get('name', 'Host')
         
-        print(f"🎯 [DEBUG] Host name: {host_name}")
+        print(f"[TARGET] [DEBUG] Host name: {host_name}")
         
         # Desabilitar todos os botões para evitar cliques múltiplos
         if hasattr(self, 'color_buttons'):
@@ -2241,303 +3476,478 @@ class IntegratedMenuSystem:
         self.join_session_with_color(color, name, game_type)
 
     def join_session_with_color(self, color, name, game_type):
-        """Juntar-se à sessão selecionada com a cor escolhida"""
-        # Verificar se já está em processo de join para evitar múltiplas tentativas
+        """Versão SIMPLIFICADA de join - sem complexidades desnecessárias"""
+        print(f"[SIMPLE_JOIN] Iniciando join simples: {name} como {color}")
+        print(f"[SIMPLE_JOIN] *** MÉTODO join_session_with_color CHAMADO ***")
+        
+        # Flag básica para evitar múltiplos joins
         if hasattr(self, 'is_joining_session') and self.is_joining_session:
-            print(f"🎯 [DEBUG] Já está juntando-se à sessão, ignorando...")
+            print(f"[SIMPLE_JOIN] Já está fazendo join, ignorando...")
             return
             
-        print(f"🎯 [DEBUG] Juntando-se à sessão com cor: {color}")
-        
-        # Definir flag AQUI para evitar múltiplas tentativas
+        print(f"[JOIN_FLAG] *** DEFININDO is_joining_session = True ***")
         self.is_joining_session = True
+        netmaster_client.is_joining_session = True  # CRITICAL: Set também no cliente!
+        print(f"[JOIN_FLAG] *** FLAGS DEFINIDAS: self={self.is_joining_session}, client={netmaster_client.is_joining_session} ***")
         
+        self.join_player_name = name
         self.host_color = color
         self.host_name = name
-        self.join_player_name = name  # NOVO: Armazenar o nome para verificação no sessions_list_update
-        self.jogador = MenuPlayer(self.host_name, self.host_color.lower(), START_POSITIONS[self.host_color.lower()])
+        self.jogador = MenuPlayer(name, color.lower(), START_POSITIONS[color.lower()])
         
-        # NÃO mostrar connection loading - reutilizar conexão existente
-        # self.show_connection_loading(name, game_type)
-        
-        # Configurar handlers para join session
-        netmaster_client.set_message_handler('session_joined', self.on_session_joined)
-        netmaster_client.set_message_handler('player_joined', self.on_session_joined)  # Possível variação
-        netmaster_client.set_message_handler('join_success', self.on_session_joined)   # Possível variação
-        netmaster_client.set_message_handler('joined_session', self.on_session_joined) # Possível variação
-        netmaster_client.set_message_handler('join_error', self.on_join_error)
-        netmaster_client.set_message_handler('error', self.on_join_error)  # Fallback para erros
-        
-        # CRÍTICO: Configurar handler para game_started aqui também
-        netmaster_client.set_message_handler('game_started', self.on_game_started)
-        
-        # CRÍTICO: Configurar handler para turn_changed para transições de turno 
-        netmaster_client.set_message_handler('turn_changed', self.on_multiplayer_turn_changed)
-        
-        # NOVO: Handler para sessions_list_update que pode indicar que foi adicionado à sessão
-        netmaster_client.set_message_handler('sessions_list_update', self.on_global_sessions_list_update)
-        
-        # NOVO: Handler genérico para capturar mensagens de join não reconhecidas
-        netmaster_client.set_message_handler('join_session_response', self.on_session_joined)
-        netmaster_client.set_message_handler('session_update', self.on_session_joined)
-        
-        # TEMPORÁRIO: Capturar TODAS as mensagens durante join para debug
-        print(f"🔍 [DEBUG] Registando handler ALL_MESSAGES_DEBUG...")
-        netmaster_client.set_message_handler('ALL_MESSAGES_DEBUG', self.on_any_message_debug)
-        print(f"🔍 [DEBUG] Handlers após registar ALL_MESSAGES_DEBUG: {list(netmaster_client.message_handlers.keys())}")
-        
-        # CRÍTICO: Handler para sessions_list_update que pode indicar que foi adicionado à sessão
-        netmaster_client.set_message_handler('sessions_list_update', self.on_global_sessions_list_update)
-        
-        # Thread para juntar-se à sessão
-        def join_session():
+        def simple_join():
             try:
-                async def async_join():
-                    # NOVO: Testar conectividade real antes do join
-                    print(f"🔍 [DEBUG] Testando conectividade real do WebSocket...")
-                    test_success = await netmaster_client.test_websocket_connectivity()
-                    print(f"🔍 [DEBUG] Teste de conectividade: {'SUCESSO' if test_success else 'FALHA'}")
-                    
-                    if not test_success:
-                        print(f"⚠️ [DEBUG] WebSocket não está recebendo mensagens - reconnecting...")
-                        try:
-                            # CRÍTICO: Fechar conexão no loop correto
-                            if netmaster_client.websocket:
-                                print(f"🔍 [DEBUG] Fechando WebSocket existente...")
-                                # Não tentar fechar aqui - pode causar conflito de loops
-                                netmaster_client.websocket = None
-                                netmaster_client.connected = False
-                            
-                            print(f"🔍 [DEBUG] Aguardando antes da reconexão...")
-                            await asyncio.sleep(1)
-                            
-                            print(f"🔍 [DEBUG] Iniciando nova conexão...")
-                            success = await netmaster_client.connect()
-                            print(f"🔍 [DEBUG] Reconectado: {success}")
-                            
-                            if success:
-                                print(f"🔍 [DEBUG] Testando conectividade após reconexão...")
-                                # Aguardar um pouco para estabilizar a conexão
-                                await asyncio.sleep(1)
-                                test_success = await netmaster_client.test_websocket_connectivity()
-                                print(f"🔍 [DEBUG] Teste pós-reconexão: {'SUCESSO' if test_success else 'FALHA'}")
-                                
-                                if not test_success:
-                                    print(f"❌ [DEBUG] Reconexão não resolveu o problema - tentativa final...")
-                                    # Última tentativa - forçar nova conexão completamente
-                                    netmaster_client.websocket = None
-                                    netmaster_client.connected = False
-                                    await asyncio.sleep(2)
-                                    
-                                    success = await netmaster_client.connect()
-                                    if success:
-                                        test_success = await netmaster_client.test_websocket_connectivity()
-                                        print(f"🔍 [DEBUG] Teste final: {'SUCESSO' if test_success else 'FALHA'}")
-                                    
-                                    if not test_success:
-                                        raise Exception("WebSocket não está recebendo mensagens após múltiplas tentativas")
-                            else:
-                                raise Exception("Falha na reconexão")
-                                
-                        except Exception as e:
-                            print(f"❌ [DEBUG] Erro na reconexão: {e}")
-                            print(f"🔍 [DEBUG] Continuando mesmo assim - pode funcionar via polling...")
-                            # NÃO abortar aqui - continuar e tentar polling como fallback
-                    
-                    # Verificar conectividade antes de join
-                    print(f"🎯 [DEBUG] Verificando conectividade: connected={netmaster_client.connected}, websocket={netmaster_client.websocket is not None}")
-                    
-                    # Se não está conectado, reconectar
-                    if not netmaster_client.connected:
-                        print(f"🎯 [DEBUG] Cliente desconectado! Tentando reconectar...")
-                        success = await netmaster_client.connect()
-                        print(f"🎯 [DEBUG] Resultado da reconexão: {success}")
-                        if not success:
-                            print(f"❌ [DEBUG] Falha na conexão - continuando com polling como backup")
-                    else:
-                        print(f"🎯 [DEBUG] Reutilizando conexão existente")
-                    
-                    # Verificar se websocket ainda está ativo
-                    try:
-                        if netmaster_client.websocket and netmaster_client.websocket.closed:
-                            print(f"🎯 [DEBUG] WebSocket está fechado! Reconectando...")
-                            success = await netmaster_client.connect()
-                            if not success:
-                                raise Exception("Failed to reconnect to server")
-                    except AttributeError:
-                        print(f"🎯 [DEBUG] WebSocket não tem atributo 'closed', continuando...")
-                    
-                    # Juntar-se à sessão selecionada
-                    session_id = self.selected_session.get('id')
-                    print(f"🎯 [DEBUG] Enviando join_session para sessão {session_id} com cor {color.lower()}")
-                    print(f"🎯 [DEBUG] Estado da conexão antes do join: connected={netmaster_client.connected}")
-                    print(f"🎯 [DEBUG] WebSocket ativo: {netmaster_client.websocket is not None}")
-                    print(f"🎯 [DEBUG] Handlers disponíveis: {list(netmaster_client.message_handlers.keys())}")
-                    
-                    # Enviar join request - mesmo que WebSocket não esteja 100% funcional
-                    result = await netmaster_client.join_session(session_id, name, color.lower())
-                    print(f"🎯 [DEBUG] Join session result: {result}")
-                    print(f"🎯 [DEBUG] Join session request sent for session {session_id}")
-                    print(f"🎯 [DEBUG] Estado pós-join: connected={netmaster_client.connected}")
-                    
-                    # CRÍTICO: Iniciar polling intensivo imediatamente após join
-                    print(f"🎯 [DEBUG] Iniciando polling intensivo para detectar join...")
-                    
-                    # Aguardar resposta do servidor com polling mais agressivo
-                    print(f"🎯 [DEBUG] Aguardando resposta do join_session...")
-                    max_attempts = 40  # Aumentar tentativas para 40 (20 segundos)
-                    
-                    for attempt in range(1, max_attempts + 1):
-                        await asyncio.sleep(0.5)
-                        print(f"🎯 [DEBUG] Aguardando join response... {attempt}/{max_attempts}")
-                        
-                        # Verificar se recebemos confirmação de join
-                        if not getattr(self, 'is_joining_session', True):
-                            print(f"✅ [DEBUG] Join confirmado via WebSocket! Parando aguardo.")
-                            return
-                        
-                        # POLLING AGRESSIVO: A cada 3 tentativas (1.5s), forçar verificação
-                        if attempt % 3 == 0:
-                            print(f"🎯 [DEBUG] Polling intensivo - verificação {attempt//3}")
-                            try:
-                                # Tentar list_sessions para atualizar estado
-                                await netmaster_client.list_sessions()
-                                await asyncio.sleep(0.5)  # Aguardar resposta
-                                
-                                # Verificar diretamente nas sessions_data se o jogador foi adicionado
-                                if hasattr(self, 'sessions_data') and self.sessions_data:
-                                    print(f"🔍 [DEBUG] Verificando sessions_data para player '{self.join_player_name}'...")
-                                    for session in self.sessions_data:
-                                        if session['id'] == session_id:
-                                            players = session.get('players', {})
-                                            for player_id, player_info in players.items():
-                                                if player_info.get('name') == self.join_player_name:
-                                                    print(f"🎯 [DEBUG] *** SUCESSO VIA POLLING! Player encontrado! ***")
-                                                    print(f"🎯 [DEBUG] Player ID: {player_id}")
-                                                    print(f"🎯 [DEBUG] Player data: {player_info}")
-                                                    
-                                                    # Limpar flag e forçar join success
-                                                    self.is_joining_session = False
-                                                    
-                                                    # Criar join sintético
-                                                    join_data = {
-                                                        'type': 'session_joined',
-                                                        'session': session,
-                                                        'player_id': player_id,
-                                                        'player_info': player_info
-                                                    }
-                                                    
-                                                    print(f"🎯 [DEBUG] Criando join sintético via polling: {join_data}")
-                                                    # Chamar no main thread
-                                                    self.root.after(0, lambda data=join_data: self.on_session_joined(data))
-                                                    return
-                                    
-                            except Exception as e:
-                                print(f"🎯 [DEBUG] Erro no polling: {e}")
-                        
-                        # Verificar se ainda está conectado (não crítico)
-                        if not netmaster_client.connected:
-                            print(f"⚠️ [DEBUG] Conexão perdida durante aguardo - continuando com polling...")
-                    
-                    # Se chegou até aqui, fazer última verificação
-                    print(f"❌ [DEBUG] Timeout após {max_attempts} tentativas")
-                    print(f"🔍 [DEBUG] Verificação final se join foi processado...")
-                    
-                    try:
-                        # Última tentativa de verificação
-                        await netmaster_client.list_sessions()
-                        await asyncio.sleep(2)  # Aguardar resposta mais tempo
-                        
-                        # Verificar uma última vez
-                        if hasattr(self, 'sessions_data') and self.sessions_data:
-                            for session in self.sessions_data:
-                                if session['id'] == session_id:
-                                    players = session.get('players', {})
-                                    for player_id, player_info in players.items():
-                                        if player_info.get('name') == self.join_player_name:
-                                            print(f"🎯 [DEBUG] *** JOIN ENCONTRADO NA VERIFICAÇÃO FINAL! ***")
-                                            self.is_joining_session = False
-                                            join_data = {
-                                                'type': 'session_joined',
-                                                'session': session,
-                                                'player_id': player_id,
-                                                'player_info': player_info
-                                            }
-                                            self.root.after(0, lambda data=join_data: self.on_session_joined(data))
-                                            return
-                    except Exception as e:
-                        print(f"❌ [DEBUG] Erro na verificação final: {e}")
-                    
-                    # Se ainda não encontrou, mostrar erro
-                    if getattr(self, 'is_joining_session', True):
-                        print(f"❌ [DEBUG] Join falhou completamente - servidor pode estar com problemas")
-                        self.is_joining_session = False
-                        self.root.after(0, lambda: self.show_error_message("Servidor não conseguiu processar o pedido. Tente novamente."))
-                    
-                    print(f"🎯 [DEBUG] Join task concluída - mantendo loop ativo")
+                # CRITICAL: Registrar handlers PRIMEIRO, no thread principal
+                print(f"[SIMPLE_JOIN] Registrando handlers no thread principal...")
+                netmaster_client.set_message_handler('session_joined', self.on_session_joined)
+                netmaster_client.set_message_handler('sessions_list_update', self.simple_sessions_update)
+                netmaster_client.set_message_handler('error', self.on_join_error)
+                netmaster_client.set_message_handler('game_finished', self.on_menu_game_finished)  # Adicionar handler de fim de jogo
                 
-                # Executar join em loop assíncrono
-                try:
-                    loop = asyncio.get_running_loop()
-                    print(f"🎯 [DEBUG] Usando loop existente para join_session")
-                    loop.create_task(async_join())
-                except RuntimeError:
-                    print(f"🎯 [DEBUG] Criando novo loop para join_session")
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
+                # DEBUG: Confirmar handlers registrados
+                print(f"[SIMPLE_JOIN] Handlers registrados: {list(netmaster_client.message_handlers.keys())}")
+                print(f"[SIMPLE_JOIN] Handler session_joined: {netmaster_client.message_handlers.get('session_joined')}")
+                print(f"[SIMPLE_JOIN] Handler game_finished: {netmaster_client.message_handlers.get('game_finished')}")
+                
+                async def async_join():
+                    print(f"[SIMPLE_JOIN] Conectando ao servidor...")
                     
-                    # IMPORTANTE: Não usar run_until_complete pois fecha o loop
-                    # Usar task e manter loop ativo para futuras operações
-                    task = loop.create_task(async_join())
+                    # Conectar se necessário
+                    if not netmaster_client.connected:
+                        success = await netmaster_client.connect()
+                        if not success:
+                            raise Exception("Falha na conexão")
                     
-                    # Executar sem fechar o loop
+                    print(f"[SIMPLE_JOIN] Conexão estabelecida")
+                    
+                    # Pequena pausa para garantir que tudo está pronto
+                    await asyncio.sleep(0.1)
+                    
+                    # Enviar join
+                    session_id = self.selected_session.get('id')
+                    print(f"[SIMPLE_JOIN] Enviando join para sessão {session_id}")
+                    await netmaster_client.join_session(session_id, name, color.lower())
+                    
+                    print(f"[SIMPLE_JOIN] Join enviado, aguardando resposta...")
+                    start_time = time.time()
+                    
+                    # Aguardar resposta (máximo 15 segundos)
+                    for i in range(15):
+                        print(f"[SIMPLE_JOIN] Aguardando... tentativa {i+1}/15, is_joining_session={self.is_joining_session}")
+                        
+                        if not self.is_joining_session:  # Success!
+                            print(f"[SIMPLE_JOIN] Join concluído com sucesso em {time.time() - start_time:.2f}s!")
+                            return
+                        await asyncio.sleep(1)
+                    
+                    # Timeout
+                    elapsed = time.time() - start_time
+                    print(f"[SIMPLE_JOIN] Timeout após {elapsed:.2f}s - join falhou")
+                    self.is_joining_session = False
+                    self.root.after(0, lambda: self.show_error_message("Timeout no join da sessão"))
+                
+                # CORREÇÃO CRÍTICA: Usar nova conexão WebSocket dedicada para join
+                # O problema é que a conexão existente está "ocupada" com outras operações
+                async def dedicated_join_connection():
+                    join_client = None
+                    connection_transferred = False  # Flag para controlar se a conexão foi transferida
                     try:
-                        loop.run_until_complete(task)
-                        print(f"🎯 [DEBUG] Join task concluída - mantendo loop ativo")
-                        # NÃO fechar o loop aqui - pode ser reutilizado
-                    except Exception as e:
-                        print(f"❌ [DEBUG] Erro na execução do join: {e}")
+                        print(f"[DEDICATED_JOIN] Criando nova conexão dedicada para join...")
+                        
+                        # Criar cliente limpo para join
+                        join_client = NetMasterClient()
+                        join_client.is_joining_session = True
+                        
+                        # Registrar handler específico para session_joined
+                        session_joined_received = False
+                        
+                        def on_dedicated_session_joined(data):
+                            nonlocal session_joined_received
+                            print(f"[DEDICATED_JOIN] *** SESSION_JOINED RECEBIDO! ***")
+                            print(f"[DEDICATED_JOIN] *** DADOS RECEBIDOS: {data} ***")
+                            
+                            # CRÍTICO: Definir player_id e session_id no join_client IMEDIATAMENTE
+                            player_id = data.get('player_id')
+                            session_data = data.get('session', {})
+                            session_id = session_data.get('id')
+                            player_info = data.get('player_info', {})
+                            player_name = player_info.get('name')
+                            
+                            print(f"[DEDICATED_JOIN] *** EXTRAINDO IDs DA MENSAGEM ***")
+                            print(f"[DEDICATED_JOIN] *** player_id: {player_id} ***")
+                            print(f"[DEDICATED_JOIN] *** session_id: {session_id} ***")
+                            print(f"[DEDICATED_JOIN] *** player_name: {player_name} ***")
+                            
+                            if player_id:
+                                join_client.player_id = player_id
+                                print(f"[DEDICATED_JOIN] *** join_client.player_id DEFINIDO: {join_client.player_id} ***")
+                            else:
+                                print(f"[DEDICATED_JOIN] *** ERROR: player_id é None! ***")
+                            
+                            if session_id:
+                                join_client.session_id = session_id
+                                print(f"[DEDICATED_JOIN] *** join_client.session_id DEFINIDO: {join_client.session_id} ***")
+                            else:
+                                print(f"[DEDICATED_JOIN] *** ERROR: session_id é None! ***")
+                            
+                            if player_name:
+                                join_client.player_name = player_name
+                                print(f"[DEDICATED_JOIN] *** join_client.player_name DEFINIDO: {join_client.player_name} ***")
+                            
+                            session_joined_received = True
+                            # Atualizar flags principais
+                            self.is_joining_session = False
+                            netmaster_client.is_joining_session = False
+                            # Processar com handler existente
+                            self.root.after(0, lambda: self.on_session_joined(data))
+                        
+                        def on_dedicated_test_connectivity(data):
+                            print(f"[DEDICATED_JOIN] *** TEST_CONNECTIVITY RECEBIDO! ***")
+                        
+                        def on_dedicated_game_started(data):
+                            print(f"[DEDICATED_JOIN] *** GAME_STARTED RECEBIDO! ***")
+                            # Processar com handler existente do sistema principal
+                            self.root.after(0, lambda: self.on_game_started(data))
+                        
+                        # CORREÇÃO: Usar set_message_handler (método correto da classe)
+                        join_client.set_message_handler('session_joined', on_dedicated_session_joined)
+                        join_client.set_message_handler('test_connectivity', on_dedicated_test_connectivity)
+                        join_client.set_message_handler('game_started', on_dedicated_game_started)
+                        
+                        # Conectar
+                        print(f"[DEDICATED_JOIN] Conectando...")
+                        success = await join_client.connect()
+                        if not success:
+                            raise Exception("Falha na conexão dedicada")
+                        
+                        print(f"[DEDICATED_JOIN] Conexão estabelecida, aguardando welcome...")
+                        await asyncio.sleep(0.5)  # Aguardar welcome
+                        
+                        # Enviar join
+                        session_id = self.selected_session.get('id')
+                        print(f"[DEDICATED_JOIN] Enviando join para sessão {session_id}")
+                        success = await join_client.join_session(session_id, name, color.lower())
+                        
+                        if success:
+                            print(f"[DEDICATED_JOIN] Join enviado, aguardando session_joined...")
+                            
+                            # Aguardar session_joined por até 10 segundos
+                            for i in range(100):  # 100 * 0.1s = 10s
+                                if session_joined_received:
+                                    print(f"[DEDICATED_JOIN] *** SUCESSO! session_joined recebido em {i*0.1:.1f}s ***")
+                                    break
+                                await asyncio.sleep(0.1)
+                            else:
+                                print(f"[DEDICATED_JOIN] TIMEOUT - session_joined não recebido em 10s")
+                                self.root.after(0, lambda: self.show_error_message("Timeout na conexão à sessão"))
+                        else:
+                            print(f"[DEDICATED_JOIN] Falha no envio do join")
+                            self.root.after(0, lambda: self.show_error_message("Falha no envio do join"))
+                        
+                        # Manter conexão ativa para mensagens futuras
+                        if session_joined_received:
+                            print(f"[DEDICATED_JOIN] Join sucesso! Transferindo controle para cliente principal...")
+                            
+                            # CORREÇÃO CRÍTICA: Transferir websocket e garantir heartbeat
+                            old_websocket = netmaster_client.websocket
+                            netmaster_client.websocket = join_client.websocket
+                            netmaster_client.connected = True
+                            
+                            print(f"[DEDICATED_JOIN] WebSocket transferido com sucesso!")
+                            
+                            # CORREÇÃO CRÍTICA: Iniciar tasks de reading/processing no main client
+                            try:
+                                loop = asyncio.get_event_loop()
+                                
+                                # Garantir que message listener está ativo
+                                if not hasattr(netmaster_client, '_message_listener_task') or netmaster_client._message_listener_task.done():
+                                    print(f"[DEDICATED_JOIN] Iniciando message listener no cliente principal...")
+                                    netmaster_client._message_listener_task = loop.create_task(netmaster_client.listen_for_messages())
+                                    print(f"[DEDICATED_JOIN] Message listener iniciado com sucesso!")
+                                else:
+                                    print(f"[DEDICATED_JOIN] Message listener já está ativo no cliente principal")
+                                
+                                # Garantir que heartbeat está ativo
+                                if not hasattr(netmaster_client, '_heartbeat_task') or netmaster_client._heartbeat_task.done():
+                                    print(f"[DEDICATED_JOIN] Reiniciando heartbeat no cliente principal...")
+                                    netmaster_client._heartbeat_task = loop.create_task(netmaster_client.start_heartbeat_loop())
+                                    print(f"[DEDICATED_JOIN] Heartbeat reiniciado com sucesso!")
+                                else:
+                                    print(f"[DEDICATED_JOIN] Heartbeat já está ativo no cliente principal")
+                                    
+                            except Exception as task_error:
+                                print(f"[DEDICATED_JOIN] Erro ao iniciar tasks: {task_error}")
+                            
+                            # CRÍTICO: Registrar handlers imediatamente após transfer para evitar perda de game_started
+                            print(f"[DEDICATED_JOIN] *** REGISTRANDO HANDLERS CRÍTICOS IMEDIATAMENTE ***")
+                            try:
+                                # Configurar referência do dashboard no cliente
+                                netmaster_client._dashboard_ref = self
+                                
+                                # CRÍTICO: Transferir player_id do join_client para main client
+                                if hasattr(join_client, 'player_id') and join_client.player_id:
+                                    print(f"[DEDICATED_JOIN] *** ANTES TRANSFER - join_client.player_id: {join_client.player_id} ***")
+                                    print(f"[DEDICATED_JOIN] *** ANTES TRANSFER - netmaster_client.player_id: {getattr(netmaster_client, 'player_id', 'NONE')} ***")
+                                    netmaster_client.player_id = join_client.player_id
+                                    print(f"[DEDICATED_JOIN] *** PLAYER_ID TRANSFERIDO: {netmaster_client.player_id} ***")
+                                    print(f"[DEDICATED_JOIN] *** VERIFICATION - netmaster_client.player_id: {netmaster_client.player_id} ***")
+                                else:
+                                    print(f"[DEDICATED_JOIN] *** WARNING: join_client não tem player_id válido! ***")
+                                    print(f"[DEDICATED_JOIN] *** join_client.player_id: {getattr(join_client, 'player_id', 'NONE')} ***")
+                                
+                                # CRÍTICO: Transferir session_id do join_client para main client
+                                if hasattr(join_client, 'session_id') and join_client.session_id:
+                                    print(f"[DEDICATED_JOIN] *** ANTES TRANSFER - join_client.session_id: {join_client.session_id} ***")
+                                    print(f"[DEDICATED_JOIN] *** ANTES TRANSFER - netmaster_client.session_id: {getattr(netmaster_client, 'session_id', 'NONE')} ***")
+                                    netmaster_client.session_id = join_client.session_id
+                                    print(f"[DEDICATED_JOIN] *** SESSION_ID TRANSFERIDO: {netmaster_client.session_id} ***")
+                                    print(f"[DEDICATED_JOIN] *** VERIFICATION - netmaster_client.session_id: {netmaster_client.session_id} ***")
+                                else:
+                                    print(f"[DEDICATED_JOIN] *** WARNING: join_client não tem session_id válido! ***")
+                                    print(f"[DEDICATED_JOIN] *** join_client.session_id: {getattr(join_client, 'session_id', 'NONE')} ***")
+                                
+                                # CRÍTICO: Marcar que IDs foram transferidos para evitar sobrescrita
+                                netmaster_client._ids_transferred_from_dedicated_join = True
+                                print(f"[DEDICATED_JOIN] *** FLAG DE TRANSFERÊNCIA DEFINIDA ***")
+                                
+                                # CRÍTICO: Transferir player_name também para debugging
+                                if hasattr(join_client, 'player_name') and join_client.player_name:
+                                    netmaster_client.player_name = join_client.player_name
+                                    print(f"[DEDICATED_JOIN] *** PLAYER_NAME TRANSFERIDO: {netmaster_client.player_name} ***")
+                                elif hasattr(self, 'join_player_name') and self.join_player_name:
+                                    netmaster_client.player_name = self.join_player_name
+                                    print(f"[DEDICATED_JOIN] *** PLAYER_NAME TRANSFERIDO DE join_player_name: {netmaster_client.player_name} ***")
+                                else:
+                                    print(f"[DEDICATED_JOIN] *** WARNING: Nenhum player_name disponível para transferir ***")
+                                
+                                # Registrar handlers essenciais IMEDIATAMENTE
+                                netmaster_client.set_message_handler('game_started', self.on_game_started)
+                                netmaster_client.set_message_handler('ALL_MESSAGES_DEBUG', self.on_any_message_debug)
+                                netmaster_client.set_message_handler('player_joined', self.on_player_joined)
+                                netmaster_client.set_message_handler('player_left', self.on_player_left)
+                                netmaster_client.set_message_handler('turn_changed', self.on_multiplayer_turn_changed)
+                                
+                                print(f"[DEDICATED_JOIN] *** HANDLERS CRÍTICOS REGISTRADOS COM SUCESSO! ***")
+                                print(f"[DEDICATED_JOIN] Handlers ativos: {list(netmaster_client.message_handlers.keys())}")
+                                
+                                # Definir flags necessárias para handlers funcionarem
+                                self.multiplayer_mode = True
+                                self.in_waiting_room = True
+                                
+                                print(f"[DEDICATED_JOIN] *** FLAGS CONFIGURADAS: multiplayer_mode=True, in_waiting_room=True ***")
+                                
+                            except Exception as handler_error:
+                                print(f"[DEDICATED_JOIN] Erro ao registrar handlers: {handler_error}")
+                            
+                            print(f"[DEDICATED_JOIN] Cliente principal agora usa conexão estabelecida pelo join dedicado")
+                            
+                            # Marcar que a conexão foi transferida
+                            connection_transferred = True
+                            
+                            # Manter ativo - os tasks do cliente principal continuam rodando normalmente
+                            while netmaster_client.connected and join_client.connected:
+                                await asyncio.sleep(0.5)
+                        
+                    except Exception as error:
+                        error_msg = str(error)
+                        print(f"[DEDICATED_JOIN] Erro: {error_msg}")
+                        self.root.after(0, lambda: self.show_error_message(f"Erro na conexão: {error_msg}"))
+                    finally:
+                        # Só desconectar se a conexão NÃO foi transferida com sucesso
+                        if not connection_transferred and join_client and join_client.connected:
+                            try:
+                                print(f"[DEDICATED_JOIN] Desconectando cliente dedicado (sem transferência)...")
+                                await join_client.disconnect()
+                            except:
+                                pass
+                        elif connection_transferred:
+                            print(f"[DEDICATED_JOIN] Conexão transferida com sucesso - mantendo ativa")
+                
+                # Executar em thread daemon
+                def run_dedicated_join():
+                    print(f"[DEDICATED_JOIN] *** THREAD DEDICATED JOIN INICIADA ***")
+                    try:
+                        loop = asyncio.new_event_loop()
+                        asyncio.set_event_loop(loop)
+                        print(f"[DEDICATED_JOIN] *** LOOP CRIADO, EXECUTANDO dedicated_join_connection() ***")
+                        loop.run_until_complete(dedicated_join_connection())
+                        print(f"[DEDICATED_JOIN] *** dedicated_join_connection() COMPLETADO ***")
+                    except Exception as error:
+                        error_msg = str(error)
+                        print(f"[DEDICATED_JOIN] Erro no loop: {error_msg}")
+                    finally:
                         loop.close()
-                        raise
+                        print(f"[DEDICATED_JOIN] *** THREAD DEDICATED JOIN FINALIZADA ***")
+                
+                print(f"[SIMPLE_JOIN] *** INICIANDO THREAD DEDICATED JOIN ***")
+                threading.Thread(target=run_dedicated_join, daemon=True).start()
+                print(f"[SIMPLE_JOIN] *** THREAD DEDICATED JOIN INICIADA - CONTINUANDO ***")
                     
             except Exception as e:
-                print(f"❌ Erro ao juntar-se à sessão: {e}")
-                self.is_joining_session = False  # Reset flag on error
-                self.root.after(0, lambda: self.show_error_message(f"Erro ao juntar-se à sessão: {e}"))
+                print(f"[SIMPLE_JOIN] Erro: {e}")
+                self.is_joining_session = False
+                self.root.after(0, lambda: self.show_error_message(f"Erro no join: {e}"))
         
-        threading.Thread(target=join_session, daemon=True).start()
+        threading.Thread(target=simple_join, daemon=True).start()
+
+    def simple_sessions_update(self, data):
+        """Handler SIMPLES para sessions_list_update COM DETECÇÃO DE GAME_STARTED"""
+        print(f"[SIMPLE_UPDATE] Recebida sessions_list_update")
+        
+        # *** CRITICAL FIX: DETECTAR GAME_STARTED VIA SESSIONS_LIST_UPDATE ***
+        if (getattr(self, 'in_waiting_room', False) and 
+            getattr(self, 'multiplayer_mode', False) and
+            hasattr(self, '_current_session_id')):
+            
+            print(f"[GAME_STARTED_DETECTION] Verificando se nossa sessão foi iniciada...")
+            print(f"[GAME_STARTED_DETECTION] Nossa sessão ID: {getattr(self, '_current_session_id', 'NONE')}")
+            
+            sessions = data.get('sessions', [])
+            print(f"[GAME_STARTED_DETECTION] Sessões recebidas: {len(sessions)}")
+            
+            our_session_found = False
+            for session in sessions:
+                session_id = session.get('id')
+                session_state = session.get('state', 'unknown')
+                print(f"[GAME_STARTED_DETECTION] Sessão {session_id}: estado={session_state}")
+                
+                if session_id == self._current_session_id:
+                    our_session_found = True
+                    print(f"[GAME_STARTED_DETECTION] NOSSA SESSÃO ENCONTRADA: {session_id}, estado: {session_state}")
+                    
+                    if session_state == 'playing':
+                        print(f"[GAME_STARTED_DETECTION] *** SESSÃO INICIADA! SIMULANDO GAME_STARTED ***")
+                        
+                        # Criar mensagem game_started sintética
+                        synthetic_game_started = {
+                            'type': 'game_started',
+                            'session': session,
+                            'message': 'O jogo começou! (detectado via sessions_list_update)'
+                        }
+                        
+                        print(f"[GAME_STARTED_DETECTION] Executando on_game_started com dados sintéticos...")
+                        self.root.after(0, lambda: self.on_game_started(synthetic_game_started))
+                        return  # Importante: retornar aqui para não processar o resto
+            
+            if not our_session_found:
+                print(f"[GAME_STARTED_DETECTION] NOSSA SESSÃO NÃO ENCONTRADA - pode ter sido iniciada e removida da lista")
+                # Se nossa sessão desapareceu da lista, provavelmente foi iniciada
+                if len(sessions) == 0:
+                    print(f"[GAME_STARTED_DETECTION] *** LISTA VAZIA - SESSÃO PROVAVELMENTE INICIADA ***")
+                    
+                    # Criar mensagem game_started sintética básica
+                    synthetic_game_started = {
+                        'type': 'game_started',
+                        'session': {
+                            'id': self._current_session_id,
+                            'state': 'playing',
+                            'current_player_id': getattr(self, '_host_player_id', None),
+                            'current_turn_index': 0,
+                            'player_order': [],
+                            'players': {}
+                        },
+                        'message': 'O jogo começou! (detectado via desaparecimento da sessão)'
+                    }
+                    
+                    print(f"[GAME_STARTED_DETECTION] Executando on_game_started com dados sintéticos básicos...")
+                    self.root.after(0, lambda: self.on_game_started(synthetic_game_started))
+                    return
+        
+        # Se estamos fazendo join, verificar se fomos adicionados
+        if hasattr(self, 'is_joining_session') and self.is_joining_session:
+            sessions = data.get('sessions', [])
+            for session in sessions:
+                if session['id'] == self.selected_session.get('id'):
+                    players = session.get('players', {})
+                    for player_id, player_info in players.items():
+                        if player_info.get('name') == self.join_player_name:
+                            print(f"[SIMPLE_UPDATE] Join detectado via sessions_list_update!")
+                            self.is_joining_session = False
+                            
+                            # Salvar ID da sessão para detecção de game_started
+                            self._current_session_id = session['id']
+                            print(f"[GAME_STARTED_DETECTION] Sessão ID salva: {self._current_session_id}")
+                            
+                            # Criar resposta sintética
+                            join_data = {
+                                'type': 'session_joined',
+                                'session': session,
+                                'player_id': player_id,
+                                'player_info': player_info
+                            }
+                            self.root.after(0, lambda: self.on_session_joined(join_data))
+                            return
+        
+        # Atualizar lista normal
+        self.sessions_data = data.get('sessions', [])
+        if hasattr(self, 'current_page') and self.current_page == "multiplayer_menu":
+            self.root.after(0, self.refresh_multiplayer_menu)
 
     def on_any_message_debug(self, data):
         """Handler debug para capturar todas as mensagens durante join"""
         msg_type = data.get('type', 'unknown')
-        print(f"🔍 [ALL_MESSAGES_DEBUG] *** HANDLER CHAMADO! *** Tipo: {msg_type}")
-        print(f"🔍 [ALL_MESSAGES_DEBUG] is_joining_session: {getattr(self, 'is_joining_session', False)}")
-        print(f"🔍 [ALL_MESSAGES_DEBUG] Data: {data}")
+        print(f"[ALL_MESSAGES_DEBUG] *** HANDLER UNIVERSAL CHAMADO! *** Tipo: {msg_type}")
+        print(f"[ALL_MESSAGES_DEBUG] is_joining_session: {getattr(self, 'is_joining_session', False)}")
+        print(f"[ALL_MESSAGES_DEBUG] in_waiting_room: {getattr(self, 'in_waiting_room', False)}")
+        print(f"[ALL_MESSAGES_DEBUG] multiplayer_mode: {getattr(self, 'multiplayer_mode', False)}")
+        print(f"[ALL_MESSAGES_DEBUG] Timestamp: {time.time()}")
+        print(f"[ALL_MESSAGES_DEBUG] Data: {data}")
+        
+        # CRITICAL: Capturar mensagens game_started SEMPRE
+        if msg_type == 'game_started':
+            print(f"[GAME_STARTED_DEBUG] *** GAME_STARTED DETECTADO NO HANDLER UNIVERSAL! ***")
+            print(f"[GAME_STARTED_DEBUG] *** TIMESTAMP: {time.time()} ***")
+            print(f"[GAME_STARTED_DEBUG] *** PLAYER ID: {getattr(netmaster_client, 'player_id', 'UNDEFINED')} ***")
+            print(f"[GAME_STARTED_DEBUG] *** SESSION ID: {getattr(netmaster_client, 'session_id', 'UNDEFINED')} ***")
+            print(f"[GAME_STARTED_DEBUG] *** IN_WAITING_ROOM: {getattr(self, 'in_waiting_room', 'UNDEFINED')} ***")
+            print(f"[GAME_STARTED_DEBUG] *** MULTIPLAYER_MODE: {getattr(self, 'multiplayer_mode', 'UNDEFINED')} ***")
+            print(f"[GAME_STARTED_DEBUG] Dados do game_started: {data}")
+            print(f"[GAME_STARTED_DEBUG] Forçando execução do handler on_game_started...")
+            # Chamar handler específico também pelo universal como backup
+            if hasattr(self, 'on_game_started'):
+                print(f"[GAME_STARTED_DEBUG] Chamando self.on_game_started diretamente...")
+                self.on_game_started(data)
+                print(f"[GAME_STARTED_DEBUG] *** on_game_started EXECUTADO COM SUCESSO! ***")
+            else:
+                print(f"[GAME_STARTED_DEBUG] ERROR: on_game_started não existe!")
+        
+        # SUPER CRITICAL: Log de TODAS as mensagens depois do join
+        if hasattr(self, 'in_waiting_room') and self.in_waiting_room:
+            print(f"[ALL_MESSAGES_DEBUG] *** ESTAMOS NA WAITING ROOM - CAPTURANDO TODAS AS MENSAGENS ***")
+            print(f"[ALL_MESSAGES_DEBUG] Tipo da mensagem: {msg_type}")
+            print(f"[ALL_MESSAGES_DEBUG] Timestamp: {time.time()}")
+            if msg_type not in ['sessions_list_update', 'heartbeat']:
+                print(f"[ALL_MESSAGES_DEBUG] *** MENSAGEM IMPORTANTE RECEBIDA NA WAITING ROOM: {msg_type} ***")
+        
+        # CRÍTICO: Processar sessions_list SEMPRE, não só durante join
+        if msg_type in ['sessions_list', 'sessions_list_update']:
+            print(f"[ALL_MESSAGES_DEBUG] *** PROCESSANDO {msg_type} NO HANDLER GLOBAL ***")
+            self.handle_sessions_list_global(data)
         
         if hasattr(self, 'is_joining_session') and self.is_joining_session:
-            print(f"🔍 [JOIN_DEBUG] *** MENSAGEM RECEBIDA DURANTE JOIN: {msg_type} ***")
-            print(f"🔍 [JOIN_DEBUG] Data completa: {data}")
+            print(f"[SEARCH] [JOIN_DEBUG] *** MENSAGEM RECEBIDA DURANTE JOIN: {msg_type} ***")
+            print(f"[SEARCH] [JOIN_DEBUG] Data completa: {data}")
             
             # Verificar se é uma mensagem de join de qualquer tipo
             if any(keyword in msg_type.lower() for keyword in ['join', 'session', 'player']):
-                print(f"🔍 [JOIN_DEBUG] *** POSSÍVEL MENSAGEM DE JOIN: {msg_type} ***")
+                print(f"[SEARCH] [JOIN_DEBUG] *** POSSÍVEL MENSAGEM DE JOIN: {msg_type} ***")
                 
                 # Se contém informação de sessão e player, pode ser um join
                 if 'session' in data and ('player' in data or 'player_info' in data or 'players' in data):
-                    print(f"🔍 [JOIN_DEBUG] *** DETECTADA MENSAGEM COM SESSÃO E PLAYER - FORÇANDO JOIN! ***")
-                    print(f"🔍 [JOIN_DEBUG] Chamando on_session_joined com esta mensagem...")
+                    print(f"[SEARCH] [JOIN_DEBUG] *** DETECTADA MENSAGEM COM SESSÃO E PLAYER - FORÇANDO JOIN! ***")
+                    print(f"[SEARCH] [JOIN_DEBUG] Chamando on_session_joined com esta mensagem...")
                     self.on_session_joined(data)
                 elif msg_type == 'sessions_list_update':
-                    print(f"🔍 [JOIN_DEBUG] Recebida sessions_list_update - verificando se foi adicionado...")
+                    print(f"[SEARCH] [JOIN_DEBUG] Recebida sessions_list_update - verificando se foi adicionado...")
                     # Verificar se o meu nome aparece na lista de jogadores
                     sessions = data.get('sessions', [])
                     for session in sessions:
                         players = session.get('players', {})
                         for player_id, player_data in players.items():
                             if player_data.get('name') == self.join_player_name:
-                                print(f"🔍 [JOIN_DEBUG] *** ENCONTRADO MEU NOME NA SESSIONS_LIST_UPDATE! ***")
-                                print(f"🔍 [JOIN_DEBUG] Player ID encontrado: {player_id}")
-                                print(f"🔍 [JOIN_DEBUG] Player data: {player_data}")
+                                print(f"[SEARCH] [JOIN_DEBUG] *** ENCONTRADO MEU NOME NA SESSIONS_LIST_UPDATE! ***")
+                                print(f"[SEARCH] [JOIN_DEBUG] Player ID encontrado: {player_id}")
+                                print(f"[SEARCH] [JOIN_DEBUG] Player data: {player_data}")
                                 # Construir resposta de join sintética
                                 synthetic_join = {
                                     'type': 'session_joined',
@@ -2545,50 +3955,196 @@ class IntegratedMenuSystem:
                                     'player_id': player_id,
                                     'player_info': player_data
                                 }
-                                print(f"🔍 [JOIN_DEBUG] Criando join sintético: {synthetic_join}")
+                                print(f"[SEARCH] [JOIN_DEBUG] Criando join sintético: {synthetic_join}")
                                 self.on_session_joined(synthetic_join)
                                 return
             
             # Forçar verificação no handler específico se for sessions_list_update
             if msg_type == 'sessions_list_update':
-                print(f"🔍 [JOIN_DEBUG] Repassando sessions_list_update para handler específico...")
+                print(f"[SEARCH] [JOIN_DEBUG] Repassando sessions_list_update para handler específico...")
                 self.on_global_sessions_list_update(data)
         else:
-            print(f"🔍 [ALL_MESSAGES_DEBUG] Não estou em processo de join, ignorando mensagem {msg_type}")
+            print(f"[ALL_MESSAGES_DEBUG] Não estou em processo de join, ignorando mensagem {msg_type}")
+
+    def handle_sessions_list_global(self, data):
+        """Handler global SIMPLIFICADO para sessions_list"""
+        print(f"[SESSIONS] *** RECEBIDA LISTA DE SESSÕES ***")
+        
+        try:
+            sessions_list = data.get('sessions', [])
+            print(f"[SESSIONS] {len(sessions_list)} sessões disponíveis")
+            
+            # Atualizar dados globais
+            self.current_sessions = sessions_list
+            self.sessions_data = sessions_list
+            
+            # Se estamos na página de sessões, atualizar interface
+            if hasattr(self, 'sessions_frame_ref') and self.sessions_frame_ref:
+                try:
+                    if self.sessions_frame_ref.winfo_exists():
+                        print(f"[SESSIONS] Atualizando display de sessões...")
+                        self.update_sessions_display_simple(sessions_list)
+                except:
+                    pass
+                    
+        except Exception as e:
+            print(f"[SESSIONS] Erro: {e}")
+    
+    def update_sessions_display_simple(self, sessions_list):
+        """Atualiza display de sessões de forma SIMPLES"""
+        def update_ui():
+            try:
+                if not self.sessions_frame_ref.winfo_exists():
+                    return
+                    
+                # Limpar frame
+                for widget in self.sessions_frame_ref.winfo_children():
+                    widget.destroy()
+                
+                if not sessions_list:
+                    tk.Label(self.sessions_frame_ref, text="No sessions available", 
+                            font=("Helvetica", 14), bg="black", fg="#999999").pack(pady=20)
+                else:
+                    for session in sessions_list:
+                        session_id = session.get('id', 'Unknown')
+                        host_name = 'Unknown'
+                        players = session.get('players', {})
+                        for player_data in players.values():
+                            host_name = player_data.get('name', 'Unknown')
+                            break
+                        
+                        session_text = f"Session {session_id} - Host: {host_name}"
+                        
+                        session_btn = tk.Button(self.sessions_frame_ref, text=session_text,
+                                              font=("Helvetica", 12), bg="#4CAF50", fg="white",
+                                              command=lambda s=session: self.join_session_simple(s))
+                        session_btn.pack(pady=5, padx=20, fill="x")
+                        
+            except Exception as e:
+                print(f"[SESSIONS] Erro ao atualizar UI: {e}")
+        
+        # Executar na UI thread
+        self.root.after(0, update_ui)
+    
+    def join_session_simple(self, session):
+        """Join a session de forma SIMPLES"""
+        print(f"[JOIN] Tentando entrar na sessão: {session.get('id')}")
+        
+        try:
+            # Usar método existente de join
+            if hasattr(self, 'join_selected_session'):
+                self.join_selected_session(self.player_name, session)
+            else:
+                print(f"[JOIN] Método join_selected_session não encontrado")
+        except Exception as e:
+            print(f"[JOIN] Erro ao entrar na sessão: {e}")
 
     def on_session_joined(self, data):
         """Callback quando se junta à sessão com sucesso"""
-        print(f"🎯 [DEBUG] on_session_joined chamado com data: {data}")
+        print(f"[TARGET] [DEBUG] on_session_joined chamado com data: {data}")
         
-        # Reset joining flag e parar animação
-        self.is_joining_session = False
-        self.joining_animation_active = False
-        
-        def update_ui():
-            session_data = data.get('session', {})
-            player_info = data.get('player_info', {})
+        try:
+            # Reset joining flag e parar animação
+            print(f"[TARGET] [DEBUG] Antes: is_joining_session = {self.is_joining_session}")
+            self.is_joining_session = False
+            print(f"[TARGET] [DEBUG] Depois: is_joining_session = {self.is_joining_session}")
             
-            netmaster_client.session_id = session_data.get('id')
-            netmaster_client.player_id = data.get('player_id')
+            self.joining_animation_active = False
+            print(f"[TARGET] [DEBUG] joining_animation_active definido como False")
             
-            # Armazenar informações do jogador no cliente
-            netmaster_client.player_color = player_info.get('color', getattr(self, 'selected_color', 'red'))
-            netmaster_client.player_name = player_info.get('name', getattr(self, 'join_player_name', 'Player'))
+            def update_ui():
+                try:
+                    print(f"[TARGET] [DEBUG] Iniciando update_ui")
+                    session_data = data.get('session', {})
+                    player_info = data.get('player_info', {})
+                    
+                    # NOTA: NÃO sobrescrever IDs que foram transferidos do dedicated join client
+                    flag_exists = hasattr(netmaster_client, '_ids_transferred_from_dedicated_join')
+                    print(f"[SESSION_JOINED] *** VERIFICANDO FLAG _ids_transferred_from_dedicated_join: {flag_exists} ***")
+                    print(f"[SESSION_JOINED] *** CURRENT netmaster_client.player_id: {getattr(netmaster_client, 'player_id', 'NONE')} ***")
+                    print(f"[SESSION_JOINED] *** CURRENT netmaster_client.session_id: {getattr(netmaster_client, 'session_id', 'NONE')} ***")
+                    print(f"[SESSION_JOINED] *** MESSAGE player_id: {data.get('player_id')} ***")
+                    print(f"[SESSION_JOINED] *** MESSAGE session_id: {session_data.get('id')} ***")
+                    
+                    if not flag_exists:
+                        print(f"[SESSION_JOINED] *** DEFININDO IDs A PARTIR DA MENSAGEM session_joined ***")
+                        netmaster_client.session_id = session_data.get('id')
+                        netmaster_client.player_id = data.get('player_id')
+                        print(f"[SESSION_JOINED] Session ID definido: {netmaster_client.session_id}")
+                        print(f"[SESSION_JOINED] Player ID definido: {netmaster_client.player_id}")
+                    else:
+                        print(f"[SESSION_JOINED] *** IDs JÁ TRANSFERIDOS DO DEDICATED JOIN - NÃO SOBRESCREVER ***")
+                        print(f"[SESSION_JOINED] Session ID mantido: {netmaster_client.session_id}")
+                        print(f"[SESSION_JOINED] Player ID mantido: {netmaster_client.player_id}")
+                        print(f"[SESSION_JOINED] Session ID da mensagem (ignorado): {session_data.get('id')}")
+                        print(f"[SESSION_JOINED] Player ID da mensagem (ignorado): {data.get('player_id')}")
+                    
+                    # *** EMERGENCY FIX: SEMPRE garantir que temos player_id válido ***
+                    message_player_id = data.get('player_id')
+                    print(f"[SESSION_JOINED] *** EMERGENCY FIX DEBUG ***")
+                    print(f"[SESSION_JOINED] *** message_player_id: {message_player_id} ***")
+                    print(f"[SESSION_JOINED] *** netmaster_client.player_id: {getattr(netmaster_client, 'player_id', 'NONE')} ***")
+                    print(f"[SESSION_JOINED] *** Condição 1 - message_player_id existe: {bool(message_player_id)} ***")
+                    print(f"[SESSION_JOINED] *** Condição 2 - não temos player_id: {not netmaster_client.player_id} ***")
+                    print(f"[SESSION_JOINED] *** Condição 3 - player_id diferente: {netmaster_client.player_id != message_player_id if message_player_id else False} ***")
+                    
+                    if message_player_id:
+                        print(f"[SESSION_JOINED] *** EMERGENCY FIX ATIVO: FORÇANDO player_id correto ***")
+                        print(f"[SESSION_JOINED] *** ANTES: {getattr(netmaster_client, 'player_id', 'NONE')} ***")
+                        print(f"[SESSION_JOINED] *** FORÇANDO PARA: {message_player_id} ***")
+                        netmaster_client.player_id = message_player_id
+                        print(f"[SESSION_JOINED] *** DEPOIS: {netmaster_client.player_id} ***")
+                        print(f"[SESSION_JOINED] *** EMERGENCY FIX APLICADO COM SUCESSO ***")
+                    else:
+                        print(f"[SESSION_JOINED] *** ERROR: message_player_id é None/vazio! ***")
+                    
+                    # Set player name for debugging
+                    message_player_name = player_info.get('name')
+                    if message_player_name:
+                        netmaster_client.player_name = message_player_name
+                        print(f"[SESSION_JOINED] *** PLAYER_NAME DEFINIDO: {netmaster_client.player_name} ***")
+                    
+                    # *** CRITICAL: Salvar ID da sessão para detecção de game_started ***
+                    self._current_session_id = session_data.get('id')
+                    print(f"[GAME_STARTED_DETECTION] Session ID salva no join: {self._current_session_id}")
+                    
+                    # CRITICAL: Definir modo multiplayer para o joinee
+                    self.multiplayer_mode = True
+                    print(f"[MULTIPLAYER_FIX] *** MULTIPLAYER_MODE DEFINIDO COMO TRUE PARA JOINEE ***")
+                    
+                    # Armazenar informações do jogador no cliente
+                    netmaster_client.player_color = player_info.get('color', getattr(self, 'selected_color', 'red'))
+                    netmaster_client.player_name = player_info.get('name', getattr(self, 'join_player_name', 'Player'))
+                    
+                    print(f"[TARGET] Juntou-se à sessão: {netmaster_client.session_id}")
+                    print(f"[PLAYER] Player ID: {netmaster_client.player_id}")
+                    print(f"[STYLE] Player Color: {netmaster_client.player_color}")
+                    print(f"[NOTE] Player Name: {netmaster_client.player_name}")
+                    print(f"[DATA] Session data: {session_data}")
+                    print(f"[MULTIPLAYER_FIX] multiplayer_mode agora é: {self.multiplayer_mode}")
+                    
+                    # Mostrar mensagem de sucesso primeiro, depois transição para waiting room
+                    self.show_join_success_message(session_data)
+                    print(f"[TARGET] [DEBUG] update_ui concluído com sucesso")
+                except Exception as ui_error:
+                    print(f"[TARGET] [ERROR] Erro em update_ui: {ui_error}")
+                    import traceback
+                    print(f"[TARGET] [ERROR] Traceback: {traceback.format_exc()}")
             
-            print(f"🎯 Juntou-se à sessão: {netmaster_client.session_id}")
-            print(f"👤 Player ID: {netmaster_client.player_id}")
-            print(f"🎨 Player Color: {netmaster_client.player_color}")
-            print(f"📝 Player Name: {netmaster_client.player_name}")
-            print(f"📊 Session data: {session_data}")
+            print(f"[TARGET] [DEBUG] Agendando update_ui")
+            self.root.after(0, update_ui)
+            print(f"[TARGET] [DEBUG] on_session_joined concluído com sucesso")
             
-            # Mostrar mensagem de sucesso primeiro, depois transição para waiting room
-            self.show_join_success_message(session_data)
-        
-        self.root.after(0, update_ui)
+        except Exception as handler_error:
+            print(f"[TARGET] [ERROR] Erro em on_session_joined: {handler_error}")
+            import traceback
+            print(f"[TARGET] [ERROR] Traceback: {traceback.format_exc()}")
+            # Mesmo com erro, marcar como não joining para evitar timeout infinito
+            self.is_joining_session = False
     
     def show_join_success_message(self, session_data):
         """Mostrar mensagem de sucesso ao juntar-se à sessão"""
-        print("🎯 [DEBUG] Mostrando mensagem de sucesso de join")
+        print("[TARGET] [DEBUG] Mostrando mensagem de sucesso de join")
         
         # Limpar root
         for widget in self.root.winfo_children():
@@ -2611,21 +4167,67 @@ class IntegratedMenuSystem:
         main_frame.place(relx=0.5, rely=0.5, anchor="center")
         
         # Mensagem de sucesso
-        success_text = tk.Label(main_frame, text="Joined Host's session successfully!", 
+        # Obter nome do host
+        host_player_id = session_data.get('host_player_id')
+        host_name = "Host"  # fallback
+        if host_player_id and host_player_id in session_data.get('players', {}):
+            host_name = session_data['players'][host_player_id].get('name', 'Host')
+        
+        success_text = tk.Label(main_frame, text=f"Joined {host_name}'s session \nsuccessfully!", 
                                font=("Helvetica", 18, "bold"), bg="black", fg="#4CAF50")
         success_text.pack(pady=20)
         
         # Aguardar 2 segundos e depois mostrar waiting room
         self.root.after(2000, lambda: self.show_session_waiting_room(session_data))
     
+    def start_waiting_room_timeout_checker(self):
+        """Inicia verificação periódica na waiting room para capturar mensagens perdidas"""
+        print(f"[TIMEOUT_CHECKER] *** INICIANDO TIMEOUT CHECKER ***")
+        self.waiting_room_timeout_active = True
+        self.check_waiting_room_timeout()
+    
+    def check_waiting_room_timeout(self):
+        """Verifica se há timeout na waiting room e força verificação de estado"""
+        if not hasattr(self, 'waiting_room_timeout_active') or not self.waiting_room_timeout_active:
+            print(f"[TIMEOUT_CHECKER] Timeout checker desativado, parando")
+            return
+            
+        if hasattr(self, 'in_waiting_room') and self.in_waiting_room:
+            print(f"[TIMEOUT_CHECKER] *** AINDA NA WAITING ROOM - VERIFICAÇÃO ATIVA ***")
+            print(f"[TIMEOUT_CHECKER] Timestamp: {time.time()}")
+            print(f"[TIMEOUT_CHECKER] is_session_host: {getattr(self, 'is_session_host', False)}")
+            print(f"[TIMEOUT_CHECKER] multiplayer_mode: {getattr(self, 'multiplayer_mode', False)}")
+            print(f"[TIMEOUT_CHECKER] countdown_active: {getattr(self, 'countdown_active', False)}")
+            
+            # CRITICAL: Verificar se há handlers registrados
+            print(f"[TIMEOUT_CHECKER] Handlers registrados:")
+            if hasattr(netmaster_client, 'message_handlers'):
+                for handler_name in netmaster_client.message_handlers:
+                    print(f"[TIMEOUT_CHECKER]   - {handler_name}")
+            
+            # Solicitar atualização de sessões como backup
+            if hasattr(self, 'client_socket') and self.client_socket:
+                try:
+                    print(f"[TIMEOUT_CHECKER] Solicitando atualização de sessões...")
+                    self.client_socket.emit('get_sessions_list')
+                except Exception as e:
+                    print(f"[TIMEOUT_CHECKER] Erro ao solicitar sessões: {e}")
+            
+            # Reagendar para próxima verificação (a cada 3 segundos)
+            self.root.after(3000, self.check_waiting_room_timeout)
+        else:
+            print(f"[TIMEOUT_CHECKER] Não na waiting room, parando verificações")
+            self.waiting_room_timeout_active = False
+
     def on_join_error(self, data):
         """Callback para erro ao juntar-se à sessão"""
         # Reset joining flag e parar animação
         self.is_joining_session = False
         self.joining_animation_active = False
+        self.join_error_occurred = True  # Flag específica para indicar erro
         
         error_msg = data.get('message', 'Erro ao juntar-se à sessão')
-        print(f"❌ Erro join session: {error_msg}")
+        print(f"[ERROR] Erro join session: {error_msg}")
         self.root.after(0, lambda: self.show_error_message(error_msg))
 
     def show_error_message(self, message):
@@ -2649,9 +4251,16 @@ class IntegratedMenuSystem:
         error_frame = tk.Frame(self.root, bg="black")
         error_frame.place(relx=0.5, rely=0.5, anchor="center")
         
-        tk.Label(error_frame, text="Error", font=("Helvetica", 20, "bold"), 
+        tk.Label(error_frame, text="Connection Error", font=("Helvetica", 20, "bold"), 
                 bg="black", fg="#f44336").pack(pady=10)
-        tk.Label(error_frame, text=message, font=("Helvetica", 14), 
+        
+        # Melhorar mensagem dependendo do tipo de erro
+        if "não encontrada" in message.lower():
+            display_msg = "Session not found!\n\nThe session may have been closed or expired.\nPlease try joining a different session."
+        else:
+            display_msg = message
+            
+        tk.Label(error_frame, text=display_msg, font=("Helvetica", 14), 
                 bg="black", fg="white", wraplength=400, justify="center").pack(pady=10)
         
         # Botão voltar
@@ -2689,7 +4298,7 @@ class IntegratedMenuSystem:
         progress_frame.pack(pady=10)
         
         for i in range(8):
-            bar = tk.Label(progress_frame, text="▢", font=("Helvetica", 14), bg="black", fg="gray")
+            bar = tk.Label(progress_frame, text="□", font=("Helvetica", 14), bg="black", fg="gray")
             bar.pack(side=tk.LEFT, padx=2)
             self.progress_bars_connection.append(bar)
         
@@ -2738,8 +4347,8 @@ class IntegratedMenuSystem:
                 return
                 
             delay = i * 100
-            self.root.after(delay, lambda b=bar: self._safe_configure_bar(b, "#4CAF50", "▣") if getattr(self, 'loading_animation_active', False) else None)
-            self.root.after(delay + 800, lambda b=bar: self._safe_configure_bar(b, "gray", "▢") if getattr(self, 'loading_animation_active', False) else None)
+            self.root.after(delay, lambda b=bar: self._safe_configure_bar(b, "#4CAF50", "■") if getattr(self, 'loading_animation_active', False) else None)
+            self.root.after(delay + 800, lambda b=bar: self._safe_configure_bar(b, "gray", "□") if getattr(self, 'loading_animation_active', False) else None)
         
         # Repetir animação apenas se ainda está ativa
         if getattr(self, 'loading_animation_active', False):
@@ -2760,33 +4369,47 @@ class IntegratedMenuSystem:
             # Verificar se websockets está disponível
             if websockets is None:
                 error_msg = "Websockets não disponível. \nFuncionalidade multiplayer desabilitada."
-                print(f"❌ {error_msg}")
+                print(f"[ERROR] {error_msg}")
                 if hasattr(self, 'connection_status_label'):
                     self.root.after(0, lambda: self.connection_status_label.configure(
                         text=error_msg, fg="red"))
                 return
             
             # Executar conexão assíncrona e manter o loop ativo
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
             
-            async def connect_and_maintain():
-                success = await netmaster_client.connect()
-                if success:
-                    print("✅ Conectado ao servidor NetMaster")
-                    # Manter o loop ativo para receber mensagens
-                    try:
-                        while netmaster_client.connected:
-                            await asyncio.sleep(1)  # Manter conexão ativa
-                    except Exception as e:
-                        print(f"❌ Erro na manutenção da conexão: {e}")
-                else:
-                    print("❌ Falha na conexão")
+            # Executar conexão assíncrona corretamente
+            def run_connection():
+                try:
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    
+                    async def connect_and_maintain():
+                        success = await netmaster_client.connect()
+                        if success:
+                            print("✓ Conectado ao servidor NetMaster")
+                            # CRÍTICO: Aguardar welcome message primeiro
+                            await asyncio.sleep(0.5)
+                            
+                            # Manter o loop ativo para receber mensagens
+                            try:
+                                while netmaster_client.connected:
+                                    await asyncio.sleep(0.1)  # Verificação mais frequente
+                            except Exception as e:
+                                print(f"[ERROR] Erro na manutenção da conexão: {e}")
+                        else:
+                            print("[ERROR] Falha na conexão")
+                    
+                    # CORREÇÃO CRÍTICA: Executar sem fechar o loop
+                    loop.run_until_complete(connect_and_maintain())
+                    # REMOVIDO: loop.close() - deixar loop ativo para receber mensagens
+                except Exception as e:
+                    print(f"[ERROR] Erro no loop de conexão: {e}")
             
-            loop.run_until_complete(connect_and_maintain())
+            # Executar em thread daemon para não bloquear UI
+            threading.Thread(target=run_connection, daemon=True).start()
                 
         except Exception as e:
-            print(f"❌ Erro na conexão: {e}")
+            print(f"[ERROR] Erro na conexão: {e}")
             if hasattr(self, 'connection_status_label'):
                 self.root.after(0, lambda: self.connection_status_label.configure(
                     text=f"Erro de conexão: {str(e)}", fg="red"))
@@ -2812,26 +4435,35 @@ class IntegratedMenuSystem:
     
     def on_server_welcome(self, data):
         """Callback quando servidor envia boas-vindas"""
-        print(f"🎮 Servidor: {data}")
+        print(f"Servidor: {data}")
     
     def on_session_created(self, data):
         """Callback quando sessão é criada com sucesso"""
         def update_ui():
             session_data = data.get('session', {})
+            # NOTA: Para criação de sessão (host), sempre definir IDs normalmente
             netmaster_client.session_id = session_data.get('id')
             netmaster_client.player_id = data.get('player_id')
+            print(f"[SESSION_CREATED] Session ID definido (Host): {netmaster_client.session_id}")
+            print(f"[SESSION_CREATED] Player ID definido (Host): {netmaster_client.player_id}")
             
-            print(f"🎯 Sessão criada: {netmaster_client.session_id}")
-            print(f"👤 Player ID: {netmaster_client.player_id}")
-            print(f"📊 Session data: {session_data}")
+            # *** CRITICAL FIX: DEFINIR MULTIPLAYER_MODE PARA HOST ***
+            self.multiplayer_mode = True
+            print(f"[SESSION_CREATED] *** MULTIPLAYER_MODE DEFINIDO COMO TRUE PARA HOST ***")
+            print(f"[SESSION_CREATED] *** VERIFICAÇÃO: self.multiplayer_mode = {self.multiplayer_mode} ***")
+            print(f"[SESSION_CREATED] *** VERIFICAÇÃO: hasattr = {hasattr(self, 'multiplayer_mode')} ***")
             
-            # Configurar handlers para atualizações de sessão IMEDIATAMENTE
-            print(f"🔧 [DEBUG] Configurando handlers de multiplayer para host...")
+            print(f"[TARGET] Sessão criada: {netmaster_client.session_id}")
+            print(f"[PLAYER] Player ID: {netmaster_client.player_id}")
+            print(f"[DATA] Session data: {session_data}")
+            
+            # Configurar handlers básicos para atualizações de sessão
+            print(f"[CONFIG] [DEBUG] Configurando handlers básicos para host...")
             netmaster_client.set_message_handler('player_joined', self.on_player_joined)
             netmaster_client.set_message_handler('player_left', self.on_player_left)
-            netmaster_client.set_message_handler('game_started', self.on_game_started)
+            # NOTA: Handler game_started será registrado na waiting room para consistência
             netmaster_client.set_message_handler('turn_changed', self.on_multiplayer_turn_changed)
-            print(f"🔧 [DEBUG] Handlers configurados com sucesso!")
+            print(f"[CONFIG] [DEBUG] Handlers básicos configurados!")
             
             self.show_session_waiting_room(session_data)
         
@@ -2849,46 +4481,73 @@ class IntegratedMenuSystem:
     
     def on_global_sessions_list(self, data):
         """Handler global para sessions_list"""
-        print(f"🌐 [DEBUG] on_global_sessions_list chamado com data: {data}")
+        print(f"[NETWORK] [DEBUG] on_global_sessions_list chamado com data: {data}")
         sessions_list = data.get('sessions', [])
-        print(f"🌐 [DEBUG] sessions_list global: {len(sessions_list)} sessões")
+        print(f"[NETWORK] [DEBUG] sessions_list global: {len(sessions_list)} sessões")
         # Armazenar para uso posterior se necessário
         if hasattr(self, 'current_sessions'):
             self.current_sessions = sessions_list
         # Também armazenar em sessions_data para fetch_sessions
         self.sessions_data = sessions_list
-        print(f"🌐 [DEBUG] sessions_data atualizado: {len(self.sessions_data)} sessões")
+        print(f"[NETWORK] [DEBUG] sessions_data atualizado: {len(self.sessions_data)} sessões")
     
     def on_global_sessions_list_update(self, data):
         """Handler global para sessions_list_update"""
-        print(f"🌐 [DEBUG] on_global_sessions_list_update chamado com data: {data}")
+        print(f"[NETWORK] [DEBUG] *** GLOBAL_SESSIONS_LIST_UPDATE DETALHADO ***")
+        print(f"[NETWORK] [DEBUG] Data completa recebida: {data}")
+        print(f"[NETWORK] [DEBUG] Tipo de data: {type(data)}")
+        print(f"[NETWORK] [DEBUG] Keys em data: {list(data.keys()) if isinstance(data, dict) else 'N/A'}")
+        
+        # *** CRITICAL FIX: VERIFICAR SE ESTAMOS EM MULTIPLAYER_MODE ***
+        if hasattr(self, 'multiplayer_mode') and self.multiplayer_mode:
+            print(f"[MULTIPLAYER_PREVENTION] *** MULTIPLAYER_MODE ATIVO - IGNORANDO SESSIONS_LIST_UPDATE ***")
+            print(f"[MULTIPLAYER_PREVENTION] Este update não deve afetar o jogo em andamento")
+            print(f"[MULTIPLAYER_PREVENTION] Sessions list vazia é normal após game_started")
+            return
+        
+        # ADICIONAR: Timestamp para confirmar quando é recebido
+        import time
+        timestamp = time.strftime("%H:%M:%S", time.localtime())
+        print(f"[BROADCAST] [SUCCESS] *** RECEBIDO às {timestamp} ***")
+        
+        # NOVA FUNCIONALIDADE: Registar tempo do último broadcast para fallback
+        self.last_broadcast_time = time.time()
+        self.broadcast_missed_count = 0
+        print(f"[BROADCAST] [SUCCESS] Broadcast timestamp atualizado - fallback resetado")
+        
         sessions_list = data.get('sessions', [])
-        print(f"🌐 [DEBUG] sessions_list_update global: {len(sessions_list)} sessões")
+        print(f"[NETWORK] [DEBUG] sessions_list_update global: {len(sessions_list)} sessões")
+        
+        if sessions_list:
+            for i, session in enumerate(sessions_list):
+                print(f"[NETWORK] [DEBUG] Sessão global {i+1}: ID={session.get('id')}, Host={session.get('host_player_id')}, Players={session.get('current_players')}")
+        else:
+            print(f"[NETWORK] [DEBUG] PROBLEMA GLOBAL: Lista de sessões está vazia")
         
         # CRÍTICO: Verificar se estamos em processo de join
         if hasattr(self, 'is_joining_session') and self.is_joining_session:
-            print(f"🎯 [DEBUG] *** ESTAMOS JUNTANDO À SESSÃO - VERIFICAR SE FOI BEM-SUCEDIDO ***")
-            print(f"🎯 [DEBUG] join_player_name: {getattr(self, 'join_player_name', 'UNDEFINED')}")
+            print(f"[TARGET] [DEBUG] *** ESTAMOS JUNTANDO À SESSÃO - VERIFICAR SE FOI BEM-SUCEDIDO ***")
+            print(f"[TARGET] [DEBUG] join_player_name: {getattr(self, 'join_player_name', 'UNDEFINED')}")
             
             if hasattr(self, 'join_player_name') and self.join_player_name:
                 player_name = self.join_player_name
-                print(f"🎯 [DEBUG] Procurando jogador '{player_name}' em {len(sessions_list)} sessões...")
+                print(f"[TARGET] [DEBUG] Procurando jogador '{player_name}' em {len(sessions_list)} sessões...")
                 
                 # Procurar em TODAS as sessões por nosso jogador
                 for session in sessions_list:
                     session_id = session.get('id', 'UNKNOWN')
                     players = session.get('players', {})
-                    print(f"🎯 [DEBUG] Sessão {session_id}: {len(players)} jogadores")
+                    print(f"[TARGET] [DEBUG] Sessão {session_id}: {len(players)} jogadores")
                     
                     # Verificar se nosso jogador está na lista de players
                     for player_id, player_data in players.items():
                         player_data_name = player_data.get('name', 'UNKNOWN')
-                        print(f"🎯 [DEBUG]   Player: {player_data_name} (ID: {player_id})")
+                        print(f"[TARGET] [DEBUG]   Player: {player_data_name} (ID: {player_id})")
                         
                         if player_data_name == player_name:
-                            print(f"🎯 [DEBUG] *** SUCESSO! ENCONTRADO PLAYER {player_name} NA SESSÃO {session_id} ***")
-                            print(f"🎯 [DEBUG] Player ID: {player_id}")
-                            print(f"🎯 [DEBUG] Player data: {player_data}")
+                            print(f"[TARGET] [DEBUG] *** SUCESSO! ENCONTRADO PLAYER {player_name} NA SESSÃO {session_id} ***")
+                            print(f"[TARGET] [DEBUG] Player ID: {player_id}")
+                            print(f"[TARGET] [DEBUG] Player data: {player_data}")
                             
                             # Limpar flag de join
                             self.is_joining_session = False
@@ -2900,30 +4559,89 @@ class IntegratedMenuSystem:
                                 'player_id': player_id,
                                 'player_info': player_data
                             }
-                            print(f"🎯 [DEBUG] Criando join sintético: {join_data}")
+                            print(f"[TARGET] [DEBUG] Criando join sintético: {join_data}")
                             
                             # Forçar chamada IMEDIATA
                             self.on_session_joined(join_data)
                             return
                 
-                print(f"🎯 [DEBUG] Player '{player_name}' NÃO encontrado em nenhuma sessão!")
+                print(f"[TARGET] [DEBUG] Player '{player_name}' NÃO encontrado em nenhuma sessão!")
+        
+        # CRÍTICO: Verificar se estamos na waiting room e evitar recriá-la desnecessariamente  
+        print(f"[WAITING_ROOM] [PREVENTION_CHECK] Verificando se devemos prevenir recriação...")
+        print(f"[WAITING_ROOM] [PREVENTION_CHECK] hasattr(self, 'in_waiting_room'): {hasattr(self, 'in_waiting_room')}")
+        print(f"[WAITING_ROOM] [PREVENTION_CHECK] self.in_waiting_room: {getattr(self, 'in_waiting_room', 'UNDEFINED')}")
+        
+        if (hasattr(self, 'in_waiting_room') and self.in_waiting_room):
+            print(f"[WAITING_ROOM] [UPDATE] PREVENÇÃO ATIVA - estamos na waiting room")
+            print(f"[WAITING_ROOM] [UPDATE] waiting_time_label exists: {hasattr(self, 'waiting_time_label')}")
+            print(f"[WAITING_ROOM] [UPDATE] waiting_time_label is not None: {getattr(self, 'waiting_time_label', None) is not None}")
+            
+            # Verificar se temos o label da waiting room
+            if (hasattr(self, 'waiting_time_label') and self.waiting_time_label and 
+                hasattr(self.waiting_time_label, 'winfo_exists')):
+                try:
+                    if self.waiting_time_label.winfo_exists():
+                        print(f"[WAITING_ROOM] [UPDATE] waiting_time_label existe - EVITANDO recriação da interface")
+                        # Apenas atualizar dados de sessão se necessário, mas não recriar interface
+                        for session in sessions_list:
+                            if (hasattr(netmaster_client, 'session_id') and 
+                                session.get('id') == netmaster_client.session_id):
+                                # Atualizar tempo de espera se mudou significativamente
+                                new_waiting_time = session.get('waiting_time_left', 0)
+                                if (hasattr(self, '_last_waiting_time') and 
+                                    abs(new_waiting_time - getattr(self, '_last_waiting_time', 0)) > 5):
+                                    print(f"[WAITING_ROOM] [UPDATE] Tempo mudou de {getattr(self, '_last_waiting_time', 0)} para {new_waiting_time}")
+                                    self._last_waiting_time = new_waiting_time
+                                    # CORREÇÃO: Usar sincronização em vez de stop/restart para evitar alternância
+                                    if hasattr(self, 'waiting_time_label') and self.waiting_time_label:
+                                        try:
+                                            if self.waiting_time_label.winfo_exists():
+                                                # Sincronizar countdown imediatamente
+                                                minutes = new_waiting_time // 60
+                                                seconds = new_waiting_time % 60
+                                                if minutes > 0:
+                                                    time_text = f"Time left: {minutes}m {seconds}s"
+                                                else:
+                                                    time_text = f"Time left: {seconds}s"
+                                                
+                                                self.waiting_time_label.configure(text=time_text, fg="#4CAF50")
+                                                
+                                                # Incrementar countdown ID para invalidar timers antigos
+                                                self._current_countdown_id = getattr(self, '_current_countdown_id', 0) + 1
+                                                print(f"[WAITING_ROOM] [SYNC] Sincronizando para countdown ID {self._current_countdown_id}")
+                                                
+                                                # Iniciar novo countdown sincronizado sem delay
+                                                self.update_waiting_countdown(new_waiting_time)
+                                        except tk.TclError:
+                                            print(f"[WAITING_ROOM] [SYNC] Label inválido, ignorando sincronização")
+                        print(f"[WAITING_ROOM] [UPDATE] Interface preservada - retornando sem recriação")
+                        return
+                    else:
+                        print(f"[WAITING_ROOM] [UPDATE] waiting_time_label existe mas foi destruído - prosseguindo")
+                except tk.TclError:
+                    print(f"[WAITING_ROOM] [UPDATE] waiting_time_label inválido - prosseguindo")
+            else:
+                print(f"[WAITING_ROOM] [UPDATE] waiting_time_label não existe - prosseguindo")
+        else:
+            print(f"[WAITING_ROOM] [PREVENTION_CHECK] NÃO estamos na waiting room - prosseguindo normalmente")
         
         # Verificar se estamos tentando juntar a uma sessão e se fomos adicionados (fallback antigo)
         if hasattr(self, 'selected_session') and self.selected_session and hasattr(self, 'join_player_name'):
             session_id = self.selected_session.get('id')
             player_name = self.join_player_name  # Nome do jogador que está tentando se juntar
             
-            print(f"🎯 [DEBUG] Verificando se jogador {player_name} foi adicionado à sessão {session_id}")
+            print(f"[TARGET] [DEBUG] Verificando se jogador {player_name} foi adicionado à sessão {session_id}")
             
             # Procurar a sessão onde tentamos nos juntar
             for session in sessions_list:
                 if session.get('id') == session_id:
                     players = session.get('players', {})
-                    print(f"🎯 [DEBUG] Players na sessão: {list(players.values())}")
+                    print(f"[TARGET] [DEBUG] Players na sessão: {list(players.values())}")
                     # Verificar se nosso jogador está na lista de players
                     for player_id, player_data in players.items():
                         if player_data.get('name') == player_name:
-                            print(f"🎯 [DEBUG] DETECTADO JOIN BEM-SUCEDIDO! Player {player_name} encontrado na sessão {session_id}")
+                            print(f"[TARGET] [DEBUG] DETECTADO JOIN BEM-SUCEDIDO! Player {player_name} encontrado na sessão {session_id}")
                             # Simular session_joined
                             join_data = {
                                 'type': 'session_joined',
@@ -2937,7 +4655,7 @@ class IntegratedMenuSystem:
         
         # Se estamos em processo de join mas não encontramos o player, forçar timeout
         if hasattr(self, 'is_joining_session') and self.is_joining_session:
-            print(f"🎯 [DEBUG] Join em progresso mas player não encontrado nas sessões - verificando novamente...")
+            print(f"[TARGET] [DEBUG] Join em progresso mas player não encontrado nas sessões - verificando novamente...")
             # Dar mais tempo para a mensagem session_joined chegar
             self.root.after(2000, self.check_join_timeout)
         
@@ -2946,36 +4664,67 @@ class IntegratedMenuSystem:
             self.current_sessions = sessions_list
         # Também armazenar em sessions_data para fetch_sessions
         self.sessions_data = sessions_list
-        print(f"🌐 [DEBUG] sessions_data atualizado: {len(self.sessions_data)} sessões")
+        print(f"[NETWORK] [DEBUG] sessions_data atualizado: {len(self.sessions_data)} sessões")
+        
+        # CRUCIAL: Auto-atualizar a lista se estamos em modo de refresh/lista
+        if hasattr(self, 'is_refreshing') and self.is_refreshing:
+            print(f"[NETWORK] [DEBUG] *** AUTO-REFRESH DETECTADO - ATUALIZANDO DISPLAY ***")
+            if hasattr(self, 'sessions_frame_ref') and self.sessions_frame_ref and self.sessions_frame_ref.winfo_exists():
+                # Atualizar display imediatamente com as novas sessões
+                self.refresh_display_with_sessions(sessions_list)
+                self.is_refreshing = False
+            else:
+                print(f"[NETWORK] [DEBUG] Frame de sessões não existe para auto-refresh")
+        
+        # *** NOVA FUNCIONALIDADE: SEMPRE ATUALIZAR SE ESTAMOS NA PÁGINA DE SESSÕES ***
+        # Verificar se estamos na página de lista de sessões e auto-refresh está ativo
+        elif (hasattr(self, 'auto_refresh_active') and self.auto_refresh_active and 
+              hasattr(self, 'sessions_frame_ref') and self.sessions_frame_ref and 
+              self.sessions_frame_ref.winfo_exists()):
+            print(f"[NETWORK] [DEBUG] *** AUTO-UPDATE ATIVO - ATUALIZANDO LISTA AUTOMATICAMENTE ***")
+            # Só atualizar se não estamos em processo de join para evitar conflitos
+            if not (hasattr(self, 'is_joining_session') and self.is_joining_session):
+                print(f"[NETWORK] [DEBUG] Atualizando lista com {len(sessions_list)} sessões...")
+                self.refresh_display_with_sessions(sessions_list)
+            else:
+                print(f"[NETWORK] [DEBUG] Join em progresso, pulando auto-update")
     
     def check_join_timeout(self):
         """Verificar se join timeout deve ser ativado"""
         if hasattr(self, 'is_joining_session') and self.is_joining_session:
-            print(f"🎯 [DEBUG] Join timeout check - ainda esperando resposta")
+            print(f"[TARGET] [DEBUG] Join timeout check - ainda esperando resposta")
             # Ainda não recebemos confirmação, forçar fallback
             if hasattr(self, 'selected_session') and hasattr(self, 'join_player_name'):
-                print(f"🎯 [DEBUG] Forçando fallback para mostrar join success...")
-                self.show_join_success_message()
+                print(f"[TARGET] [DEBUG] Forçando fallback para mostrar join success...")
+                # Criar session_data básico para fallback
+                fallback_session_data = {
+                    'id': getattr(self, 'selected_session', 'unknown'),
+                    'players': {},
+                    'state': 'waiting',
+                    'current_players': 1,
+                    'max_players': 4
+                }
+                self.show_join_success_message(fallback_session_data)
     
     def on_waiting_timeout(self, data):
         """Callback para timeout de espera"""
         timeout_msg = data.get('message', 'Tempo limite de espera atingido')
         allow_solo = data.get('allow_solo', False)
         
-        print(f"⏰ TIMEOUT recebido!")
-        print(f"📨 Dados do timeout: {data}")
-        print(f"🎮 Allow solo: {allow_solo}")
+        print(f"[TIMEOUT] TIMEOUT recebido!")
+        print(f"[MESSAGE] Dados do timeout: {data}")
+        print(f"Allow solo: {allow_solo}")
         
         # Parar todas as animações ativas imediatamente
         self.loading_animation_active = False
         self.countdown_active = False  # Parar countdown
         
         def update_ui():
-            print("🎨 Atualizando UI para Time Limit Reached...")
+            print("[STYLE] Atualizando UI para Time Limit Reached...")
             
             # Garantir que as imagens estão carregadas
             if not hasattr(self, 'network_pattern_img') or not hasattr(self, 'netmaster_img'):
-                print("🔄 Recarregando imagens...")
+                print("[RELOAD] Recarregando imagens...")
                 self.load_menu_images()
             
             # Limpar a tela
@@ -2989,17 +4738,17 @@ class IntegratedMenuSystem:
             main_frame.pack(expand=True, fill='both')
             
             # Adicionar padrões de rede DEPOIS do main_frame para ficarem por cima
-            print(f"🌐 Adicionando network patterns - use_network_pattern: {getattr(self, 'use_network_pattern', False)}")
-            print(f"🖼️ network_pattern_img exists: {hasattr(self, 'network_pattern_img') and self.network_pattern_img is not None}")
+            print(f"[NETWORK] Adicionando network patterns - use_network_pattern: {getattr(self, 'use_network_pattern', False)}")
+            print(f"[IMAGE] network_pattern_img exists: {hasattr(self, 'network_pattern_img') and self.network_pattern_img is not None}")
             
             self.add_network_pattern_decorations(self.root)
             
             # Logo NetMaster - implementação idêntica à página principal
             if getattr(self, 'use_netmaster_img', False) and hasattr(self, 'netmaster_img') and self.netmaster_img:
-                print("🎯 Usando logo NetMaster")
+                print("[TARGET] Usando logo NetMaster")
                 tk.Label(self.root, image=self.netmaster_img, bg="black").place(relx=0.5, y=10, anchor="n")
             else:
-                print("📝 Usando texto NetMaster")
+                print("[NOTE] Usando texto NetMaster")
                 tk.Label(self.root, text="NetMaster", font=("Helvetica", 20, "bold"), bg="black", fg="white").place(relx=0.5, y=10, anchor="n")
             
             # Título - movido mais para baixo para não colidir com o logo
@@ -3025,14 +4774,14 @@ class IntegratedMenuSystem:
                                command=self.show_main_menu, width=15, height=2)
             back_btn.pack(pady=5)
             
-            print("✅ UI Time Limit Reached atualizada com sucesso!")
+            print("✓ UI Time Limit Reached atualizada com sucesso!")
         
         # CORREÇÃO: Executar imediatamente sem delay para resposta mais rápida
         self.root.after(0, update_ui)
     
     def on_multiplayer_turn_changed(self, data):
         """Handler para mudanças de turno no menu system"""
-        print("🔄 [MENU_TURN_CHANGED] Mudança de turno recebida no menu system!")
+        print("[RELOAD] [MENU_TURN_CHANGED] Mudança de turno recebida no menu system!")
         
         current_player_id = data.get('current_player_id')
         current_player_name = data.get('current_player_name', 'Unknown')
@@ -3040,9 +4789,9 @@ class IntegratedMenuSystem:
         player_order = data.get('player_order', [])
         current_turn_index = data.get('current_turn_index', 0)
         
-        print(f"🎯 [MENU_TURN_CHANGED] Jogador atual: {current_player_name} ({current_player_color})")
-        print(f"📝 [MENU_TURN_CHANGED] Ordem dos jogadores: {player_order}")
-        print(f"🔢 [MENU_TURN_CHANGED] Índice do turno: {current_turn_index}")
+        print(f"[TARGET] [MENU_TURN_CHANGED] Jogador atual: {current_player_name} ({current_player_color})")
+        print(f"[NOTE] [MENU_TURN_CHANGED] Ordem dos jogadores: {player_order}")
+        print(f"[NUMBER] [MENU_TURN_CHANGED] Índice do turno: {current_turn_index}")
         
         # Verificar se é a vez deste jogador
         my_player_id = getattr(netmaster_client, 'player_id', None)
@@ -3050,7 +4799,7 @@ class IntegratedMenuSystem:
         
         def update_ui():
             if is_my_turn:
-                print("✅ [MENU_TURN_CHANGED] É a minha vez - transicionando para dashboard")
+                print("✓ [MENU_TURN_CHANGED] É a minha vez - transicionando para dashboard")
                 # Criar dados de sessão simulados para o dashboard
                 session_data = {
                     'current_player_id': current_player_id,
@@ -3060,7 +4809,7 @@ class IntegratedMenuSystem:
                 }
                 self.launch_multiplayer_dashboard(session_data)
             else:
-                print("⏳ [MENU_TURN_CHANGED] Não é a minha vez - mostrando/mantendo tela de espera")
+                print("[WAITING] [MENU_TURN_CHANGED] Não é a minha vez - mostrando/mantendo tela de espera")
                 # Se já estamos numa tela de espera, não fazer nada
                 # Se não, criar nova tela de espera
                 session_data = {
@@ -3075,13 +4824,13 @@ class IntegratedMenuSystem:
         try:
             self.root.after(0, update_ui)
         except Exception as e:
-            print(f"❌ [MENU_TURN_CHANGED] Erro ao agendar atualização da UI: {e}")
+            print(f"[ERROR] [MENU_TURN_CHANGED] Erro ao agendar atualização da UI: {e}")
             update_ui()  # Tentar executar diretamente
     
     def on_menu_game_finished(self, data):
         """Handler para mensagens de fim de jogo no menu"""
-        print(f"🏆 Jogo finalizado no menu!")
-        print(f"📊 Dados do resultado: {data}")
+        print(f"Jogo finalizado no menu!")
+        print(f"[DATA] Dados do resultado: {data}")
         
         # Extrair dados do resultado
         winner_name = data.get('winner_name', 'Desconhecido')
@@ -3107,11 +4856,7 @@ class IntegratedMenuSystem:
         
         # Iniciar PlayerDashboard mantendo conexão com servidor mas em modo solo
         root = tk.Tk()
-        other_players = [
-            MenuPlayer("Bot1", "green", START_POSITIONS["green"]),
-            MenuPlayer("Bot2", "blue", START_POSITIONS["blue"]),
-            MenuPlayer("Bot3", "yellow", START_POSITIONS["yellow"]),
-        ]
+        other_players = []  # Jogo solo - sem outros jogadores
         
         dashboard = PlayerDashboard(
             root=root,
@@ -3119,8 +4864,7 @@ class IntegratedMenuSystem:
             saldo=1000,
             other_players=other_players,
             player_name=player_name,
-            selected_card_idx=0,
-            multiplayer_client=netmaster_client  # Manter conexão para notificações do servidor
+            selected_card_idx=0
         )
         
         root.mainloop()
@@ -3136,11 +4880,7 @@ class IntegratedMenuSystem:
         
         # Iniciar PlayerDashboard em modo solo
         root = tk.Tk()
-        other_players = [
-            MenuPlayer("Bot1", "green", START_POSITIONS["green"]),
-            MenuPlayer("Bot2", "blue", START_POSITIONS["blue"]),
-            MenuPlayer("Bot3", "yellow", START_POSITIONS["yellow"]),
-        ]
+        other_players = []  # Jogo solo - sem outros jogadores
         
         dashboard = PlayerDashboard(
             root=root,
@@ -3148,8 +4888,7 @@ class IntegratedMenuSystem:
             saldo=1000,
             other_players=other_players,
             player_name=player_name,
-            selected_card_idx=0,
-            multiplayer_client=None  # Modo solo
+            selected_card_idx=0
         )
         
         root.mainloop()
@@ -3177,7 +4916,7 @@ class IntegratedMenuSystem:
         status_frame = tk.Frame(self.root, bg="black")
         status_frame.place(relx=0.5, rely=0.25, anchor="center")
         
-        tk.Label(status_frame, text="✅ Conectado ao servidor!", 
+        tk.Label(status_frame, text="✓ Conectado ao servidor!", 
                 font=("Helvetica", 16, "bold"), bg="black", fg="#4CAF50").pack()
         tk.Label(status_frame, text="Configure sua sessão de jogo", 
                 font=("Helvetica", 14), bg="black", fg="white").pack(pady=(5, 0))
@@ -3333,23 +5072,58 @@ class IntegratedMenuSystem:
         # Mostrar loading
         self.show_session_creation_loading()
         
-        # Criar sessão no servidor
+        # Criar sessão no servidor usando o método thread-safe
         def create_session():
             try:
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                
-                success = loop.run_until_complete(
-                    netmaster_client.create_session(self.host_name, color.lower(), duration)
-                )
+                # Usar o loop existente se disponível, senão criar novo
+                try:
+                    loop = asyncio.get_running_loop()
+                    print("[CREATE] [DEBUG] Usando loop existente")
+                    # Se há um loop rodando, agendamos a corrotina
+                    future = asyncio.run_coroutine_threadsafe(self._create_session_async(color, duration), loop)
+                    success = future.result(timeout=30)  # 30 segundos timeout
+                except RuntimeError:
+                    # Não há loop rodando, criar um novo
+                    print("[CREATE] [DEBUG] Criando novo loop asyncio")
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    try:
+                        success = loop.run_until_complete(self._create_session_async(color, duration))
+                    finally:
+                        loop.close()
                 
                 if not success:
                     self.root.after(0, lambda: self.show_session_creation_error("Falha ao criar sessão"))
                     
             except Exception as e:
-                self.root.after(0, lambda: self.show_session_creation_error(f"Erro: {str(e)}"))
+                error_msg = f"Erro: {str(e)}"
+                self.root.after(0, lambda: self.show_session_creation_error(error_msg))
         
         threading.Thread(target=create_session, daemon=True).start()
+    
+    async def _create_session_async(self, color, duration):
+        """Método async para criar sessão - separado para melhor gerenciamento"""
+        try:
+            # CRÍTICO: Garantir conexão antes de criar sessão
+            if not netmaster_client.connected:
+                print("[CREATE] [DEBUG] Conectando ao servidor antes de criar sessão...")
+                connect_success = await netmaster_client.connect()
+                if not connect_success:
+                    raise Exception("Falha na conexão ao servidor")
+                print("[CREATE] [DEBUG] Conectado com sucesso!")
+            
+            # IMPORTANTE: Registar handler global para broadcasts
+            print("[CREATE] [DEBUG] Registando handler global sessions_list_update...")
+            netmaster_client.set_message_handler('sessions_list_update', self.on_global_sessions_list_update)
+            print("[CREATE] [DEBUG] Handler global registado!")
+            
+            # Criar sessão
+            success = await netmaster_client.create_session(self.host_name, color.lower(), duration)
+            return success
+            
+        except Exception as e:
+            print(f"[CREATE] [ERROR] Erro em _create_session_async: {e}")
+            raise
     
     def show_session_creation_loading(self):
         """Mostrar loading durante criação de sessão"""
@@ -3424,7 +5198,7 @@ class IntegratedMenuSystem:
     
     def show_joining_session_page(self, host_name):
         """Mostrar página de joining session com animação"""
-        print(f"🎯 [DEBUG] Mostrando página joining para host: {host_name}")
+        print(f"[TARGET] [DEBUG] Mostrando página joining para host: {host_name}")
         
         # Parar todas as animações ativas
         self.loading_animation_active = False
@@ -3488,8 +5262,43 @@ class IntegratedMenuSystem:
     
     def show_session_waiting_room(self, session_data):
         """Mostrar sala de espera da sessão"""
-        print(f"🏠 Entrando na sala de espera...")
-        print(f"📊 Session data recebida: {session_data}")
+        print(f"[HOME] Entrando na sala de espera...")
+        print(f"[DATA] Session data recebida: {session_data}")
+        
+        # *** CRÍTICO: Configurar referência para polling de game_started ***
+        netmaster_client._dashboard_ref = self
+        self._host_player_id = session_data.get('host_player_id')
+        print(f"[GAME_STARTED_SETUP] Dashboard ref configurada, host_id: {self._host_player_id}")
+        
+        # *** CRÍTICO: VERIFICAÇÃO ROBUSTA DE LISTEN_FOR_MESSAGES ***
+        print(f"[WAITING_ROOM] *** VERIFICAÇÃO CRÍTICA DE LISTEN_FOR_MESSAGES ***")
+        
+        # Verificar estado das tasks
+        task_exists = hasattr(netmaster_client, '_message_listener_task') and netmaster_client._message_listener_task is not None
+        task_running = task_exists and not netmaster_client._message_listener_task.done()
+        
+        print(f"[WAITING_ROOM] Task exists: {task_exists}")
+        print(f"[WAITING_ROOM] Task running: {task_running}")
+        
+        if task_exists:
+            print(f"[WAITING_ROOM] Task state: {netmaster_client._message_listener_task}")
+            if netmaster_client._message_listener_task.done():
+                print(f"[WAITING_ROOM] Task is done - checking exception...")
+                try:
+                    exception = netmaster_client._message_listener_task.exception()
+                    print(f"[WAITING_ROOM] Task exception: {exception}")
+                except:
+                    print(f"[WAITING_ROOM] Could not get task exception")
+        
+        print(f"[WAITING_ROOM] *** VERIFICAÇÃO: WebSocket funcionando normalmente ***")
+        print(f"[WAITING_ROOM] Connected: {netmaster_client.connected}")
+        print(f"[WAITING_ROOM] WebSocket exists: {netmaster_client.websocket is not None}")
+        
+        print(f"[WAITING_ROOM] *** FIM VERIFICAÇÃO CRÍTICA ***")
+        
+        # Definir flag para indicar que estamos na waiting room
+        self.in_waiting_room = True
+        self._last_waiting_time = session_data.get('waiting_time_left', 0)
         
         # Parar todas as animações ativas
         self.loading_animation_active = False
@@ -3547,6 +5356,9 @@ class IntegratedMenuSystem:
                                                font=("Helvetica", 12), bg="black", fg="#ffeb3b")
             self.waiting_time_label.pack(pady=5)
             
+            # CORREÇÃO: Resetar ID do countdown para evitar conflitos
+            self._current_countdown_id = 0
+            
             # Iniciar countdown
             self.update_waiting_countdown(waiting_time_left)
         
@@ -3574,7 +5386,7 @@ class IntegratedMenuSystem:
             player_frame.pack(pady=2)
             
             # Nome do jogador com cor
-            tk.Label(player_frame, text=f"● {player_data['name']}", 
+            tk.Label(player_frame, text=f"• {player_data['name']}", 
                     font=("Helvetica", 14, "bold"), bg="black", fg=display_color).pack()
         
         # Botões
@@ -3582,47 +5394,242 @@ class IntegratedMenuSystem:
         buttons_frame.place(relx=0.5, rely=0.8, anchor="center")
         
         # Botão Start Game (apenas para host)
-        if netmaster_client.player_id == session_data.get('host_player_id'):
+        host_player_id = session_data.get('host_player_id')
+        current_player_id = netmaster_client.player_id
+        current_players = session_data.get('current_players', 0)
+        
+        print(f"[START_GAME] [DEBUG] Verificação do botão Start Game:")
+        print(f"[START_GAME] [DEBUG] - Host player ID: {host_player_id}")
+        print(f"[START_GAME] [DEBUG] - Current player ID: {current_player_id}")
+        print(f"[START_GAME] [DEBUG] - É host?: {current_player_id == host_player_id}")
+        print(f"[START_GAME] [DEBUG] - Current players: {current_players}")
+        
+        if current_player_id == host_player_id:
+            print(f"[START_GAME] [DEBUG] Criando botão Start Game para o host")
             start_btn = tk.Button(buttons_frame, text="Start Game", 
                                  font=("Helvetica", 14, "bold"), bg="#4CAF50", fg="white",
                                  command=self.start_multiplayer_game)
             start_btn.pack(pady=5)
             
-            if session_data.get('current_players', 0) < 2:
-                start_btn.configure(state='disabled', text="Waiting for more players...")
+            # CORREÇÃO: Permitir iniciar com 2 ou mais jogadores
+            if current_players < 2:
+                print(f"[START_GAME] [DEBUG] Desabilitando botão - apenas {current_players} jogadores")
+                start_btn.configure(state='disabled', text="Need at least 2 players...")
+            else:
+                print(f"[START_GAME] [DEBUG] Habilitando botão - {current_players} jogadores")
+                start_btn.configure(state='normal', text="Start Game")
+        else:
+            print(f"[START_GAME] [DEBUG] Não é host - não criando botão Start Game")
         
         # Botão sair
         tk.Button(buttons_frame, text="Leave Session", 
                  font=("Helvetica", 12), bg="#f44336", fg="white",
                  command=self.leave_session).pack(pady=5)
         
-        # Configurar handlers para atualizações
+        # CRÍTICO: Configurar handlers para atualizações da sessão
+        # Este é o momento único e correto para registrar o handler game_started
+        # para ambos Host e Joinee
+        print(f"[HANDLER_SETUP] *** REGISTRANDO HANDLERS DA WAITING ROOM ***")
         netmaster_client.set_message_handler('player_joined', self.on_player_joined)
         netmaster_client.set_message_handler('player_left', self.on_player_left)
         netmaster_client.set_message_handler('game_started', self.on_game_started)
         netmaster_client.set_message_handler('turn_changed', self.on_multiplayer_turn_changed)
         
-        # DEBUG: Verificar estado da ligação periodicamente
+        # *** NOVO HANDLER PARA BROADCAST DE JOGADORES ***
+        netmaster_client.set_message_handler('players_info_sync', self.on_players_info_sync)
+        print(f"[HANDLER_SETUP] Handler players_info_sync registrado com sucesso!")
+        
+        print(f"[HANDLER_SETUP] Handler game_started registrado com sucesso!")
+        
+        # CRITICAL: Garantir que o handler universal está SEMPRE registrado
+        print(f"[HANDLER_FORCE] *** FORÇANDO REGISTRO DO HANDLER ALL_MESSAGES_DEBUG ***")
+        netmaster_client.set_message_handler('ALL_MESSAGES_DEBUG', self.on_any_message_debug)
+        print(f"[HANDLER_FORCE] Handler ALL_MESSAGES_DEBUG registrado")
+        print(f"[HANDLER_FORCE] Handlers ativos: {list(netmaster_client.message_handlers.keys())}")
+        
+        # *** CRITICAL FIX: POLLING ATIVO PARA GAME_STARTED ***
+        print(f"[GAME_STARTED_FIX] *** INICIANDO POLLING ATIVO PARA GAME_STARTED ***")
+        self.start_game_started_polling()
+        
+        # CRITICAL: Iniciar timeout checker para waiting room
+        self.start_waiting_room_timeout_checker()
+        
+        # DEBUG: Verificar se handlers estão registrados
+        print(f"[WAITING_ROOM] [DEBUG] Handlers registrados:")
+        if hasattr(netmaster_client, 'message_handlers'):
+            for handler_name in netmaster_client.message_handlers:
+                print(f"[WAITING_ROOM] [DEBUG]   - {handler_name}")
+        
+        # DEBUG: Verificar estado da ligação periodicamente COM VERIFICAÇÃO DE ATIVIDADE
         def check_connection_periodically():
-            if hasattr(self, 'countdown_active') and self.countdown_active:
+            if hasattr(self, 'countdown_active') and getattr(self, 'countdown_active', True):
                 connection_status = f"connected={netmaster_client.connected}, websocket={netmaster_client.websocket is not None}"
-                print(f"🔗 [DEBUG] Estado da ligação na sala de espera: {connection_status}")
-                print(f"🔗 [DEBUG] Handlers ativos: {list(netmaster_client.message_handlers.keys())}")
-                print(f"🔗 [DEBUG] Player ID: {netmaster_client.player_id}")
-                print(f"🔗 [DEBUG] Session ID: {netmaster_client.session_id}")
+                print(f"[CONNECTION] [DEBUG] Estado da ligação na sala de espera: {connection_status}")
+                print(f"[CONNECTION] [DEBUG] Handlers ativos: {list(netmaster_client.message_handlers.keys())}")
+                print(f"[CONNECTION] [DEBUG] Player ID: {netmaster_client.player_id}")
+                print(f"[CONNECTION] [DEBUG] Session ID: {netmaster_client.session_id}")
                 
-                # Verificar se a ligação ainda está ativa
-                if not netmaster_client.connected or not netmaster_client.websocket:
-                    print(f"❌ [DEBUG] LIGAÇÃO PERDIDA! Tentando reconectar...")
-                    # TODO: Implementar reconexão se necessário
+                # CRITICAL: Verificar se listen_for_messages está realmente ativo
+                task_exists = hasattr(netmaster_client, '_message_listener_task') and netmaster_client._message_listener_task is not None
+                task_running = task_exists and not netmaster_client._message_listener_task.done()
+                
+                print(f"[CONNECTION] [DEBUG] Listen task exists: {task_exists}")
+                print(f"[CONNECTION] [DEBUG] Listen task running: {task_running}")
+                
+                # Se a task não está rodando, forçar reconexão
+                if not task_running:
+                    print(f"[CONNECTION] [CRITICAL] *** LISTEN_FOR_MESSAGES NÃO ESTÁ ATIVO! ***")
+                    print(f"[CONNECTION] [CRITICAL] *** FORÇANDO RECONEXÃO IMEDIATA ***")
+                    
+                    async def emergency_reconnect():
+                        try:
+                            # Limpar estado
+                            if netmaster_client.websocket:
+                                try:
+                                    await netmaster_client.websocket.close()
+                                except:
+                                    pass
+                                netmaster_client.websocket = None
+                                netmaster_client.connected = False
+                            
+                            # Reconectar
+                            success = await netmaster_client.connect()
+                            print(f"[CONNECTION] [CRITICAL] Reconexão emergencial: {success}")
+                            
+                            if success:
+                                print(f"[CONNECTION] [CRITICAL] *** LISTEN_FOR_MESSAGES RESTAURADO! ***")
+                            
+                        except Exception as e:
+                            print(f"[CONNECTION] [CRITICAL] Erro na reconexão emergencial: {e}")
+                    
+                    # Executar reconexão usando threading para evitar problemas de loop
+                    def run_emergency_reconnect():
+                        print(f"[CONNECTION] [CRITICAL] Iniciando reconexão em thread separada")
+                        import threading
+                        import asyncio
+                        
+                        def async_reconnect():
+                            # Criar novo loop de eventos para esta thread
+                            loop = asyncio.new_event_loop()
+                            asyncio.set_event_loop(loop)
+                            
+                            try:
+                                loop.run_until_complete(emergency_reconnect())
+                                print(f"[CONNECTION] [CRITICAL] Reconexão concluída com sucesso")
+                            except Exception as e:
+                                print(f"[CONNECTION] [CRITICAL] Erro na reconexão: {e}")
+                            finally:
+                                loop.close()
+                        
+                        # Executar em thread separada
+                        thread = threading.Thread(target=async_reconnect, daemon=True)
+                        thread.start()
+                    
+                    # Executar a partir do main thread
+                    self.root.after(100, run_emergency_reconnect)
                 
                 # Verificar novamente em 3 segundos
                 self.root.after(3000, check_connection_periodically)
         
-        # Iniciar verificação periódica mais frequente
-        self.root.after(3000, check_connection_periodically)
+        # CRITICAL: Watchdog para garantir que mensagens estão sendo recebidas
+        self._last_message_time = time.time()
+        self._message_watchdog_active = True
         
-        # Fallback: Se após 30 segundos não recebemos game_started, verificar se o jogo já começou
+        def message_watchdog():
+            """Verifica se mensagens estão sendo recebidas e força reconexão se necessário"""
+            if not hasattr(self, '_message_watchdog_active') or not self._message_watchdog_active:
+                return
+                
+            current_time = time.time()
+            time_since_last_message = current_time - getattr(self, '_last_message_time', current_time)
+            
+            print(f"[WATCHDOG] Verificando atividade de mensagens...")
+            print(f"[WATCHDOG] Tempo desde última mensagem: {time_since_last_message:.1f}s")
+            print(f"[WATCHDOG] Connected: {netmaster_client.connected}")
+            print(f"[WATCHDOG] WebSocket: {netmaster_client.websocket is not None}")
+            
+            # CORREÇÃO CRÍTICA: NÃO forçar reconexão durante jogos multiplayer
+            # Durante gameplay multiplayer é normal não receber mensagens por longos períodos
+            multiplayer_active = getattr(self, 'multiplayer_mode', False)
+            in_waiting_room = getattr(self, 'in_waiting_room', False)
+            
+            if multiplayer_active and not in_waiting_room:
+                print(f"[WATCHDOG] Jogo multiplayer ativo - watchdog DESATIVADO (não força reconexão)")
+                print(f"[WATCHDOG] É normal não receber mensagens durante gameplay")
+                # Durante jogo multiplayer, não verificar timeout - apenas manter heartbeat
+                self.root.after(10000, message_watchdog)  # Verificar novamente em 10s
+                return
+            
+            # CORREÇÃO: Durante a waiting room, usar timeout mais longo
+            if in_waiting_room:
+                print(f"[WATCHDOG] Na waiting room - heartbeat automático mantém conexão")
+                timeout_seconds = 120.0  # Mais tolerante na waiting room (2 minutos)
+            else:
+                timeout_seconds = 60.0  # Normal fora da waiting room (apenas single player)
+            
+            if time_since_last_message > timeout_seconds:
+                print(f"[WATCHDOG] *** SEM MENSAGENS HÁ {time_since_last_message:.1f}s - FORÇANDO RECONEXÃO ***")
+                
+                def emergency_reconnect_watchdog():
+                    import threading
+                    import asyncio
+                    
+                    def do_reconnect():
+                        loop = asyncio.new_event_loop()
+                        asyncio.set_event_loop(loop)
+                        
+                        async def reconnect():
+                            try:
+                                # Fechar conexão atual
+                                if netmaster_client.websocket:
+                                    try:
+                                        await netmaster_client.websocket.close()
+                                    except:
+                                        pass
+                                    netmaster_client.websocket = None
+                                    netmaster_client.connected = False
+                                
+                                print(f"[WATCHDOG] Aguardando antes da reconexão...")
+                                await asyncio.sleep(2)
+                                
+                                # Reconectar
+                                success = await netmaster_client.connect()
+                                print(f"[WATCHDOG] Reconexão: {success}")
+                                
+                                if success:
+                                    # Atualizar timestamp
+                                    self._last_message_time = time.time()
+                                    print(f"[WATCHDOG] *** RECONEXÃO CONCLUÍDA - TIMESTAMP RESETADO ***")
+                                
+                            except Exception as e:
+                                print(f"[WATCHDOG] Erro na reconexão: {e}")
+                        
+                        try:
+                            loop.run_until_complete(reconnect())
+                        finally:
+                            loop.close()
+                    
+                    thread = threading.Thread(target=do_reconnect, daemon=True)
+                    thread.start()
+                
+                self.root.after(100, emergency_reconnect_watchdog)
+            
+            # Reagendar watchdog para próxima verificação (verificar menos frequentemente na waiting room)
+            if hasattr(self, '_message_watchdog_active') and self._message_watchdog_active:
+                check_interval = 20000 if getattr(self, 'in_waiting_room', False) else 10000  # 20s na waiting room, 10s normal
+                self.root.after(check_interval, message_watchdog)
+        
+        # Atualizar timestamp quando mensagens são recebidas
+        def update_message_timestamp():
+            self._last_message_time = time.time()
+        
+        # Registrar callback para atualizar timestamp
+        netmaster_client._update_message_timestamp = update_message_timestamp
+        
+        # Iniciar watchdog
+        self.root.after(10000, message_watchdog)  # Primeira verificação em 10s
+        
+        # Fallback: Se após tempo significativo não recebemos game_started, verificar se o jogo já começou
         def fallback_check():
             if hasattr(self, 'countdown_active') and self.countdown_active:
                 # Verificar se sou o host da sessão
@@ -3630,30 +5637,37 @@ class IntegratedMenuSystem:
                 my_player_id = netmaster_client.player_id
                 
                 if host_player_id == my_player_id:
-                    print(f"🎯 [DEBUG] FALLBACK: Sou o HOST - não preciso de fallback, devo mostrar Start Game")
+                    print(f"[TARGET] [DEBUG] FALLBACK: Sou o HOST - não preciso de fallback, devo mostrar Start Game")
                     # O host não precisa de fallback, deve mostrar Start Game
                     return
                 
-                print(f"⚠️ [DEBUG] FALLBACK: Não recebi game_started em 30s, verificando se jogo já começou...")
+                print(f"[WARNING] [DEBUG] FALLBACK: Não recebi game_started em muito tempo, verificando se jogo já começou...")
                 # Tentar verificar estado da sessão
                 try:
-                    # Simular timeout - força transição para waiting for turn se ainda estiver na sala
-                    if hasattr(self, 'countdown_active') and self.countdown_active:
-                        print(f"🔄 [FALLBACK] Forçando transição para 'Waiting for your turn to play...'")
-                        self.countdown_active = False
-                        self.show_waiting_for_turn()
+                    # APENAS fazer transição se realmente houver evidência de que o jogo começou
+                    # Por agora, não forçar mais a transição automática
+                    print(f"[FALLBACK] [DEBUG] Mantendo-me na waiting room até receber game_started do servidor")
                 except Exception as e:
-                    print(f"❌ [DEBUG] Erro no fallback check: {e}")
+                    print(f"[ERROR] [DEBUG] Erro no fallback check: {e}")
         
-        # Agendar fallback para 30 segundos
-        self.root.after(30000, fallback_check)
+        # Agendar fallback para tempo muito maior (2 minutos) ou desativar
+        # self.root.after(120000, fallback_check)  # 2 minutos em vez de 8 segundos
     
-    def update_waiting_countdown(self, time_left):
+    def update_waiting_countdown(self, time_left, countdown_id=None):
         """Atualiza o countdown do tempo de espera"""
         try:
             # Verificar se a animação ainda deve estar ativa
             if not getattr(self, 'countdown_active', True):
-                print("🛑 [DEBUG] Countdown cancelado - timeout acionado")
+                print("[DEBUG] Countdown cancelado - timeout acionado")
+                return
+            
+            # Se countdown_id não foi fornecido, usar o ID atual (para novos countdowns)
+            if countdown_id is None:
+                countdown_id = getattr(self, '_current_countdown_id', 0)
+            
+            # Verificar se este countdown ainda é válido
+            if getattr(self, '_current_countdown_id', 0) != countdown_id:
+                print(f"[DEBUG] Countdown invalidado - ID atual: {getattr(self, '_current_countdown_id', 0)}, countdown ID: {countdown_id}")
                 return
                 
             if hasattr(self, 'waiting_time_label') and self.waiting_time_label and hasattr(self.waiting_time_label, 'winfo_exists'):
@@ -3661,9 +5675,9 @@ class IntegratedMenuSystem:
                     minutes = time_left // 60
                     seconds = time_left % 60
                     if minutes > 0:
-                        time_text = f"Tempo restante: {minutes}m {seconds}s"
+                        time_text = f"Time left: {minutes}m {seconds}s"
                     else:
-                        time_text = f"Tempo restante: {seconds}s"
+                        time_text = f"Time left: {seconds}s"
                     
                     # Mudar cor conforme tempo restante
                     if time_left <= 10:
@@ -3675,14 +5689,15 @@ class IntegratedMenuSystem:
                     
                     self.waiting_time_label.configure(text=time_text, fg=color)
                     
-                    # Agendar próxima atualização apenas se countdown ainda está ativo
-                    if getattr(self, 'countdown_active', True):
-                        self.root.after(1000, lambda: self.update_waiting_countdown(time_left - 1))
+                    # Agendar próxima atualização apenas se countdown ainda está ativo E este é o countdown atual
+                    if (getattr(self, 'countdown_active', True) and 
+                        getattr(self, '_current_countdown_id', 0) == countdown_id):
+                        self.root.after(1000, lambda: self.update_waiting_countdown(time_left - 1, countdown_id))
                 elif self.waiting_time_label.winfo_exists():
                     self.waiting_time_label.configure(text="Tempo esgotado!", fg="#f44336")
         except (tk.TclError, AttributeError):
             # Widget foi destruído ou não existe mais, parar countdown
-            print("⚠️ [DEBUG] Widget countdown destruído")
+            print("[WARNING] [DEBUG] Widget countdown destruído")
             pass
     
     def animate_waiting_dots(self):
@@ -3717,35 +5732,337 @@ class IntegratedMenuSystem:
                 
                 success = loop.run_until_complete(netmaster_client.start_game())
                 if not success:
-                    print("❌ Falha ao iniciar jogo")
+                    print("[ERROR] Falha ao iniciar jogo")
                     
             except Exception as e:
-                print(f"❌ Erro ao iniciar jogo: {e}")
+                print(f"[ERROR] Erro ao iniciar jogo: {e}")
         
         threading.Thread(target=start_game, daemon=True).start()
     
     def on_player_joined(self, data):
         """Callback quando jogador se junta à sessão"""
-        print(f"👥 Jogador entrou: {data}")
-        # Atualizar interface da sala de espera
+        print(f"[USERS] Jogador entrou: {data}")
         session_data = data.get('session', {})
-        self.root.after(0, lambda: self.show_session_waiting_room(session_data))
+        
+            # CORREÇÃO: Verificar se o tempo de espera foi estendido
+        new_waiting_time = session_data.get('waiting_time_left', 0)
+        
+        # Se já estamos na waiting room e o tempo foi estendido significativamente (>45s), 
+        # atualizar apenas o countdown em vez de recriar toda a interface
+        if (hasattr(self, 'waiting_time_label') and 
+            hasattr(self, 'countdown_active') and 
+            self.countdown_active and
+            new_waiting_time > 45):
+            
+            print(f"[DEBUG] Tempo estendido detectado: {new_waiting_time}s - sincronizando countdown")
+            
+            # Mostrar notificação ao host sobre extensão do tempo
+            if netmaster_client.player_id == session_data.get('host_player_id'):
+                # Criar uma notificação temporária
+                def show_extension_notification():
+                    try:
+                        # Encontrar um local para mostrar a notificação
+                        notification = tk.Label(self.root, 
+                                               text="[TIMEOUT] Waiting time increased to +1 minute!", 
+                                               font=("Helvetica", 12, "bold"), 
+                                               bg="#4CAF50", fg="white", relief="solid", bd=2)
+                        notification.place(relx=0.5, rely=0.15, anchor="center")
+                        
+                        # Remover notificação após 3 segundos
+                        self.root.after(3000, lambda: notification.destroy())
+                    except Exception as e:
+                        print(f"[DEBUG] Erro ao mostrar notificação: {e}")
+                
+                self.root.after(100, show_extension_notification)
+            
+            # NOVA ABORDAGEM: Sincronizar countdown sem parar/reiniciar
+            def sync_countdown():
+                if hasattr(self, 'waiting_time_label') and self.waiting_time_label:
+                    try:
+                        if self.waiting_time_label.winfo_exists():
+                            # Atualizar imediatamente para o novo tempo
+                            minutes = new_waiting_time // 60
+                            seconds = new_waiting_time % 60
+                            if minutes > 0:
+                                time_text = f"Time left: {minutes}m {seconds}s"
+                            else:
+                                time_text = f"Time left: {seconds}s"
+                            
+                            self.waiting_time_label.configure(text=time_text, fg="#4CAF50")
+                            
+                            # Incrementar countdown ID para invalidar countdowns antigos
+                            self._current_countdown_id = getattr(self, '_current_countdown_id', 0) + 1
+                            
+                            # Iniciar novo countdown sincronizado
+                            self.update_waiting_countdown(new_waiting_time)
+                    except tk.TclError:
+                        pass
+            
+            self.root.after(100, sync_countdown)  # Sincronizar rapidamente
+            
+            # Atualizar apenas a lista de jogadores sem recriar tudo
+            self.update_players_list(session_data)
+        else:
+            # Caso normal: recriar interface completa
+            self.root.after(0, lambda: self.show_session_waiting_room(session_data))
+    
+    def update_players_list(self, session_data):
+        """Atualiza apenas a lista de jogadores sem recriar toda a interface"""
+        try:
+            # Encontrar o frame dos jogadores existente
+            for widget in self.root.winfo_children():
+                if isinstance(widget, tk.Frame):
+                    for child in widget.winfo_children():
+                        if isinstance(child, tk.Label) and "Players in Session:" in child.cget('text'):
+                            # Encontrou o frame dos jogadores, atualizar
+                            parent_frame = widget
+                            
+                            # Remover lista atual de jogadores (manter apenas o header)
+                            for subchild in parent_frame.winfo_children()[1:]:  # Skip header
+                                subchild.destroy()
+                            
+                            # Recriar lista de jogadores
+                            color_map = {
+                                'red': '#ff4444',
+                                'green': '#44ff44', 
+                                'blue': '#4444ff',
+                                'yellow': '#ffff44'
+                            }
+                            
+                            for player_id, player_data in session_data.get('players', {}).items():
+                                player_color = player_data.get('color', 'white')
+                                display_color = color_map.get(player_color, 'white')
+                                
+                                # Frame para cada jogador
+                                player_frame = tk.Frame(parent_frame, bg="black")
+                                player_frame.pack(pady=2)
+                                
+                                # Nome do jogador com cor
+                                tk.Label(player_frame, text=f"• {player_data['name']}", 
+                                        font=("Helvetica", 14, "bold"), bg="black", fg=display_color).pack()
+                            
+                            print(f"[DEBUG] Lista de jogadores atualizada com {len(session_data.get('players', {}))} jogadores")
+                            
+                            # CRÍTICO: Atualizar o botão Start Game também
+                            self.update_start_game_button(session_data)
+                            return
+        except Exception as e:
+            print(f"[DEBUG] Erro ao atualizar lista de jogadores: {e}")
+            # Se houver erro, fazer fallback para recriar interface completa
+            self.show_session_waiting_room(session_data)
+    
+    def update_start_game_button(self, session_data):
+        """Atualiza apenas o botão Start Game sem recriar toda a interface"""
+        try:
+            host_player_id = session_data.get('host_player_id')
+            current_player_id = netmaster_client.player_id
+            current_players = session_data.get('current_players', 0)
+            
+            print(f"[START_GAME] [DEBUG] Atualizando botão Start Game:")
+            print(f"[START_GAME] [DEBUG] - Host player ID: {host_player_id}")
+            print(f"[START_GAME] [DEBUG] - Current player ID: {current_player_id}")
+            print(f"[START_GAME] [DEBUG] - É host?: {current_player_id == host_player_id}")
+            print(f"[START_GAME] [DEBUG] - Current players: {current_players}")
+            
+            if current_player_id == host_player_id:
+                # Procurar por botão Start Game existente
+                start_button_found = False
+                for widget in self.root.winfo_children():
+                    if isinstance(widget, tk.Frame):
+                        for child in widget.winfo_children():
+                            if isinstance(child, tk.Button) and "Start Game" in child.cget('text'):
+                                # Encontrou o botão, atualizar estado
+                                if current_players < 2:
+                                    print(f"[START_GAME] [DEBUG] Desabilitando botão existente - apenas {current_players} jogadores")
+                                    child.configure(state='disabled', text="Need at least 2 players...")
+                                else:
+                                    print(f"[START_GAME] [DEBUG] Habilitando botão existente - {current_players} jogadores")
+                                    child.configure(state='normal', text="Start Game")
+                                start_button_found = True
+                                break
+                        if start_button_found:
+                            break
+                
+                if not start_button_found:
+                    print(f"[START_GAME] [DEBUG] Botão não encontrado - recriando interface completa")
+                    self.show_session_waiting_room(session_data)
+            else:
+                print(f"[START_GAME] [DEBUG] Não é host - botão não deveria existir")
+                
+        except Exception as e:
+            print(f"[DEBUG] Erro ao atualizar botão Start Game: {e}")
+            # Se houver erro, fazer fallback para recriar interface completa
+            self.show_session_waiting_room(session_data)
+    
+    def on_receive_action_event_card(self, data):
+        """Handler para receber cartas Actions/Events de outros jogadores"""
+        try:
+            sender = data.get('sender')
+            card_type = data.get('card_type')
+            card_data = data.get('card_data', {})
+            
+            print(f"[CARD_TRANSMISSION] 📬 Recebendo carta de {sender}")
+            print(f"[CARD_TRANSMISSION] Tipo: {card_type}, Dados: {card_data}")
+            
+            # Obter informações da carta
+            card_id = card_data.get('id')
+            card_path = card_data.get('card_path')
+            from_player = card_data.get('from_player')
+            
+            if not all([card_id, card_path, card_type]):
+                print(f"[CARD_TRANSMISSION] ❌ Dados incompletos: id={card_id}, path={card_path}, type={card_type}")
+                return
+            
+            # Adicionar carta ao inventário correto
+            success = False
+            if card_type.lower() in ['actions', 'action']:
+                success = self.adicionar_carta_inventario('Actions', card_path, card_id)
+                print(f"[CARD_TRANSMISSION] Actions - Sucesso: {success}")
+            elif card_type.lower() in ['events', 'event']:
+                success = self.adicionar_carta_inventario('Events', card_path, card_id)
+                print(f"[CARD_TRANSMISSION] Events - Sucesso: {success}")
+            else:
+                print(f"[CARD_TRANSMISSION] Tipo de carta desconhecido: {card_type}")
+                return
+            
+            if success:
+                print(f"[CARD_TRANSMISSION] ✓ Carta {card_id} de {from_player} adicionada ao inventário {card_type}")
+                
+                # Opcional: Mostrar notificação visual (não implementado por solicitação do usuário)
+                # self.show_card_received_notification(from_player, card_type, card_id)
+            else:
+                print(f"[CARD_TRANSMISSION] ❌ Falha ao adicionar carta {card_id} ao inventário")
+                
+        except Exception as e:
+            print(f"[CARD_TRANSMISSION] ❌ Erro ao processar carta recebida: {e}")
     
     def on_player_left(self, data):
         """Callback quando jogador sai da sessão"""
-        print(f"👋 Jogador saiu: {data}")
+        print(f" Jogador saiu: {data}")
         # Atualizar interface da sala de espera
         session_data = data.get('session', {})
         self.root.after(0, lambda: self.show_session_waiting_room(session_data))
     
+    def on_players_info_sync(self, data):
+        """
+        *** NOVO HANDLER: BROADCAST AUTOMÁTICO DE JOGADORES ***
+        Recebe atualizações da lista de jogadores do servidor
+        """
+        players_data = data.get('players', {})
+        total_players = data.get('total_players', 0)
+        session_id = data.get('session_id', 'unknown')
+        
+        print(f"[PLAYERS_SYNC] *** BROADCAST DE JOGADORES RECEBIDO ***")
+        print(f"[PLAYERS_SYNC] Session ID: {session_id}")
+        print(f"[PLAYERS_SYNC] Total jogadores: {total_players}")
+        print(f"[PLAYERS_SYNC] Dados recebidos: {players_data}")
+        
+        # Atualizar dados locais
+        self.session_players = players_data
+        self.other_players = []
+        
+        # Filtrar outros jogadores (excluir próprio)
+        my_color = getattr(self, 'player_color', '').lower()
+        for player_id, info in players_data.items():
+            if info['color'].lower() != my_color:  # Não é o próprio jogador
+                self.other_players.append({
+                    'id': player_id,
+                    'color': info['color'],
+                    'name': info['name'],
+                    'is_active': info['is_active']
+                })
+        
+        print(f"[PLAYERS_SYNC] ✓ Other players atualizados: {len(self.other_players)} jogadores")
+        for player in self.other_players:
+            print(f"[PLAYERS_SYNC]   - {player['name']} ({player['color']}) - Ativo: {player['is_active']}")
+        
+        # *** ATUALIZAR INTERFACE SE NECESSÁRIO ***
+        try:
+            self._update_players_display()
+        except Exception as e:
+            print(f"[PLAYERS_SYNC] Erro ao atualizar display: {e}")
+    
+    def _update_players_display(self):
+        """Atualiza displays que mostram outros jogadores"""
+        # Atualizar ícones de jogadores na interface principal
+        if hasattr(self, '_players_icons_frame'):
+            print(f"[PLAYERS_SYNC] Atualizando ícones de jogadores")
+            self._refresh_players_icons()
+        
+        # Atualizar qualquer overlay de seleção de jogador ativo
+        if hasattr(self, 'active_player_overlay'):
+            print(f"[PLAYERS_SYNC] Atualizando overlay de seleção de jogador")
+            self._refresh_player_selection_overlay()
+        
+        print(f"[PLAYERS_SYNC] ✓ Display de jogadores atualizado com sucesso")
+    
     def on_game_started(self, data):
         """Callback quando jogo é iniciado"""
-        print(f"🎯 Jogo iniciado: {data}")
-        print(f"🎯 [DEBUG] *** GAME_STARTED RECEBIDO NO SEGUNDO JOGADOR! ***")
-        print(f"🎯 [DEBUG] Data completa do game_started: {data}")
-        print(f"🎯 [DEBUG] on_game_started foi chamado no menu system!")
-        print(f"🎯 [DEBUG] Player ID: {getattr(netmaster_client, 'player_id', 'NONE')}")
-        print(f"🎯 [DEBUG] Session ID: {getattr(netmaster_client, 'session_id', 'NONE')}")
+        import time
+        current_timestamp = time.time()
+        print(f"[ON_GAME_STARTED] *** HANDLER on_game_started EXECUTADO! ***")
+        print(f"[ON_GAME_STARTED] *** TIMESTAMP: {current_timestamp} ***")
+        print(f"[ON_GAME_STARTED] *** TIME STRING: {time.strftime('%H:%M:%S')} ***")
+        print(f"[ON_GAME_STARTED] *** PLAYER ID: {getattr(netmaster_client, 'player_id', 'NONE')} ***")
+        print(f"[ON_GAME_STARTED] *** SESSION ID: {getattr(netmaster_client, 'session_id', 'NONE')} ***")
+        print(f"[ON_GAME_STARTED] *** DATA RECEIVED: {data} ***")
+        print(f"[ON_GAME_STARTED] *** DATA TYPE: {type(data)} ***")
+        print(f"[ON_GAME_STARTED] *** DATA KEYS: {list(data.keys()) if isinstance(data, dict) else 'NOT_DICT'} ***")
+        print(f"[ON_GAME_STARTED] *** CURRENT STATE - IN_WAITING_ROOM: {getattr(self, 'in_waiting_room', 'UNDEFINED')} ***")
+        print(f"[ON_GAME_STARTED] *** CURRENT STATE - MULTIPLAYER_MODE: {getattr(self, 'multiplayer_mode', 'UNDEFINED')} ***")
+        
+        print(f"[GAME_STARTED] *** MENSAGEM RECEBIDA! ***")
+        print(f"[GAME_STARTED] Time: {time.strftime('%H:%M:%S')}")
+        print(f"[GAME_STARTED] CRITICAL: on_game_started FOI CHAMADO!")
+        print(f"[GAME_STARTED] Data type: {type(data)}")
+        print(f"[GAME_STARTED] Data keys: {list(data.keys()) if isinstance(data, dict) else 'NOT_DICT'}")
+        print(f"[TARGET] Jogo iniciado: {data}")
+        print(f"[TARGET] [DEBUG] *** GAME_STARTED RECEBIDO NO SEGUNDO JOGADOR! ***")
+        print(f"[TARGET] [DEBUG] Data completa do game_started: {data}")
+        print(f"[TARGET] [DEBUG] on_game_started foi chamado no menu system!")
+        print(f"[TARGET] [DEBUG] Player ID: {getattr(netmaster_client, 'player_id', 'NONE')}")
+        print(f"[TARGET] [DEBUG] Session ID: {getattr(netmaster_client, 'session_id', 'NONE')}")
+        
+        # *** CRITICAL FIX: ATUALIZAR session_data COM DADOS ATUALIZADOS ***
+        session_data = data.get('session', {})
+        if session_data:
+            print(f"[CARD_STORAGE_FIX] *** ATUALIZANDO netmaster_client.session_data COM DADOS DO GAME_STARTED ***")
+            print(f"[CARD_STORAGE_FIX] Session data anterior: {getattr(netmaster_client, 'session_data', None)}")
+            print(f"[CARD_STORAGE_FIX] Session data nova: {session_data}")
+            netmaster_client.session_data = session_data
+            print(f"[CARD_STORAGE_FIX] ✓ session_data atualizada com sucesso!")
+            
+            # DEBUG: Verificar jogadores na session_data atualizada
+            players = session_data.get('players', {})
+            print(f"[CARD_STORAGE_FIX] Jogadores na session_data atualizada: {list(players.keys())}")
+            for player_id, player_data in players.items():
+                player_name = player_data.get('name', 'Unknown')
+                player_color = player_data.get('color', 'unknown')
+                print(f"[CARD_STORAGE_FIX]   - {player_id}: {player_name} ({player_color})")
+        else:
+            print(f"[CARD_STORAGE_FIX] Sem session_data no game_started!")
+        
+        # SAIR DA WAITING ROOM
+        self.in_waiting_room = False
+        
+        # *** CRITICAL FIX: DEFINIR MULTIPLAYER_MODE PARA PREVENIR VOLTA À WAITING ROOM ***
+        self.multiplayer_mode = True
+        print(f"[GAME_STARTED] *** MULTIPLAYER_MODE DEFINIDO COMO TRUE ***")
+        
+        # *** NOVO: EXTRAIR DURAÇÃO DA SESSÃO E INICIAR TIMER ***
+        duration_minutes = session_data.get('duration_minutes', 15)  # Default 15 minutos
+        expires_at = session_data.get('expires_at')
+        
+        print(f"[GAME_TIMER] *** INICIANDO TIMER DE SESSÃO ***")
+        print(f"[GAME_TIMER] Duração: {duration_minutes} minutos")
+        print(f"[GAME_TIMER] Expires at: {expires_at}")
+        
+        # SEMPRE usar duração total em minutos para simplicidade
+        time_remaining_seconds = duration_minutes * 60
+        print(f"[GAME_TIMER] Usando duração total: {time_remaining_seconds} segundos ({duration_minutes} minutos)")
+            
+        # Iniciar timer global de sessão
+        self.start_session_timer(time_remaining_seconds)
         
         # Parar animações da waiting room
         self.waiting_animation_active = False
@@ -3758,16 +6075,16 @@ class IntegratedMenuSystem:
             player_order = session_data.get('player_order', [])
             current_turn_index = session_data.get('current_turn_index', 0)
             
-            print(f"🎯 [GAME_STARTED] Jogador atual: {current_player_id}")
-            print(f"🎯 [GAME_STARTED] Meu ID: {netmaster_client.player_id}")
-            print(f"🎯 [GAME_STARTED] Ordem dos jogadores: {player_order}")
-            print(f"🎯 [GAME_STARTED] Índice do turno: {current_turn_index}")
+            print(f"[TARGET] [GAME_STARTED] Jogador atual: {current_player_id}")
+            print(f"[TARGET] [GAME_STARTED] Meu ID: {netmaster_client.player_id}")
+            print(f"[TARGET] [GAME_STARTED] Ordem dos jogadores: {player_order}")
+            print(f"[TARGET] [GAME_STARTED] Índice do turno: {current_turn_index}")
             
             # DEBUG ADICIONAL
-            print(f"🎯 [GAME_STARTED] Type of current_player_id: {type(current_player_id)}")
-            print(f"🎯 [GAME_STARTED] Type of netmaster_client.player_id: {type(netmaster_client.player_id)}")
-            print(f"🎯 [GAME_STARTED] Comparação direta: {current_player_id == netmaster_client.player_id}")
-            print(f"🎯 [GAME_STARTED] Players na sessão: {session_data.get('players', {}).keys()}")
+            print(f"[TARGET] [GAME_STARTED] Type of current_player_id: {type(current_player_id)}")
+            print(f"[TARGET] [GAME_STARTED] Type of netmaster_client.player_id: {type(netmaster_client.player_id)}")
+            print(f"[TARGET] [GAME_STARTED] Comparação direta: {current_player_id == netmaster_client.player_id}")
+            print(f"[TARGET] [GAME_STARTED] Players na sessão: {session_data.get('players', {}).keys()}")
             
             # Verificar se é o meu turno
             is_my_turn = False
@@ -3776,38 +6093,270 @@ class IntegratedMenuSystem:
             # LÓGICA SIMPLIFICADA: Apenas usar current_player_id do servidor
             if current_player_id and current_player_id == netmaster_client.player_id:
                 is_my_turn = True
-                print("✅ [GAME_STARTED] Turno detectado por player_id match com servidor")
+                print("✓ [GAME_STARTED] Turno detectado por player_id match com servidor")
             # FALLBACK: Se current_player_id é None, usar primeira posição na ordem
             elif current_player_id is None and len(player_order) > 0 and netmaster_client.player_id == player_order[0]:
                 is_my_turn = True
-                print("✅ [GAME_STARTED] Turno detectado por primeira posição na ordem (fallback)")
+                print("✓ [GAME_STARTED] Turno detectado por primeira posição na ordem (fallback)")
             # FALLBACK 2: Se não há current_player_id nem player_order, host começa
             elif current_player_id is None and len(player_order) == 0 and host_player_id and netmaster_client.player_id == host_player_id:
                 is_my_turn = True
-                print("✅ [GAME_STARTED] Turno detectado por ser host (fallback 2)")
+                print("✓ [GAME_STARTED] Turno detectado por ser host (fallback 2)")
             else:
                 is_my_turn = False
-                print("⏳ [GAME_STARTED] Não é o meu turno conforme definido pelo servidor")
+                print("[WAITING] [GAME_STARTED] Não é o meu turno conforme definido pelo servidor")
             
             # Verificar se é o meu turno
             if is_my_turn:
-                print("✅ [GAME_STARTED] É o meu turno - indo para dice roll")
+                print("✓ [GAME_STARTED] É o meu turno - indo para dice roll")
                 # Iniciar PlayerDashboard multiplayer
                 self.launch_multiplayer_dashboard(session_data)
             else:
-                print("⏳ [GAME_STARTED] Não é o meu turno - mostrando tela de espera")
+                print("[WAITING] [GAME_STARTED] Não é o meu turno - mostrando tela de espera")
                 # Encontrar dados do jogador atual
                 players = session_data.get('players', {})
                 current_player_data = players.get(current_player_id, {})
                 current_player_name = current_player_data.get('name', 'Unknown')
                 current_player_color = current_player_data.get('color', 'white')
                 
-                print(f"🎯 [GAME_STARTED] Mostrando waiting para: {current_player_name} ({current_player_color})")
+                print(f"[TARGET] [GAME_STARTED] Mostrando waiting para: {current_player_name} ({current_player_color})")
                 
                 # Criar PlayerDashboard em modo waiting
                 self.launch_multiplayer_dashboard_waiting(current_player_name, current_player_color, session_data)
         
         self.root.after(0, start_dashboard)
+    
+    def start_game_started_polling(self):
+        """Inicia polling ativo para detectar quando jogo foi iniciado"""
+        print(f"[GAME_STARTED_POLLING] *** INICIANDO POLLING ATIVO ***")
+        
+        def check_game_started():
+            try:
+                # Só fazer polling se ainda estamos na waiting room e não somos o host
+                if (getattr(self, 'in_waiting_room', False) and 
+                    getattr(self, 'multiplayer_mode', False) and
+                    netmaster_client.player_id != getattr(self, '_host_player_id', None)):
+                    
+                    print(f"[GAME_STARTED_POLLING] Verificando status do jogo...")
+                    
+                    # Solicitar lista de sessões para ver se nossa sessão ainda está "waiting"
+                    async def async_check():
+                        try:
+                            if netmaster_client.connected and netmaster_client.websocket:
+                                # Enviar list_sessions para verificar status
+                                await netmaster_client.send_message({
+                                    'type': 'list_sessions'
+                                })
+                                print(f"[GAME_STARTED_POLLING] Lista de sessões solicitada")
+                        except Exception as e:
+                            print(f"[GAME_STARTED_POLLING] Erro no check: {e}")
+                    
+                    # Executar check assíncrono
+                    if netmaster_client.connected:
+                        try:
+                            # Usar thread para evitar problemas de loop
+                            import threading
+                            import asyncio
+                            
+                            def run_async_check():
+                                loop = asyncio.new_event_loop()
+                                asyncio.set_event_loop(loop)
+                                try:
+                                    loop.run_until_complete(async_check())
+                                except Exception as e:
+                                    print(f"[GAME_STARTED_POLLING] Erro no loop: {e}")
+                                finally:
+                                    loop.close()
+                            
+                            thread = threading.Thread(target=run_async_check, daemon=True)
+                            thread.start()
+                            
+                        except Exception as e:
+                            print(f"[GAME_STARTED_POLLING] Erro criando thread: {e}")
+                    
+                    # Continuar polling a cada 3 segundos
+                    self.root.after(3000, check_game_started)
+                else:
+                    print(f"[GAME_STARTED_POLLING] Parando polling - não na waiting room ou é host")
+                    
+            except Exception as e:
+                print(f"[GAME_STARTED_POLLING] Erro geral: {e}")
+                # Tentar novamente em 5 segundos
+                self.root.after(5000, check_game_started)
+        
+        # Iniciar primeiro check em 2 segundos
+        self.root.after(2000, check_game_started)
+    
+    def start_session_timer(self, time_remaining_seconds):
+        """Iniciar timer de contagem decrescente da sessão"""
+        print(f"[SESSION_TIMER] *** TIMER INICIADO ***")
+        print(f"[SESSION_TIMER] Tempo inicial: {time_remaining_seconds:.1f} segundos")
+        
+        # Converter para minutos e segundos
+        minutes = int(time_remaining_seconds // 60)
+        seconds = int(time_remaining_seconds % 60)
+        
+        print(f"[SESSION_TIMER] Tempo formatado: {minutes:02d}:{seconds:02d}")
+        
+        # Armazenar tempo restante
+        self.session_time_remaining = time_remaining_seconds
+        self.session_timer_active = True
+        
+        # CORREÇÃO: TODOS os jogadores (HOST e JOINEE) agora aguardam updates do servidor
+        is_host = self.is_session_host()
+        
+        if is_host:
+            print(f"[SESSION_TIMER] Este jogador é HOST - aguardando timer updates do SERVIDOR")
+        else:
+            print(f"[SESSION_TIMER] Este jogador é JOINEE - aguardando timer updates do SERVIDOR")
+        
+        # Nenhum jogador inicia countdown local - servidor controla tudo
+        print(f"[SESSION_TIMER] Timer local desativado - servidor controlará o countdown")
+    
+    def update_session_timer(self):
+        """Atualizar o timer a cada segundo - DESATIVADO: Agora todos recebem updates do servidor"""
+        if not getattr(self, 'session_timer_active', False):
+            return
+            
+        if self.session_time_remaining <= 0:
+            print(f"[SESSION_TIMER] *** TEMPO ESGOTADO! ***")
+            self.session_timer_active = False
+            # Fim de jogo - mostrar página de ranking
+            self._handle_game_time_ended()
+            return
+        
+        # CORREÇÃO: DESATIVAR countdown local - TODOS recebem updates do servidor
+        print(f"[SESSION_TIMER] Timer local desativado - aguardando updates do servidor")
+        print(f"[SESSION_TIMER] Tempo atual recebido do servidor: {self.session_time_remaining:.1f}s")
+        
+        # Apenas atualizar display com o valor recebido do servidor
+        self.update_timer_display()
+        
+        # NÃO AGENDAR mais countdown local - servidor controla tudo
+        # self.root.after(1000, self.update_session_timer) # REMOVIDO
+    
+    def update_timer_display(self):
+        """Atualizar display do timer na interface"""
+        if not hasattr(self, 'session_time_remaining'):
+            return
+            
+        # Converter para minutos e segundos
+        minutes = int(self.session_time_remaining // 60)
+        seconds = int(self.session_time_remaining % 60)
+        
+        # Formato do timer
+        timer_text = f"{minutes:02d}:{seconds:02d}"
+        
+        # Cor baseada no tempo restante
+        if minutes < 2:  # Menos de 2 minutos - vermelho
+            timer_color = "#FF4444"
+        elif minutes < 5:  # Menos de 5 minutos - amarelo
+            timer_color = "#FFAA00"
+        else:  # Mais de 5 minutos - verde
+            timer_color = "#44FF44"
+        
+        # Atualizar label se existir E se ainda é válido
+        if hasattr(self, 'session_timer_label') and self.session_timer_label:
+            try:
+                # CORREÇÃO: Verificar se o widget ainda existe antes de tentar actualizar
+                if self.session_timer_label.winfo_exists():
+                    self.session_timer_label.configure(text=timer_text, fg=timer_color)
+                else:
+                    print(f"[SESSION_TIMER] DEBUG: Widget timer não existe mais - limpando referência")
+                    self.session_timer_label = None
+            except Exception as e:
+                print(f"[SESSION_TIMER] Erro ao atualizar label: {e}")
+                # Se há erro, limpar a referência para evitar tentativas futuras
+                self.session_timer_label = None
+        else:
+            # NOVO: Log quando não há timer visível mas tempo continua a passar
+            print(f"[SESSION_TIMER] DEBUG: Timer a contar em background: {timer_text} (sem display)")
+    
+    def _handle_game_time_ended(self):
+        """Handler quando o tempo de jogo termina - mostrar página de ranking"""
+        print(f"[GAME_END] *** TEMPO DE JOGO TERMINADO ***")
+        
+        # Verificar se somos o host da sessão
+        is_host = self.is_session_host()
+        
+        if is_host:
+            print(f"[GAME_END] Este jogador é HOST - notificando servidor sobre fim de jogo")
+            
+            # Notificar servidor que o jogo terminou
+            try:
+                message = {
+                    'type': 'game_finished',
+                    'session_id': getattr(netmaster_client, 'session_id', None),
+                    'reason': 'time_expired'
+                }
+                
+                if netmaster_client and hasattr(netmaster_client, 'send_message'):
+                    netmaster_client.send_message(message)
+                    print(f"[GAME_END] Mensagem enviada ao servidor: {message}")
+                else:
+                    print(f"[GAME_END] ERRO: NetMaster client não disponível")
+            except Exception as e:
+                print(f"[GAME_END] Erro ao notificar servidor: {e}")
+        else:
+            print(f"[GAME_END] Este jogador é JOINEE - aguardando instruções do servidor")
+
+    def create_session_timer_display(self, parent_widget):
+        """Criar display do timer de sessão numa interface"""
+        import tkinter as tk
+        
+        # Na tela de espera, sempre mostrar o timer se estivermos em modo multiplayer
+        is_waiting_screen = hasattr(self, 'waiting_for_turn') and getattr(self, 'waiting_for_turn', False)
+        has_session_data = hasattr(netmaster_client, 'session_data') and netmaster_client.session_data is not None
+        
+        if not is_waiting_screen:
+            # Na interface principal, verificar se timer está ativo
+            if not (hasattr(self, 'session_timer_active') and self.session_timer_active):
+                print(f"[SESSION_TIMER] DEBUG: Timer não está ativo ao criar display (interface principal)")
+                return
+        else:
+            # Na tela de espera, sempre mostrar se há dados de sessão
+            if not has_session_data:
+                print(f"[SESSION_TIMER] DEBUG: Sem dados de sessão na tela de espera")
+                return
+            print(f"[SESSION_TIMER] DEBUG: Criando timer na tela de espera (modo servidor)")
+            
+        # Evitar criação duplicada
+        if hasattr(self, 'session_timer_label') and self.session_timer_label:
+            print(f"[SESSION_TIMER] DEBUG: Timer label já existe")
+            return
+        
+        try:
+            print(f"[SESSION_TIMER] DEBUG: Criando timer display no parent widget...")
+            
+            # Criar label do timer SEM EMOJI - TAMANHO REDUZIDO e posicionado acima do nome do jogador
+            self.session_timer_label = tk.Label(
+                parent_widget,
+                text="--:--",
+                font=("Arial", 14, "bold"),  # Reduzido de 18 para 14
+                fg="#44FF44",
+                bg="black"
+            )
+            
+            # Posicionar o timer de forma apropriada dependendo do contexto
+            if is_waiting_screen:
+                # Na tela de espera, posicionar abaixo da TopBar e acima do nome do jogador
+                self.session_timer_label.place(relx=0.5, y=65, anchor="n")  # y=65 para ficar abaixo da TopBar (60px)
+                print(f"[SESSION_TIMER] DEBUG: Timer posicionado na tela de espera (y=65)")
+            else:
+                # Na interface principal, posicionar no topo
+                self.session_timer_label.place(relx=0.5, y=0, anchor="n")
+                print(f"[SESSION_TIMER] DEBUG: Timer posicionado na interface principal (y=0)")
+            
+            print(f"[SESSION_TIMER] DEBUG: Display criado com sucesso")
+            
+            # Atualizar imediatamente
+            self.update_timer_display()
+            
+        except Exception as e:
+            print(f"[SESSION_TIMER] Erro ao criar display: {e}")
+            import traceback
+            traceback.print_exc()
+            self.session_timer_label = None
     
     def launch_multiplayer_dashboard(self, session_data=None):
         """Lançar PlayerDashboard para jogo multiplayer"""
@@ -3819,7 +6368,26 @@ class IntegratedMenuSystem:
         current_player_color = getattr(netmaster_client, 'player_color', self.host_color.lower())
         current_player_name = getattr(netmaster_client, 'player_name', self.host_name)
         
-        print(f"🎯 [DASHBOARD] Criando dashboard para: {current_player_name} ({current_player_color})")
+        print(f"[TARGET] [DASHBOARD] Criando dashboard para: {current_player_name} ({current_player_color})")
+        
+        # LIMPAR HANDLERS ANTIGOS DO JOIN PROCESS ANTES DE CRIAR DASHBOARD
+        print(f"[DASHBOARD_LAUNCH] *** LIMPANDO HANDLERS ANTIGOS DO JOIN ***")
+        old_handlers = list(netmaster_client.message_handlers.keys())
+        print(f"[DASHBOARD_LAUNCH] Handlers antigos: {old_handlers}")
+        print(f"[DASHBOARD_LAUNCH] *** LIMPEZA CRÍTICA: Salvando timer_sync se existir ***")
+        timer_sync_handler = netmaster_client.message_handlers.get('timer_sync', None)
+        if timer_sync_handler:
+            print(f"[DASHBOARD_LAUNCH] ✓ timer_sync salvo para re-registo")
+        else:
+            print(f"[DASHBOARD_LAUNCH] ✗ timer_sync não encontrado para salvar")
+        netmaster_client.message_handlers.clear()
+        print(f"[DASHBOARD_LAUNCH] ✓ Handlers antigos limpos")
+        
+        # CRÍTICO: Re-registrar handlers globais que foram limpos
+        print(f"[DASHBOARD_LAUNCH] *** RE-REGISTRANDO HANDLERS GLOBAIS ***")
+        for handler_type, handler_func in NetMasterClient._global_handlers.items():
+            netmaster_client.message_handlers[handler_type] = handler_func
+            print(f"[DASHBOARD_LAUNCH] ✓ Handler global re-registrado: {handler_type}")
         
         # Criar PlayerDashboard com suporte multiplayer
         dashboard = PlayerDashboard(
@@ -3827,8 +6395,7 @@ class IntegratedMenuSystem:
             player_color=current_player_color,
             saldo=1000,
             other_players=[c for c in ["red", "green", "blue", "yellow"] if c != current_player_color],
-            player_name=current_player_name,
-            multiplayer_client=netmaster_client  # Passar cliente para sincronização
+            player_name=current_player_name
         )
         
         # Se temos session_data, configurar informações de multiplayer
@@ -3836,11 +6403,39 @@ class IntegratedMenuSystem:
             dashboard.player_order = session_data.get('player_order', [])
             dashboard.current_turn_index = session_data.get('current_turn_index', 0)
             netmaster_client.session_data = session_data
+        
+        # *** NOVO: TRANSFERIR TIMER PARA O DASHBOARD ***
+        # CORREÇÃO: Verificar se há timer ativo OU se há session_data com duração
+        has_active_timer = hasattr(self, 'session_timer_active') and self.session_timer_active
+        has_session_time = hasattr(self, 'session_time_remaining') and self.session_time_remaining > 0
+        session_data_available = session_data and session_data.get('duration_minutes')
+        
+        if has_active_timer or has_session_time or session_data_available:
+            # Transferir timer existente ou criar novo baseado na sessão
+            if has_session_time:
+                dashboard.session_time_remaining = self.session_time_remaining
+                dashboard.session_timer_active = True
+                print(f"[SESSION_TIMER] Timer transferido para dashboard: {self.session_time_remaining:.1f}s restantes")
+            elif session_data_available:
+                # Criar timer baseado na duração da sessão se não existe timer ativo
+                duration_minutes = session_data.get('duration_minutes', 15)
+                dashboard.session_time_remaining = duration_minutes * 60
+                dashboard.session_timer_active = True
+                print(f"[SESSION_TIMER] Timer criado no dashboard baseado na sessão: {duration_minutes} minutos")
+            
+            # Parar timer no menu e continuar no dashboard
+            self.session_timer_active = False
+            
+            # CORREÇÃO: Não iniciar timer local - aguardar updates do servidor
+            # dashboard.after(500, lambda: dashboard.update_session_timer()) # REMOVIDO
+            print(f"[SESSION_TIMER] Timer transferido para dashboard - aguardando updates do servidor")
+        else:
+            print(f"[SESSION_TIMER] Nenhum timer ativo para transferir")
     
     def launch_multiplayer_dashboard_waiting(self, current_player_name, current_player_color, session_data):
         """Lançar PlayerDashboard em modo waiting quando não é o turno do jogador"""
-        print(f"⏳ [DEBUG] Lançando dashboard em modo waiting")
-        print(f"⏳ [DEBUG] Jogador atual: {current_player_name} ({current_player_color})")
+        print(f"[WAITING] [DEBUG] Lançando dashboard em modo waiting")
+        print(f"[WAITING] [DEBUG] Jogador atual: {current_player_name} ({current_player_color})")
         
         # Limpar root
         for widget in self.root.winfo_children():
@@ -3863,8 +6458,7 @@ class IntegratedMenuSystem:
             player_color=self.host_color.lower(),
             saldo=1000,
             other_players=other_players_list,
-            player_name=self.host_name,
-            multiplayer_client=netmaster_client  # Passar cliente para sincronização
+            player_name=self.host_name
         )
         
         # Forçar modo waiting imediatamente
@@ -3875,6 +6469,80 @@ class IntegratedMenuSystem:
         
         # Garantir que o multiplayer_client tenha acesso aos dados da sessão
         netmaster_client.session_data = session_data
+        
+        # *** CRITICAL FIX: REGISTRAR HANDLERS NECESSÁRIOS NO DASHBOARD ***
+        print(f"[WAITING_DASHBOARD] *** CONFIGURANDO HANDLERS PARA DASHBOARD EM WAITING ***")
+        try:
+            # LIMPAR HANDLERS ANTIGOS DO JOIN PROCESS PRIMEIRO
+            print(f"[WAITING_DASHBOARD] *** LIMPANDO HANDLERS ANTIGOS DO JOIN ***")
+            old_handlers = list(netmaster_client.message_handlers.keys())
+            print(f"[WAITING_DASHBOARD] Handlers antigos: {old_handlers}")
+            print(f"[WAITING_DASHBOARD] *** LIMPEZA CRÍTICA: Salvando timer_sync se existir ***")
+            timer_sync_handler = netmaster_client.message_handlers.get('timer_sync', None)
+            if timer_sync_handler:
+                print(f"[WAITING_DASHBOARD] ✓ timer_sync salvo para re-registo")
+            else:
+                print(f"[WAITING_DASHBOARD] ✗ timer_sync não encontrado para salvar")
+            netmaster_client.message_handlers.clear()
+            print(f"[WAITING_DASHBOARD] ✓ Handlers antigos limpos")
+            
+            # CRÍTICO: Re-registrar handlers globais que foram limpos
+            print(f"[WAITING_DASHBOARD] *** RE-REGISTRANDO HANDLERS GLOBAIS ***")
+            for handler_type, handler_func in NetMasterClient._global_handlers.items():
+                netmaster_client.message_handlers[handler_type] = handler_func
+                print(f"[WAITING_DASHBOARD] ✓ Handler global re-registrado: {handler_type}")
+            
+            # FORÇA REGISTO DOS HANDLERS CRÍTICOS PARA TURN MANAGEMENT
+            print(f"[WAITING_DASHBOARD] *** FORÇANDO REGISTO DE HANDLERS CRÍTICOS ***")
+            netmaster_client.set_message_handler('turn_changed', dashboard.on_multiplayer_turn_changed)
+            netmaster_client.set_message_handler('player_joined', dashboard.on_player_joined)
+            netmaster_client.set_message_handler('player_left', dashboard.on_player_left)
+            netmaster_client.set_message_handler('heartbeat_ack', dashboard.on_heartbeat_ack)
+            # CORREÇÃO: Adicionar handler timer_sync para sincronização do timer
+            netmaster_client.set_message_handler('timer_sync', dashboard.on_timer_sync)
+            # CRÍTICO: Adicionar handler pending_cards localmente
+            netmaster_client.set_message_handler('pending_cards', dashboard.on_pending_cards_received)
+            
+            # Manter handlers universais
+            if hasattr(self, 'on_any_message_debug'):
+                netmaster_client.set_message_handler('ALL_MESSAGES_DEBUG', self.on_any_message_debug)
+            
+            print(f"[WAITING_DASHBOARD] *** HANDLERS CONFIGURADOS COM SUCESSO ***")
+            print(f"[WAITING_DASHBOARD] Handlers ativos após registo: {list(netmaster_client.message_handlers.keys())}")
+            
+            # VERIFICAÇÃO IMEDIATA - handlers estão mesmo registados?
+            if 'turn_changed' in netmaster_client.message_handlers:
+                print(f"[WAITING_DASHBOARD] ✓ turn_changed handler CONFIRMADO")
+            else:
+                print(f"[WAITING_DASHBOARD] ❌ ERROR: turn_changed handler NÃO REGISTADO!")
+                
+            if 'pending_cards' in netmaster_client.message_handlers:
+                print(f"[WAITING_DASHBOARD] ✓ pending_cards handler CONFIRMADO")
+            else:
+                print(f"[WAITING_DASHBOARD] ❌ ERROR: pending_cards handler NÃO REGISTADO!")
+                
+        except Exception as e:
+            print(f"[WAITING_DASHBOARD] ERRO ao configurar handlers: {e}")
+        
+        # RE-REGISTAR HANDLERS APÓS UM DELAY PARA GARANTIR
+        def reregister_handlers():
+            try:
+                print(f"[WAITING_DASHBOARD] *** RE-REGISTO DE SEGURANÇA DOS HANDLERS ***")
+                netmaster_client.set_message_handler('turn_changed', dashboard.on_multiplayer_turn_changed)
+                netmaster_client.set_message_handler('player_joined', dashboard.on_player_joined)
+                netmaster_client.set_message_handler('player_left', dashboard.on_player_left)
+                netmaster_client.set_message_handler('heartbeat_ack', dashboard.on_heartbeat_ack)
+                # CORREÇÃO: Adicionar handler timer_sync no re-registo também
+                netmaster_client.set_message_handler('timer_sync', dashboard.on_timer_sync)
+                # CRÍTICO: Adicionar handler pending_cards no re-registo também
+                netmaster_client.set_message_handler('pending_cards', dashboard.on_pending_cards_received)
+                print(f"[WAITING_DASHBOARD] ✓ Handlers re-registados com sucesso!")
+                print(f"[WAITING_DASHBOARD] Handlers finais: {list(netmaster_client.message_handlers.keys())}")
+            except Exception as e:
+                print(f"[WAITING_DASHBOARD] ERRO no re-registo: {e}")
+        
+        # Re-registar após 100ms para garantir
+        self.root.after(100, reregister_handlers)
         
         # Mostrar tela de waiting imediatamente
         dashboard.show_waiting_for_turn_screen(current_player_name, current_player_color)
@@ -3890,7 +6558,7 @@ class IntegratedMenuSystem:
                     loop.run_until_complete(netmaster_client.disconnect())
                 
             except Exception as e:
-                print(f"❌ Erro ao sair: {e}")
+                print(f"[ERROR] Erro ao sair: {e}")
         
         threading.Thread(target=leave, daemon=True).start()
         
@@ -3899,7 +6567,7 @@ class IntegratedMenuSystem:
     
     def show_waiting_for_turn(self):
         """Mostra tela de espera pela vez de jogar"""
-        print(f"🔄 [FALLBACK] Mostrando 'Waiting for your turn to play...'")
+        print(f"[RELOAD] [FALLBACK] Mostrando 'Waiting for your turn to play...'")
         
         # Limpar tela
         for widget in self.root.winfo_children():
@@ -3980,7 +6648,14 @@ class IntegratedMenuSystem:
                         break
                     
                     # Buscar ícone do jogador por cor
-                    player_color = player.color if hasattr(player, 'color') else 'red'
+                    if isinstance(player, str):
+                        # player é uma string de cor
+                        player_color = player
+                        player_name = f"Player {i+1}"
+                    else:
+                        # player é um objeto com atributos color e name
+                        player_color = player.color if hasattr(player, 'color') else 'red'
+                        player_name = player.name if hasattr(player, 'name') else f"Player {i+1}"
                     icon_path = os.path.join(IMG_DIR, f"{player_color}_user_icon.png")
                     
                     try:
@@ -3993,7 +6668,6 @@ class IntegratedMenuSystem:
                         icon_label.place(x=x_offset, y=5)
                         
                         # Nome do jogador abaixo do ícone
-                        player_name = player.name if hasattr(player, 'name') else f"Player {i+1}"
                         name_label = tk.Label(
                             icons_frame,
                             text=player_name[:8],  # Limitar tamanho do nome
@@ -4086,7 +6760,7 @@ class IntegratedMenuSystem:
                     loop.run_until_complete(netmaster_client.disconnect())
                     
             except Exception as e:
-                print(f"❌ Erro ao desconectar: {e}")
+                print(f"[ERROR] Erro ao desconectar: {e}")
         
         threading.Thread(target=disconnect, daemon=True).start()
         
@@ -4105,6 +6779,77 @@ class IntegratedMenuSystem:
         else:
             # Para Remote Game ou outros tipos, lançar PlayerDashboard diretamente
             self.launch_player_dashboard(game_type)
+
+    def is_session_host(self):
+        """Verificar se este jogador é o Host da sessão"""
+        try:
+            # Verificar se há session_data
+            if not hasattr(netmaster_client, 'session_data') or not netmaster_client.session_data:
+                return False
+                
+            session_data = netmaster_client.session_data
+            my_player_id = getattr(netmaster_client, 'player_id', None)
+            host_id = session_data.get('host_player_id', None)  # CORREÇÃO: usar host_player_id
+            
+            is_host = (my_player_id == host_id)
+            print(f"[SESSION_TIMER] Verificação Host: my_id={my_player_id}, host_id={host_id}, is_host={is_host}")
+            
+            return is_host
+        except Exception as e:
+            print(f"[SESSION_TIMER] Erro ao verificar se é Host: {e}")
+            return False
+    
+    def send_timer_sync(self):
+        """Enviar sincronização do timer para todos os jogadores (apenas Host)"""
+        try:
+            if 'netmaster_client' in globals() and netmaster_client:
+                sync_data = {
+                    'type': 'timer_sync',
+                    'time_remaining': self.session_time_remaining,
+                    'timer_active': self.session_timer_active,
+                    'timestamp': time.time()
+                }
+                
+                print(f"[TIMER_SYNC] HOST enviando: {self.session_time_remaining:.1f}s")
+                
+                # Enviar a mensagem de forma assíncrona
+                async def send_async():
+                    try:
+                        await netmaster_client.send_message(sync_data)
+                        print(f"[TIMER_SYNC] ✓ Mensagem timer_sync enviada com sucesso")
+                    except Exception as e:
+                        print(f"[TIMER_SYNC] ✗ Erro ao enviar timer_sync: {e}")
+                
+                # Executar de forma assíncrona
+                asyncio.create_task(send_async())
+                
+        except Exception as e:
+            print(f"[TIMER_SYNC] Erro ao enviar sincronização: {e}")
+    
+    def on_timer_sync(self, data):
+        """Handler para sincronização do timer de sessão - apenas aceita atualizações do servidor"""
+        try:
+            # Verificar se a atualização vem do servidor
+            source = data.get('source')
+            if source != 'server':
+                print(f"[TIMER_SYNC] Ignorando timer_sync não-servidor (source: {source})")
+                return
+            
+            # Receber atualização do timer do servidor
+            time_remaining = data.get('time_remaining', 0)
+            
+            print(f"[TIMER_SYNC] Recebida atualização do timer do SERVIDOR: {time_remaining:.1f}s")
+            
+            # Atualizar estado local do timer (mas não executar countdown próprio)
+            self.session_time_remaining = time_remaining
+            self.session_timer_active = True  # Timer sempre ativo se vem do servidor
+            
+            # Atualizar display imediatamente se existir
+            if hasattr(self, 'session_timer_label') and self.session_timer_label:
+                self.update_timer_display()
+                
+        except Exception as e:
+            print(f"[TIMER_SYNC] Erro ao processar sincronização do timer: {e}")
 
     def launch_player_dashboard(self, game_type):
         """Lançar o PlayerDashboard"""
@@ -4433,7 +7178,7 @@ class PlayerDashboard(tk.Toplevel):
             
             if backup_event_tracking:
                 self._event_duration_tracking = backup_event_tracking.copy()
-                print(f"DEBUG: [EVENT_TRACKING] ✅ _event_duration_tracking restaurado do backup")
+                print(f"DEBUG: [EVENT_TRACKING] ✓ _event_duration_tracking restaurado do backup")
                 
                 # Log detalhado do tracking restaurado
                 for path, tracking in self._event_duration_tracking.items():
@@ -4445,7 +7190,7 @@ class PlayerDashboard(tk.Toplevel):
             
             if backup_event_start_turns:
                 self._event_start_turns = backup_event_start_turns.copy()
-                print(f"DEBUG: [EVENT_TRACKING] ✅ _event_start_turns restaurado do backup")
+                print(f"DEBUG: [EVENT_TRACKING] ✓ _event_start_turns restaurado do backup")
         else:
             print(f"DEBUG: [EVENT_TRACKING] Nenhum backup encontrado - tracking inicializado vazio")
         
@@ -4501,16 +7246,16 @@ class PlayerDashboard(tk.Toplevel):
         # Aplicar consolidação
         if service_tracking_consolidado:
             self._service_start_turns = service_tracking_consolidado.copy()
-            print(f"DEBUG: [SERVICE_TRACKING] ✅ Service tracking consolidado restaurado: {len(self._service_start_turns)} itens")
+            print(f"DEBUG: [SERVICE_TRACKING] ✓ Service tracking consolidado restaurado: {len(self._service_start_turns)} itens")
         
         if service_duration_consolidado:
             self._service_duration_tracking = service_duration_consolidado.copy()
-            print(f"DEBUG: [SERVICE_TRACKING] ✅ Service duration tracking consolidado restaurado: {len(self._service_duration_tracking)} itens")
+            print(f"DEBUG: [SERVICE_TRACKING] ✓ Service duration tracking consolidado restaurado: {len(self._service_duration_tracking)} itens")
         
         # Sincronizar backup principal
         if service_tracking_consolidado or service_duration_consolidado:
             root._backup_service_tracking = self._service_start_turns.copy()
-            print(f"DEBUG: [SERVICE_TRACKING] ✅ Backup principal de Services sincronizado")
+            print(f"DEBUG: [SERVICE_TRACKING] ✓ Backup principal de Services sincronizado")
         
         print(f"DEBUG: [SERVICE_TRACKING] === FIM INICIALIZAÇÃO ROBUSTA DE SERVICES ===")
         
@@ -4561,16 +7306,16 @@ class PlayerDashboard(tk.Toplevel):
         # Aplicar consolidação melhorada
         if event_tracking_consolidado:
             self._event_start_turns.update(event_tracking_consolidado)
-            print(f"DEBUG: [EVENT_TRACKING] ✅ Event tracking consolidado melhorado: {len(self._event_start_turns)} itens")
+            print(f"DEBUG: [EVENT_TRACKING] ✓ Event tracking consolidado melhorado: {len(self._event_start_turns)} itens")
         
         if event_duration_consolidado:
             self._event_duration_tracking.update(event_duration_consolidado)
-            print(f"DEBUG: [EVENT_TRACKING] ✅ Event duration tracking consolidado melhorado: {len(self._event_duration_tracking)} itens")
+            print(f"DEBUG: [EVENT_TRACKING] ✓ Event duration tracking consolidado melhorado: {len(self._event_duration_tracking)} itens")
         
         # Sincronizar backup principal
         if event_tracking_consolidado or event_duration_consolidado:
             root._backup_event_tracking = self._event_start_turns.copy()
-            print(f"DEBUG: [EVENT_TRACKING] ✅ Backup principal de Events sincronizado")
+            print(f"DEBUG: [EVENT_TRACKING] ✓ Backup principal de Events sincronizado")
         
         print(f"DEBUG: [EVENT_TRACKING] === FIM MELHORAMENTO ROBUSTO DE EVENTS ===")
         
@@ -4589,7 +7334,7 @@ class PlayerDashboard(tk.Toplevel):
             backup_data_volume = backup_counters.get('_service_data_volume_tracking', {})
             if backup_data_volume:
                 self._service_data_volume_tracking = backup_data_volume.copy()
-                print(f"DEBUG: [DATA_VOLUME] ✅ Tracking restaurado do backup: {len(self._service_data_volume_tracking)} itens")
+                print(f"DEBUG: [DATA_VOLUME] ✓ Tracking restaurado do backup: {len(self._service_data_volume_tracking)} itens")
                 for path, tracking in self._service_data_volume_tracking.items():
                     print(f"DEBUG: [DATA_VOLUME]   {os.path.basename(path)}: {tracking['packets_remaining']}/{tracking['original_packets']} pacotes")
             
@@ -4597,7 +7342,7 @@ class PlayerDashboard(tk.Toplevel):
             backup_pending_overlays = backup_counters.get('_pending_data_volume_expiry_overlays', [])
             if backup_pending_overlays:
                 self._pending_data_volume_expiry_overlays = backup_pending_overlays.copy()
-                print(f"DEBUG: [DATA_VOLUME] ✅ Overlays pendentes restaurados: {len(self._pending_data_volume_expiry_overlays)} itens")
+                print(f"DEBUG: [DATA_VOLUME] ✓ Overlays pendentes restaurados: {len(self._pending_data_volume_expiry_overlays)} itens")
                 for path in self._pending_data_volume_expiry_overlays:
                     print(f"DEBUG: [DATA_VOLUME]   Overlay pendente: {os.path.basename(path)}")
             else:
@@ -4778,6 +7523,38 @@ class PlayerDashboard(tk.Toplevel):
         for tipo, cartas in self.inventario.items():
             print(f"DEBUG: [PlayerDashboard]   {tipo}: {len(cartas)} cartas")
 
+        # REGISTAR HANDLERS MULTIPLAYER PARA A INSTÂNCIA PlayerDashboard
+        print("[DASHBOARD_HANDLERS] *** REGISTANDO ESTA INSTÂNCIA COMO ATIVA ***")
+        if 'netmaster_client' in globals() and netmaster_client:
+            try:
+                # Registar esta instância como ativa nos handlers globais
+                if hasattr(netmaster_client, 'set_active_dashboard'):
+                    netmaster_client.set_active_dashboard(self)
+                
+                # Registar handlers específicos da instância (substitui globais se necessário)
+                netmaster_client.set_message_handler('turn_changed', self.on_multiplayer_turn_changed)
+                netmaster_client.set_message_handler('player_joined', self.on_player_joined)
+                netmaster_client.set_message_handler('player_left', self.on_player_left)
+                netmaster_client.set_message_handler('heartbeat_ack', self.on_heartbeat_ack)
+                # NOVO: Handler para sincronização do timer
+                netmaster_client.set_message_handler('timer_sync', self.on_timer_sync)
+                # CRÍTICO: Registar pending_cards localmente para garantir disponibilidade
+                netmaster_client.set_message_handler('pending_cards', self.on_pending_cards_received)
+                
+                print("[DASHBOARD_HANDLERS] ✓ Instância PlayerDashboard registada como ativa")
+                print("[DASHBOARD_HANDLERS] ✓ Handlers da instância registados:")
+                print("[DASHBOARD_HANDLERS]   - turn_changed")
+                print("[DASHBOARD_HANDLERS]   - player_joined") 
+                print("[DASHBOARD_HANDLERS]   - player_left")
+                print("[DASHBOARD_HANDLERS]   - heartbeat_ack")
+                print("[DASHBOARD_HANDLERS]   - timer_sync")
+                print("[DASHBOARD_HANDLERS]   - pending_cards (local)")
+                print("[DASHBOARD_HANDLERS] INFO: card_returned_to_store usa handler global inteligente")
+            except Exception as e:
+                print(f"[DASHBOARD_HANDLERS] ERROR: Erro ao registar instância: {e}")
+        else:
+            print("[DASHBOARD_HANDLERS] WARNING: netmaster_client não disponível")
+
         # --- BARRA SUPERIOR COM IMAGEM ---
         try:
             topbar_img_path = os.path.join(IMG_DIR, f"TopBar_{self.player_color.lower()}.png")
@@ -4808,9 +7585,39 @@ class PlayerDashboard(tk.Toplevel):
             self.topbar_label = topbar_frame
             print("DEBUG: TopBar fallback criada após erro!")
 
+        # *** NOVO: INICIALIZAR TIMER DE SESSÃO ***
+        self.session_timer_active = False
+        self.session_time_remaining = 0
+        self.session_timer_label = None
+        print("DEBUG: [SESSION_TIMER] Timer de sessão inicializado")
+
+        # *** VERIFICAR SE DEVE INICIAR TIMER EM MODO MULTIPLAYER ***
+        print(f"DEBUG: [SESSION_TIMER] Verificando modo multiplayer...")
+        print(f"DEBUG: [SESSION_TIMER] hasattr multiplayer_mode: {hasattr(self, 'multiplayer_mode')}")
+        print(f"DEBUG: [SESSION_TIMER] multiplayer_mode value: {getattr(self, 'multiplayer_mode', None)}")
+        print(f"DEBUG: [SESSION_TIMER] hasattr netmaster_client.session_data: {hasattr(netmaster_client, 'session_data')}")
+        print(f"DEBUG: [SESSION_TIMER] netmaster_client.session_data: {getattr(netmaster_client, 'session_data', None)}")
+        
+        # FORÇA DETECÇÃO DE MULTIPLAYER baseada na presença de session_data
+        is_multiplayer = (hasattr(netmaster_client, 'session_data') and 
+                         netmaster_client.session_data is not None)
+        
+        if is_multiplayer:
+            print("DEBUG: [SESSION_TIMER] Modo multiplayer detectado via session_data - verificando se deve iniciar timer")
+            # Tentar obter duração da sessão do cliente netmaster
+            session_data = netmaster_client.session_data
+            duration_minutes = session_data.get('duration_minutes', 15)
+            print(f"DEBUG: [SESSION_TIMER] Dados de sessão encontrados - iniciando timer de {duration_minutes} minutos")
+            # Iniciar timer após interface estar criada
+            self.after(3000, lambda: self.start_session_timer(duration_minutes * 60))
+        else:
+            print("DEBUG: [SESSION_TIMER] Modo single player ou sem dados de sessão")
+
         # Chama a tela de lançamento de dado
         print("DEBUG: [PlayerDashboard] Chamando show_dice_roll_screen...")
-        self.show_dice_roll_screen(player_name, saldo, other_players, screen_width, screen_height)
+        # CORREÇÃO: Usar jogadores da sessão em vez de todos os outros jogadores
+        session_players = self.get_session_players_icons()
+        self.show_dice_roll_screen(player_name, saldo, session_players, screen_width, screen_height)
     
     def _capturar_estado_botoes_imediato(self):
         """Captura o estado atual dos botões + e seta no momento exato"""
@@ -4962,13 +7769,13 @@ class PlayerDashboard(tk.Toplevel):
         
         # VERIFICAÇÃO CRÍTICA: Garantir sincronização de todos os contadores
         if not (self._current_turn_number == self._current_turn == self._current_turn_id):
-            print(f"DEBUG: [TURN_RESET] ⚠️  WARNING: CONTADORES DESSINCRONIZADOS!")
+            print(f"DEBUG: [TURN_RESET] [WARNING]  WARNING: CONTADORES DESSINCRONIZADOS!")
             # Correção automática para o maior valor
             max_turn = max(self._current_turn_number, self._current_turn, self._current_turn_id)
             self._current_turn_number = max_turn
             self._current_turn = max_turn
             self._current_turn_id = max_turn
-            print(f"DEBUG: [TURN_RESET] ✅ CONTADORES SINCRONIZADOS para turno {max_turn}")
+            print(f"DEBUG: [TURN_RESET] ✓ CONTADORES SINCRONIZADOS para turno {max_turn}")
         
         # Resetar APENAS os contadores de processamento por turno (não os contadores de turno)
         old_rxd_counters = self._rxd_processed_this_turn.copy()
@@ -5782,22 +8589,23 @@ class PlayerDashboard(tk.Toplevel):
     
     def add_starter_cards(self):
         """
-        Função opcional para dar cartas iniciais ao jogador.
-        Adicionado para demonstração das páginas de inventário.
+        Função para dar cartas iniciais específicas ao jogador.
         """
-        print("DEBUG: [PlayerDashboard] Adicionando cartas iniciais de demonstração...")
+        print("DEBUG: [PlayerDashboard] Adicionando cartas iniciais específicas...")
         
         # Usar a detecção automática para Raspberry Pi e desenvolvimento local
         base_path = detect_player_inventory_base_dir()
         print(f"DEBUG: [add_starter_cards] Base path detectado: {base_path}")
         print(f"DEBUG: [add_starter_cards] Player color: {self.player_color}")
         
-        # Exemplo: dar 2-3 cartas de cada tipo da cor do jogador
-        card_types = {
-            "users": "Users",
-            "equipments": "Equipments", 
-            "services": "Services",
-            "activities": "Activities"
+        # Definir cartas específicas para cada tipo de inventário
+        starter_cards_config = {
+            "users": ["User_2.png"],
+            "equipments": ["Equipment_1.png", "Equipment_7.png"], 
+            "services": ["Service_1.png", "Service_2.png", "Service_5.png"],
+            "activities": ["Activity_1.png"],
+            "challenges": ["Challenge_1.png"]
+            # actions e events não terão cartas iniciais
         }
         
         color_variants = []
@@ -5812,117 +8620,46 @@ class PlayerDashboard(tk.Toplevel):
         else:
             color_variants = ["Blue", "blue"]  # default
         
-        for card_type, folder_name in card_types.items():
-            print(f"DEBUG: [add_starter_cards] Processando tipo: {card_type} -> pasta: {folder_name}")
+        # Processar cartas por cor do jogador (users, equipments, services, activities)
+        for card_type, target_cards in starter_cards_config.items():
+            if card_type == "challenges":
+                continue  # Challenges são processados separadamente (neutros)
+                
+            print(f"DEBUG: [add_starter_cards] Processando tipo: {card_type}")
             cards_found = False
+            
             for color_var in color_variants:
                 # Tentar estrutura do desenvolvimento local: NetMaster/Users/Residential-level/Red/
+                folder_name = card_type.capitalize()
                 path1 = os.path.join(base_path, folder_name, "Residential-level", color_var)
                 # Tentar estrutura do Raspberry Pi: /img/cartas/users/Residential-level/Red/
                 path2 = os.path.join(base_path, card_type, "Residential-level", color_var)
                 
                 for path_attempt, path_name in [(path1, "estrutura local"), (path2, "estrutura Raspberry Pi")]:
                     print(f"DEBUG: [add_starter_cards] Tentando {path_name}: {path_attempt}")
-                    print(f"DEBUG: [add_starter_cards] Caminho existe? {os.path.exists(path_attempt)}")
+                    
                     if os.path.exists(path_attempt):
                         try:
-                            files_in_path = os.listdir(path_attempt)
-                            print(f"DEBUG: [add_starter_cards] Arquivos encontrados: {files_in_path}")
-                            card_files = [os.path.join(path_attempt, f) for f in files_in_path 
-                                        if f.lower().endswith(('.png', '.jpg', '.jpeg'))]
-                            print(f"DEBUG: [add_starter_cards] Arquivos de carta filtrados: {[os.path.basename(f) for f in card_files]}")
-                            if card_files:
-                                # ESPECIAL: Para Activities, adicionar especificamente Activity_10.png e Activity_8.png se disponíveis
-                                if card_type == "activities":
-                                    target_activities = ["Activity_10.png", "Activity_8.png"]
-                                    activities_added = []
-                                    
-                                    for target_activity in target_activities:
-                                        for card_file in card_files:
-                                            if os.path.basename(card_file) == target_activity:
-                                                self.inventario[card_type].append(card_file)
-                                                activities_added.append(target_activity)
-                                                print(f"DEBUG: [add_starter_cards] Activity ESPECÍFICA adicionada: {os.path.basename(card_file)}")
-                                                break
-                                    
-                                    if not activities_added:
-                                        print(f"DEBUG: [add_starter_cards] Nenhuma activity específica encontrada, adicionando activities padrão")
-                                        # Adicionar 2-3 cartas de activities normais se nenhuma específica estiver disponível
-                                        max_cards = min(3, len(card_files))
-                                        print(f"DEBUG: [add_starter_cards] Adicionando {max_cards} cartas padrão de {card_type}")
-                                        for i in range(max_cards):
-                                            self.inventario[card_type].append(card_files[i])
-                                            print(f"DEBUG: [PlayerDashboard] Carta inicial adicionada: {os.path.basename(card_files[i])} ({card_type})")
-                                elif card_type == "users":
-                                    # ESPECIAL: Para Users, adicionar especificamente User_2, User_3 e User_4
-                                    target_users = ["User_2.png", "User_3.png", "User_4.png"]
-                                    users_added = []
-                                    
-                                    for target_user in target_users:
-                                        for card_file in card_files:
-                                            if os.path.basename(card_file) == target_user:
-                                                self.inventario[card_type].append(card_file)
-                                                users_added.append(target_user)
-                                                print(f"DEBUG: [add_starter_cards] User ESPECÍFICO adicionado: {os.path.basename(card_file)}")
-                                                break
-                                    
-                                    if not users_added:
-                                        print(f"DEBUG: [add_starter_cards] Nenhum user específico encontrado, adicionando users padrão")
-                                        # Adicionar 2-3 cartas de users normais se nenhum específico estiver disponível
-                                        max_cards = min(3, len(card_files))
-                                        print(f"DEBUG: [add_starter_cards] Adicionando {max_cards} cartas padrão de {card_type}")
-                                        for i in range(max_cards):
-                                            self.inventario[card_type].append(card_files[i])
-                                            print(f"DEBUG: [PlayerDashboard] Carta inicial adicionada: {os.path.basename(card_files[i])} ({card_type})")
-                                elif card_type == "services":
-                                    # ESPECIAL: Para Services, adicionar especificamente Service_5.png (TEMPORARY), Service_1.png (BANDWIDTH) e Service_2.png (DATA_VOLUME)
-                                    target_services = ["Service_5.png", "Service_1.png", "Service_2.png"]
-                                    services_added = []
-                                    
-                                    for target_service in target_services:
-                                        for card_file in card_files:
-                                            if os.path.basename(card_file) == target_service:
-                                                self.inventario[card_type].append(card_file)
-                                                services_added.append(target_service)
-                                                if target_service == "Service_5.png":
-                                                    print(f"DEBUG: [add_starter_cards] Service ESPECÍFICO adicionado: {os.path.basename(card_file)} (TEMPORARY - 4 turnos)")
-                                                elif target_service == "Service_1.png":
-                                                    print(f"DEBUG: [add_starter_cards] Service ESPECÍFICO adicionado: {os.path.basename(card_file)} (BANDWIDTH - permanente)")
-                                                elif target_service == "Service_2.png":
-                                                    print(f"DEBUG: [add_starter_cards] Service ESPECÍFICO adicionado: {os.path.basename(card_file)} (DATA_VOLUME - 10 pacotes)")
-                                                break
-                                    
-                                    if not services_added:
-                                        print(f"DEBUG: [add_starter_cards] Services específicos não encontrados, adicionando services padrão")
-                                        # Adicionar 2-3 cartas de services normais se nenhum específico estiver disponível
-                                        max_cards = min(3, len(card_files))
-                                        print(f"DEBUG: [add_starter_cards] Adicionando {max_cards} cartas padrão de {card_type}")
-                                        for i in range(max_cards):
-                                            self.inventario[card_type].append(card_files[i])
-                                            print(f"DEBUG: [PlayerDashboard] Carta inicial adicionada: {os.path.basename(card_files[i])} ({card_type})")
+                            # Procurar pelas cartas específicas
+                            for target_card in target_cards:
+                                card_path = os.path.join(path_attempt, target_card)
+                                if os.path.exists(card_path):
+                                    if card_type in ["actions", "events"]:
+                                        # Usar FIFO para actions e events
+                                        self.adicionar_carta_inventario(card_path, card_type)
+                                        print(f"DEBUG: [add_starter_cards] Carta {card_type} adicionada via FIFO: {target_card}")
                                     else:
-                                        # Adicionar também alguns services normais além dos específicos
-                                        remaining_files = [f for f in card_files if os.path.basename(f) not in target_services]
-                                        max_additional = min(1, len(remaining_files))  # Reduzir para 1 já que temos 2 específicos
-                                        for i in range(max_additional):
-                                            self.inventario[card_type].append(remaining_files[i])
-                                            print(f"DEBUG: [add_starter_cards] Service adicional adicionado: {os.path.basename(remaining_files[i])}")
+                                        # Usar append direto para outros tipos
+                                        self.inventario[card_type].append(card_path)
+                                        print(f"DEBUG: [add_starter_cards] Carta inicial adicionada: {target_card} ({card_type})")
                                 else:
-                                    # Para outros tipos de carta (equipments), usar comportamento normal
-                                    max_cards = min(3, len(card_files))
-                                    print(f"DEBUG: [add_starter_cards] Adicionando {max_cards} cartas de {card_type}")
-                                    for i in range(max_cards):
-                                        self.inventario[card_type].append(card_files[i])
-                                        print(f"DEBUG: [PlayerDashboard] Carta inicial adicionada: {os.path.basename(card_files[i])} ({card_type})")
-                                cards_found = True
-                                break
-                            else:
-                                print(f"DEBUG: [add_starter_cards] Nenhum arquivo de carta encontrado em {path_attempt}")
+                                    print(f"DEBUG: [add_starter_cards] Carta não encontrada: {target_card} em {path_attempt}")
+                            
+                            cards_found = True
+                            break
                         except Exception as e:
-                            print(f"DEBUG: [add_starter_cards] Erro ao listar arquivos em {path_attempt}: {e}")
+                            print(f"DEBUG: [add_starter_cards] Erro ao processar {path_attempt}: {e}")
                             continue
-                    else:
-                        print(f"DEBUG: [add_starter_cards] Caminho não existe: {path_attempt}")
                 
                 if cards_found:
                     break
@@ -5930,175 +8667,49 @@ class PlayerDashboard(tk.Toplevel):
             if not cards_found:
                 print(f"DEBUG: [add_starter_cards] NENHUMA ESTRUTURA FUNCIONOU para {card_type}")
         
-        # Adicionar algumas cartas neutras (actions, events, challenges)
-        print("DEBUG: [add_starter_cards] Processando cartas neutras...")
-        neutral_types = {
-            "challenges": "Challenges",
-            "actions": "Actions", 
-            "events": "Events"
-        }
+        # Processar challenges (neutros)
+        challenges_to_add = starter_cards_config["challenges"]
+        print(f"DEBUG: [add_starter_cards] Processando challenges neutros: {challenges_to_add}")
         
-        for card_type, folder_name in neutral_types.items():
-            # Tentar estrutura do desenvolvimento local: NetMaster/Challenges/Residential-level/
-            path1 = os.path.join(base_path, folder_name, "Residential-level")
-            # Tentar estrutura do Raspberry Pi: /img/cartas/challenges/Residential-level/
-            path2 = os.path.join(base_path, card_type, "Residential-level")
+        # Tentar estrutura do desenvolvimento local: NetMaster/Challenges/Residential-level/
+        path1 = os.path.join(base_path, "Challenges", "Residential-level")
+        # Tentar estrutura do Raspberry Pi: /img/cartas/challenges/Residential-level/
+        path2 = os.path.join(base_path, "challenges", "Residential-level")
+        
+        challenges_found = False
+        for path_attempt, path_name in [(path1, "estrutura local"), (path2, "estrutura Raspberry Pi")]:
+            print(f"DEBUG: [add_starter_cards] Tentando challenges {path_name}: {path_attempt}")
             
-            print(f"DEBUG: [add_starter_cards] Processando tipo neutro: {card_type} -> pasta: {folder_name}")
-            cards_found = False
-            
-            for path_attempt, path_name in [(path1, "estrutura local"), (path2, "estrutura Raspberry Pi")]:
-                print(f"DEBUG: [add_starter_cards] Tentando {path_name}: {path_attempt}")
-                print(f"DEBUG: [add_starter_cards] Caminho neutro existe? {os.path.exists(path_attempt)}")
-                if os.path.exists(path_attempt):
-                    try:
-                        files_in_path = os.listdir(path_attempt)
-                        print(f"DEBUG: [add_starter_cards] Arquivos neutros encontrados: {files_in_path}")
-                        
-                        # ESPECIAL: Para Actions, verificar explicitamente se Action_31.png e Action_46.png existem
-                        if card_type == "actions":
-                            action_31_path = os.path.join(path_attempt, "Action_31.png")
-                            action_46_path = os.path.join(path_attempt, "Action_46.png")
-                            print(f"DEBUG: [add_starter_cards] Verificação explícita Action_31.png em: {action_31_path}")
-                            print(f"DEBUG: [add_starter_cards] Action_31.png existe? {os.path.exists(action_31_path)}")
-                            print(f"DEBUG: [add_starter_cards] Verificação explícita Action_46.png em: {action_46_path}")
-                            print(f"DEBUG: [add_starter_cards] Action_46.png existe? {os.path.exists(action_46_path)}")
-                            if os.path.exists(action_31_path) and "Action_31.png" not in files_in_path:
-                                print(f"DEBUG: [add_starter_cards] WARNING: PROBLEMA: Action_31.png existe no filesystem mas não retornado por listdir!")
-                                files_in_path.append("Action_31.png")  # Força a adição
-                            if os.path.exists(action_46_path) and "Action_46.png" not in files_in_path:
-                                print(f"DEBUG: [add_starter_cards] WARNING: PROBLEMA: Action_46.png existe no filesystem mas não retornado por listdir!")
-                                files_in_path.append("Action_46.png")  # Força a adição
-                        
-                        card_files = [os.path.join(path_attempt, f) for f in files_in_path 
-                                    if f.lower().endswith(('.png', '.jpg', '.jpeg'))]
-                        print(f"DEBUG: [add_starter_cards] Arquivos de carta neutros filtrados: {[os.path.basename(f) for f in card_files]}")
-                        if card_files:
-                            # Para actions e events, filtrar apenas cartas válidas para o jogador
-                            if card_type == "challenges":
-                                valid_cards = []
-                                
-                                # Adicionar challenges genéricos disponíveis
-                                for card_file in card_files:
-                                    valid_cards.append(card_file)
-                                
-                                if not valid_cards:
-                                    # Se Challenge_3 não estiver disponível, pegar o primeiro Challenge disponível
-                                    valid_cards = card_files[:1] if card_files else []
-                                    print(f"DEBUG: [add_starter_cards] Challenge_3 não encontrado, usando primeiro disponível: {[os.path.basename(f) for f in valid_cards]}")
-                                
-                                card_files = valid_cards
-                                print(f"DEBUG: [add_starter_cards] Challenges selecionados para adicionar: {[os.path.basename(f) for f in card_files]}")
-                                
-                            elif card_type in ["actions", "events"] and hasattr(self, 'card_database') and self.card_database:
-                                valid_cards = []
-                                player_color = self.player_color.lower()
-                                
-                                for card_file in card_files:
-                                    filename = os.path.basename(card_file)
-                                    print(f"DEBUG: [add_starter_cards] Verificando arquivo {card_type}: {filename}")
-                                    try:
-                                        if card_type == "actions":
-                                            # ESPECÍFICO: Incluir Action_31.png e Action_46.png
-                                            if filename == "Action_31.png":
-                                                valid_cards.append(card_file)
-                                                print(f"DEBUG: [add_starter_cards] Action FORÇADA (Action_31): {filename}")
-                                            elif filename == "Action_46.png":
-                                                valid_cards.append(card_file)
-                                                print(f"DEBUG: [add_starter_cards] Action FORÇADA (Action_46): {filename}")
-                                            else:
-                                                print(f"DEBUG: [add_starter_cards] Action IGNORADA (não é Action_31 nem Action_46): {filename}")
-                                        elif card_type == "events":
-                                            # Event_1.png -> event_1
-                                            match = re.search(r'Event_(\d+)\.', filename)
-                                            if match:
-                                                # ESPECIAL: Incluir APENAS Event_55 e Event_14
-                                                if filename == "Event_55.png":
-                                                    valid_cards.append(card_file)
-                                                    print(f"DEBUG: [add_starter_cards] Event FORÇADO (teste duration variável): {filename}")
-                                                elif filename == "Event_14.png":
-                                                    valid_cards.append(card_file)
-                                                    print(f"DEBUG: [add_starter_cards] Event FORÇADO (Event_14): {filename}")
-                                                else:
-                                                    print(f"DEBUG: [add_starter_cards] Event IGNORADO (não é Event_55 nem Event_14): {filename}")
-                                    except Exception as e:
-                                        print(f"DEBUG: [add_starter_cards] Erro ao processar carta {filename}: {e}")
-                                
-                                card_files = valid_cards
-                                print(f"DEBUG: [add_starter_cards] Cartas filtradas para {card_type}: {len(card_files)} válidas de {len(valid_cards)} totais")
-                            
-                            # Adicionar cartas ao inventário
-                            if card_files:
-                                if card_type == "events":
-                                    max_cards = min(2, len(card_files))  # Máximo 2 events (Event_55 e Event_14)
-                                elif card_type == "actions":
-                                    max_cards = min(4, len(card_files))  # Máximo 4 actions (Action_70, Action_10, Action_1, Action_16)
-                                elif card_type == "challenges":
-                                    max_cards = min(2, len(card_files))  # Máximo 2 Challenges
-                                else:
-                                    max_cards = min(3, len(card_files))
-                                
-                                print(f"DEBUG: [add_starter_cards] Adicionando {max_cards} cartas neutras de {card_type}")
-                                for i in range(max_cards):
-                                    carta_path = card_files[i]
-                                    
-                                    # CORREÇÃO FIFO: Actions e Events devem usar adicionar_carta_inventario()
-                                    if card_type in ["actions", "events"]:
-                                        print(f"DEBUG: [add_starter_cards] Usando FIFO para {card_type}: {os.path.basename(carta_path)}")
-                                        self.adicionar_carta_inventario(carta_path, card_type)
-                                        print(f"DEBUG: [add_starter_cards] Carta {card_type} adicionada via FIFO: {os.path.basename(carta_path)}")
-                                    else:
-                                        # Outros tipos (challenges, equipments, etc.) usam append direto
-                                        self.inventario[card_type].append(carta_path)
-                                        print(f"DEBUG: [PlayerDashboard] Carta inicial neutra adicionada: {os.path.basename(carta_path)} ({card_type})")
-                                    
-                                    # Se for uma carta Challenge, registrar no sistema de tracking
-                                    if card_type == "challenges":
-                                        print(f"DEBUG: [add_starter_cards] Challenge adicionado ao inventário: {os.path.basename(carta_path)}")
-                                        print(f"DEBUG: [add_starter_cards] SUCCESS: Challenge estará disponível na página Activities/Challenges")
-                                    
-                                    # Se for uma carta Event, NÃO criar tracking automático
-                                    elif card_type == "events":
-                                        print(f"DEBUG: [add_starter_cards] === EVENT ADICIONADO AO INVENTÁRIO ===")
-                                        print(f"DEBUG: [add_starter_cards] Event: {os.path.basename(carta_path)}")
-                                        print(f"DEBUG: [add_starter_cards] ⚠️  TRACKING NÃO CRIADO - será criado quando Event for ativado")
-                                        print(f"DEBUG: [add_starter_cards] ✅  Event adicionado ao inventário via FIFO sem tracking pré-criado")
-                                        print(f"DEBUG: [add_starter_cards] === FIM: EVENT NO INVENTÁRIO ===")
-                            else:
-                                print(f"DEBUG: [add_starter_cards] Nenhuma carta válida encontrada para {card_type} após filtragem")
-                            cards_found = True
-                            break
+            if os.path.exists(path_attempt):
+                try:
+                    # Procurar pelas cartas específicas de challenge
+                    for target_card in challenges_to_add:
+                        card_path = os.path.join(path_attempt, target_card)
+                        if os.path.exists(card_path):
+                            self.inventario["challenges"].append(card_path)
+                            print(f"DEBUG: [add_starter_cards] Challenge inicial adicionado: {target_card}")
                         else:
-                            print(f"DEBUG: [add_starter_cards] Nenhum arquivo de carta neutra encontrado em {path_attempt}")
-                    except Exception as e:
-                        print(f"DEBUG: [PlayerDashboard] Erro ao carregar carta inicial {card_type}: {e}")
-                else:
-                    print(f"DEBUG: [add_starter_cards] Caminho neutro não existe: {path_attempt}")
-            
-            if not cards_found:
-                print(f"DEBUG: [add_starter_cards] NENHUMA ESTRUTURA NEUTRA FUNCIONOU para {card_type}")
+                            print(f"DEBUG: [add_starter_cards] Challenge não encontrado: {target_card} em {path_attempt}")
+                    
+                    challenges_found = True
+                    break
+                except Exception as e:
+                    print(f"DEBUG: [add_starter_cards] Erro ao processar challenges {path_attempt}: {e}")
+                    continue
         
-        print(f"DEBUG: [PlayerDashboard] Resumo do inventário após cartas iniciais:")
+        if not challenges_found:
+            print(f"DEBUG: [add_starter_cards] NENHUMA ESTRUTURA FUNCIONOU para challenges")
+        
+        print(f"DEBUG: [PlayerDashboard] Resumo do inventário após cartas iniciais específicas:")
         for tipo, cartas in self.inventario.items():
             print(f"DEBUG: [PlayerDashboard]   {tipo}: {len(cartas)} cartas")
+            if cartas:
+                for carta in cartas:
+                    print(f"DEBUG: [PlayerDashboard]     - {os.path.basename(carta)}")
         
-        # Verificar se temos as Actions específicas no inventário
-        action_31_present = any("Action_31.png" in carta for carta in self.inventario.get("actions", []))
-        action_46_present = any("Action_46.png" in carta for carta in self.inventario.get("actions", []))
-        print(f"DEBUG: [PlayerDashboard] Action_31.png presente? {action_31_present}")
-        print(f"DEBUG: [PlayerDashboard] Action_46.png presente? {action_46_present}")
+        print("DEBUG: [PlayerDashboard] Cartas iniciais específicas adicionadas com sucesso!")
         
-        if action_31_present or action_46_present:
-            print(f"DEBUG: [PlayerDashboard] SUCCESS: Actions específicas encontradas! NÃO adicionando Actions extras")
-            # Só garantir que há Events suficientes, mas não Actions extras
-            current_actions = len(self.inventario.get("actions", []))
-            self.add_more_action_event_cards(min_actions=current_actions, min_events=2)  # Manter actions atuais
-        else:
-            print(f"DEBUG: [PlayerDashboard] WARNING: Actions específicas NÃO encontradas, adicionando Actions padrão")
-            # Garantir que há cartas suficientes de Actions/Events  
-            self.add_more_action_event_cards(min_actions=6, min_events=2)
-        
-        # Adicionar Equipment_2.png especificamente ao inventário
+    def _get_card_message_size(self, carta_path):
         base_path = detect_player_inventory_base_dir()
         
         # CORREÇÃO: Incluir a cor do jogador no caminho do Equipment_2.png
@@ -6200,8 +8811,8 @@ class PlayerDashboard(tk.Toplevel):
         # O tracking será criado apenas quando o Event for realmente ativado
         if self.inventario.get("events"):
             print("DEBUG: [add_starter_cards] Events encontrados no inventário")
-            print("DEBUG: [add_starter_cards] ⚠️  Events NÃO serão ativados automaticamente")
-            print("DEBUG: [add_starter_cards] ✅  Tracking será criado quando Event for ativado no jogo")
+            print("DEBUG: [add_starter_cards] [WARNING]  Events NÃO serão ativados automaticamente")
+            print("DEBUG: [add_starter_cards] ✓  Tracking será criado quando Event for ativado no jogo")
     
     def _get_card_message_size(self, carta_path):
         """
@@ -7377,12 +9988,55 @@ class PlayerDashboard(tk.Toplevel):
         saldo_lbl.place(x=screen_width-70, y=30)
 
         # Ícones dos outros jogadores (esquerda)
+        print(f"DEBUG: [DICE_ICONS] Criando ícones dos outros jogadores")
+        print(f"DEBUG: [DICE_ICONS] Total de other_players: {len(other_players)}")
+        print(f"DEBUG: [DICE_ICONS] self.player_color: '{self.player_color}'")
+        
         for idx, p in enumerate(other_players):
-            if idx < len(USER_ICONS):
-                icon_img = ImageTk.PhotoImage(Image.open(USER_ICONS[idx]).resize((30,30)))
-                lbl = tk.Label(self, image=icon_img, bg=self.bar_color)
-                lbl.image = icon_img  # type: ignore[attr-defined]
-                lbl.place(x=5+idx*40, y=20)
+            try:
+                # Determinar cor do jogador
+                if isinstance(p, str):
+                    # p é uma string de cor
+                    player_color = p
+                    player_name = f"Player {idx+1}"
+                elif isinstance(p, dict):
+                    # p é um dicionário com dados do jogador
+                    player_color = p.get('color', 'red')
+                    player_name = p.get('name', f'Player {idx+1}')
+                else:
+                    # p é um objeto com atributo color
+                    player_color = p.color if hasattr(p, 'color') else 'red'
+                    player_name = p.name if hasattr(p, 'name') else f'Player {idx+1}'
+                
+                # Mapear cor para ícone específico
+                color_icon_map = {
+                    "red": "red_user_icon.png",
+                    "blue": "blue_user_icon.png", 
+                    "green": "green_user_icon.png",
+                    "yellow": "yellow_user_icon.png"
+                }
+                
+                icon_filename = color_icon_map.get(player_color.lower(), "red_user_icon.png")
+                icon_path = os.path.join(IMG_DIR, icon_filename)
+                
+                print(f"DEBUG: [DICE_ICONS] Jogador {idx}: {player_name} ({player_color}) -> {icon_filename}")
+                
+                if os.path.exists(icon_path):
+                    icon_img = ImageTk.PhotoImage(Image.open(icon_path).resize((30,30)))
+                    lbl = tk.Label(self, image=icon_img, bg=self.bar_color)
+                    lbl.image = icon_img  # type: ignore[attr-defined]
+                    lbl.place(x=5+idx*40, y=20)
+                else:
+                    print(f"DEBUG: [DICE_ICONS] Icon not found: {icon_path}")
+            except Exception as e:
+                print(f"DEBUG: [DICE_ICONS] Error loading player icon {idx}: {e}")
+                # Fallback to original logic if error
+                if idx < len(USER_ICONS):
+                    icon_img = ImageTk.PhotoImage(Image.open(USER_ICONS[idx]).resize((30,30)))
+                    lbl = tk.Label(self, image=icon_img, bg=self.bar_color)
+                    lbl.image = icon_img  # type: ignore[attr-defined]
+                    lbl.place(x=5+idx*40, y=20)
+                    print(f"DEBUG: [DICE_ICONS] Fallback: usou USER_ICONS[{idx}]")
 
         # Frame central para o dado e frases
         center_frame = tk.Frame(self, bg="black")
@@ -7665,6 +10319,42 @@ class PlayerDashboard(tk.Toplevel):
         self.animate_typing(lbl1, "It's your turn!", delay=60,
             callback=lambda: self.animate_typing(lbl2, "Roll the dice to start your adventure.", delay=60, callback=after_texts)
         )
+        
+        # *** NOVO: ADICIONAR TIMER DE SESSÃO NA TELA DE DADOS ***
+        if getattr(self, 'session_timer_active', False):
+            print(f"[SESSION_TIMER] Criando display na tela de dados - timer está activo")
+            # Usar delay para garantir que a interface está pronta
+            self.after(500, lambda: self.create_session_timer_display(self))
+        else:
+            # FORÇA DETECÇÃO DE MULTIPLAYER baseada na presença de session_data
+            is_multiplayer = (hasattr(netmaster_client, 'session_data') and 
+                             netmaster_client.session_data is not None)
+            
+            if is_multiplayer:
+                print(f"[SESSION_TIMER] Modo multiplayer detectado na tela de dados - tentando iniciar timer")
+                session_data = netmaster_client.session_data
+                duration_minutes = session_data.get('duration_minutes', 15)
+                print(f"[SESSION_TIMER] Iniciando timer tardio de {duration_minutes} minutos")
+                self.after(1000, lambda: self.start_session_timer(duration_minutes * 60))
+                self.after(1500, lambda: self.create_session_timer_display(self))
+            else:
+                print(f"[SESSION_TIMER] Sem dados de sessão disponíveis para iniciar timer na tela de dados")
+        
+        # *** NOVO: ADICIONAR BELOWBAR NA TELA DE DICE ROLL ***
+        try:
+            belowbar_path = os.path.join(IMG_DIR, f"BelowBar_{self.player_color.lower()}.png")
+            if os.path.exists(belowbar_path):
+                belowbar_img = Image.open(belowbar_path)
+                belowbar_img = belowbar_img.resize((screen_width, int(belowbar_img.height * screen_width / belowbar_img.width)))
+                self.belowbar_photo_dice = ImageTk.PhotoImage(belowbar_img)
+                
+                belowbar_label = tk.Label(self, image=self.belowbar_photo_dice, bg="black")
+                belowbar_label.pack(side=tk.BOTTOM, fill=tk.X)
+                print(f"DEBUG: [DICE_ROLL] BelowBar criado com sucesso: {belowbar_path}")
+            else:
+                print(f"DEBUG: [DICE_ROLL] WARNING: BelowBar não encontrado: {belowbar_path}")
+        except Exception as e:
+            print(f"DEBUG: [DICE_ROLL] Erro ao criar BelowBar: {e}")
         
     def atualizar_carrossel(self):
         # Junta todas as cartas de Activities e Challenges do inventário, sem duplicar
@@ -8137,13 +10827,41 @@ class PlayerDashboard(tk.Toplevel):
             if not (hasattr(self, 'winfo_exists') and self.winfo_exists()):
                 print("DEBUG: [END_TURN_TRANSITION] WARNING: Aplicação destruída - abortando transição")
                 return
+            
+            # MELHOR DETECÇÃO DE MODO MULTIPLAYER
+            multiplayer_mode_flag = getattr(self, 'multiplayer_mode', False)
+            has_session_data = hasattr(self, 'session_data') and self.session_data
+            has_netmaster_session = hasattr(netmaster_client, 'session_id') and netmaster_client.session_id
+            is_connected = hasattr(netmaster_client, 'connected') and netmaster_client.connected
+            
+            # É multiplayer se qualquer uma destas condições for verdadeira
+            is_multiplayer = multiplayer_mode_flag or has_session_data or has_netmaster_session
+            
+            print(f"DEBUG: [END_TURN_TRANSITION] Verificando modo multiplayer:")
+            print(f"DEBUG: [END_TURN_TRANSITION]   multiplayer_mode flag = {multiplayer_mode_flag}")
+            print(f"DEBUG: [END_TURN_TRANSITION]   has_session_data = {has_session_data}")
+            print(f"DEBUG: [END_TURN_TRANSITION]   has_netmaster_session = {has_netmaster_session}")
+            print(f"DEBUG: [END_TURN_TRANSITION]   is_connected = {is_connected}")
+            print(f"DEBUG: [END_TURN_TRANSITION]   RESULTADO: is_multiplayer = {is_multiplayer}")
+            
+            # CORREÇÃO CRÍTICA: Em modo multiplayer, NÃO ir automaticamente para dice roll
+            # O servidor é que decide quem tem o próximo turno via turn_changed
+            if is_multiplayer:
+                print("DEBUG: [END_TURN_TRANSITION] Modo multiplayer detectado - aguardando turn_changed do servidor")
+                print("DEBUG: [END_TURN_TRANSITION] NÃO chamando show_dice_roll_screen automaticamente")
+                return
                 
+            # Só em modo single player é que vai automaticamente para dice roll
+            print("DEBUG: [END_TURN_TRANSITION] Modo single player - continuando para dice roll")
+            
             # Obter dimensões da tela
             screen_width = self.winfo_screenwidth()
             screen_height = self.winfo_screenheight()
             
             print("DEBUG: [END_TURN_TRANSITION] Chamando show_dice_roll_screen...")
-            self.show_dice_roll_screen(self.player_name, self.saldo, self.other_players, screen_width, screen_height)
+            # CORREÇÃO: Usar jogadores da sessão em vez de todos os outros jogadores
+            session_players = self.get_session_players_icons()
+            self.show_dice_roll_screen(self.player_name, self.saldo, session_players, screen_width, screen_height)
             print("DEBUG: [END_TURN_TRANSITION] SUCCESS: Transição para dice roll screen completa")
             
         except tk.TclError as e:
@@ -8165,6 +10883,12 @@ class PlayerDashboard(tk.Toplevel):
             # CORREÇÃO CRÍTICA: Restaurar contadores de turno se foram feitos backups
             # Isto resolve o problema dos contadores voltarem ao turno 1 após substituições
             self._restore_turn_counters_after_reconstruction()
+            
+            # NOVO SISTEMA: Verificar cartas pendentes armazenadas no servidor
+            # Chamado quando é a vez do jogador jogar (interface principal)
+            print("DEBUG: [INTERFACE] === VERIFICAÇÃO DE CARTAS PENDENTES NO SERVIDOR ===")
+            self._verificar_cartas_pendentes()
+            print("DEBUG: [INTERFACE] === FIM VERIFICAÇÃO DE CARTAS PENDENTES ===")
             
             # VERIFICAÇÃO AUTOMÁTICA DE EVENTS EXPIRADOS
             # Verificar se há Events expirados e mostrar overlay automaticamente POR CIMA da interface
@@ -8367,13 +11091,38 @@ class PlayerDashboard(tk.Toplevel):
                 self.topbar_label = topbar_frame
                 print("DEBUG: [playerdashboard_interface] TopBar fallback criada após erro!")
         
-        # Ícones dos outros jogadores (esquerda)
-        for idx, p in enumerate(other_players):
+        # Ícones dos outros jogadores (esquerda) - CORRIGIDO: mostrar apenas jogadores da sessão
+        session_players = self.get_session_players_icons()
+        for idx, player_info in enumerate(session_players):
             if idx < len(USER_ICONS):
-                icon_img = ImageTk.PhotoImage(Image.open(USER_ICONS[idx]).resize((30,30)))
-                lbl = tk.Label(self, image=icon_img, bg=self.bar_color)
-                lbl.image = icon_img  # type: ignore[attr-defined]
-                lbl.place(x=5+idx*40, y=20)
+                try:
+                    # Usar ícone baseado na cor do jogador da sessão
+                    color_icon_map = {
+                        "red": "red_user_icon.png",
+                        "blue": "blue_user_icon.png", 
+                        "green": "green_user_icon.png",
+                        "yellow": "yellow_user_icon.png"
+                    }
+                    
+                    icon_name = color_icon_map.get(player_info.get('color', 'red'), "red_user_icon.png")
+                    icon_path = os.path.join(IMG_DIR, icon_name)
+                    
+                    if os.path.exists(icon_path):
+                        icon_img = ImageTk.PhotoImage(Image.open(icon_path).resize((30,30)))
+                        lbl = tk.Label(self, image=icon_img, bg=self.bar_color)
+                        lbl.image = icon_img  # type: ignore[attr-defined]
+                        lbl.place(x=5+idx*40, y=20)
+                        print(f"DEBUG: [ICONS] Ícone criado para {player_info.get('name')} ({player_info.get('color')})")
+                    else:
+                        print(f"DEBUG: [ICONS] Ícone não encontrado: {icon_path}")
+                except Exception as e:
+                    print(f"DEBUG: [ICONS] Erro ao criar ícone {idx}: {e}")
+                    # Fallback para ícone padrão se houver erro
+                    if idx < len(USER_ICONS):
+                        icon_img = ImageTk.PhotoImage(Image.open(USER_ICONS[idx]).resize((30,30)))
+                        lbl = tk.Label(self, image=icon_img, bg=self.bar_color)
+                        lbl.image = icon_img  # type: ignore[attr-defined]
+                        lbl.place(x=5+idx*40, y=20)
 
         # Nome do jogador (centro)
         name_lbl = tk.Label(self, text=player_name, font=("Helvetica", 18, "bold"), bg=self.bar_color, fg="black", borderwidth=0)
@@ -8495,7 +11244,7 @@ class PlayerDashboard(tk.Toplevel):
                         return
                     
                     # Importar Store aqui para evitar imports circulares
-                    from Store_v2 import StoreWindow
+                    from Store import StoreWindow
                     # Usar as mesmas informações da casa atual (se disponível)
                     casa_tipo = getattr(self, 'current_casa_tipo', 'neutral')
                     casa_cor = getattr(self, 'current_casa_cor', 'neutral')
@@ -8893,6 +11642,26 @@ class PlayerDashboard(tk.Toplevel):
             else:
                 print("DEBUG: WARNING: card_labels não existe - pulando atualização de destaques")
         
+        # *** NOVO: ADICIONAR TIMER DE SESSÃO NA INTERFACE PRINCIPAL ***
+        if getattr(self, 'session_timer_active', False):
+            print(f"[SESSION_TIMER] Criando display na interface principal - timer já está activo")
+            # Usar delay para garantir que a interface está pronta
+            self.after(200, lambda: self.create_session_timer_display(self))
+        else:
+            # FORÇA DETECÇÃO DE MULTIPLAYER baseada na presença de session_data
+            is_multiplayer = (hasattr(netmaster_client, 'session_data') and 
+                             netmaster_client.session_data is not None)
+            
+            if is_multiplayer:
+                print(f"[SESSION_TIMER] Modo multiplayer detectado na interface principal - verificando se deve iniciar timer")
+                session_data = netmaster_client.session_data
+                duration_minutes = session_data.get('duration_minutes', 15)
+                print(f"[SESSION_TIMER] Iniciando timer de {duration_minutes} minutos na interface principal")
+                self.after(500, lambda: self.start_session_timer(duration_minutes * 60))
+                self.after(700, lambda: self.create_session_timer_display(self))
+            else:
+                print(f"[SESSION_TIMER] Modo single player ou sem dados de sessão na interface principal")
+        
         # Usar delay pequeno para garantir que widgets estão estabilizados
         self.after(150, atualizar_destaques_com_delay)
         
@@ -8954,6 +11723,73 @@ class PlayerDashboard(tk.Toplevel):
             saldo_lbl.lift()  # Garante que fica por cima
         except Exception as e:
             print(f"DEBUG: Erro ao criar overlay coin/saldo: {e}")
+    
+    def get_session_players_icons(self):
+        """Obtém lista de jogadores da sessão actual para mostrar ícones corretos"""
+        try:
+            print(f"DEBUG: [ICONS] GET_SESSION_PLAYERS_ICONS - player: {self.player_name} ({self.player_color})")
+            
+            # Verificar se há session_data no netmaster_client global
+            if hasattr(netmaster_client, 'session_data') and netmaster_client.session_data:
+                session_data = netmaster_client.session_data
+                players_list = []
+                
+                print(f"DEBUG: [ICONS] session_data encontrada com {len(session_data.get('players', {}))} jogadores")
+                
+                # Obter jogadores da sessão, excluindo o próprio jogador
+                for player_id, player_data in session_data.get('players', {}).items():
+                    player_name = player_data.get('name', 'Unknown')
+                    player_color = player_data.get('color', 'red')
+                    
+                    # Não incluir o próprio jogador nos ícones
+                    if player_name != self.player_name:
+                        players_list.append({
+                            'id': player_id,
+                            'name': player_name,
+                            'color': player_color
+                        })
+                        print(f"DEBUG: [ICONS] ✓ Jogador adicionado: {player_name} ({player_color})")
+                    else:
+                        print(f"DEBUG: [ICONS] ✗ Excluído (é o próprio): {player_name} ({player_color})")
+                
+                print(f"DEBUG: [ICONS] Lista final: {len(players_list)} jogadores")
+                return players_list
+            else:
+                print("DEBUG: [ICONS] Sem session_data - usando fallback para other_players")
+                # Fallback: converter other_players existente em formato esperado
+                fallback_list = []
+                if hasattr(self, 'other_players') and self.other_players:
+                    print(f"DEBUG: [ICONS] self.other_players: {self.other_players}")
+                    
+                    for i, player in enumerate(self.other_players):
+                        if hasattr(player, 'name') and hasattr(player, 'color'):
+                            # Objeto com atributos name e color
+                            if player.color.lower() != self.player_color.lower():
+                                fallback_list.append({
+                                    'id': f'player_{i}',
+                                    'name': player.name,
+                                    'color': player.color
+                                })
+                                print(f"DEBUG: [ICONS] FALLBACK ✓ Objeto: {player.name} ({player.color})")
+                            else:
+                                print(f"DEBUG: [ICONS] FALLBACK ✗ Objeto (mesma cor): {player.name} ({player.color})")
+                        elif isinstance(player, str):
+                            # Se other_players contém strings (cores), mapear para nomes
+                            if player.lower() != self.player_color.lower():
+                                fallback_list.append({
+                                    'id': f'player_{i}',
+                                    'name': f'Player {i+1}',
+                                    'color': player
+                                })
+                                print(f"DEBUG: [ICONS] FALLBACK ✓ String: Player {i+1} ({player})")
+                            else:
+                                print(f"DEBUG: [ICONS] FALLBACK ✗ String (mesma cor): Player {i+1} ({player})")
+                
+                print(f"DEBUG: [ICONS] Lista final do fallback: {len(fallback_list)} jogadores")
+                return fallback_list
+        except Exception as e:
+            print(f"DEBUG: [ICONS] Erro ao obter jogadores da sessão: {e}")
+            return []
     
     def update_progress_bars_for_card(self, card_idx):
         """Atualiza as barras de progresso com base nos valores do card_stats"""
@@ -9048,6 +11884,206 @@ class PlayerDashboard(tk.Toplevel):
         if not hasattr(self, "progress_labels"):
             self.progress_labels = {}
         self.progress_labels[label] = value_lbl  # Guarda referência à label do valor
+
+    # *** MÉTODOS DO TIMER DE SESSÃO ***
+    def start_session_timer(self, time_remaining_seconds):
+        """Iniciar timer de contagem decrescente da sessão"""
+        print(f"[SESSION_TIMER] *** TIMER INICIADO NO PLAYERDASHBOARD ***")
+        print(f"[SESSION_TIMER] Tempo inicial: {time_remaining_seconds:.1f} segundos")
+        
+        # Converter para minutos e segundos
+        minutes = int(time_remaining_seconds // 60)
+        seconds = int(time_remaining_seconds % 60)
+        
+        print(f"[SESSION_TIMER] Tempo formatado: {minutes:02d}:{seconds:02d}")
+        
+        # Armazenar tempo restante
+        self.session_time_remaining = time_remaining_seconds
+        self.session_timer_active = True
+        
+        # VERIFICAR SE É O HOST - apenas Host inicia countdown automático
+        is_host = self.is_session_host()
+        
+        print(f"[SESSION_TIMER] Timer activado - verificando se é Host: {is_host}")
+        
+        if is_host:
+            print(f"[SESSION_TIMER] Este jogador é HOST - iniciando countdown automático")
+            # Iniciar update do timer apenas no Host
+            self.update_session_timer()
+        else:
+            print(f"[SESSION_TIMER] Este jogador é JOINEE - aguardando sincronização do Host")
+            # Joinees não iniciam countdown - apenas aguardam mensagens do Host
+
+    def update_session_timer(self):
+        """Atualizar o timer a cada segundo - DESATIVADO: Agora todos recebem updates do servidor"""
+        if not getattr(self, 'session_timer_active', False):
+            return
+            
+        if self.session_time_remaining <= 0:
+            print(f"[SESSION_TIMER] *** TEMPO ESGOTADO! ***")
+            self.session_timer_active = False
+            # Fim de jogo - mostrar página de ranking
+            self._handle_game_time_ended()
+            return
+        
+        # CORREÇÃO: DESATIVAR countdown local - TODOS recebem updates do servidor
+        print(f"[SESSION_TIMER] Timer local desativado - aguardando updates do servidor")
+        print(f"[SESSION_TIMER] Tempo atual recebido do servidor: {self.session_time_remaining:.1f}s")
+        
+        # Apenas atualizar display com o valor recebido do servidor
+        self.update_timer_display()
+        
+        # NÃO AGENDAR mais countdown local - servidor controla tudo
+        # self.after(1000, self.update_session_timer) # REMOVIDO
+    
+    def is_session_host(self):
+        """Verificar se este jogador é o Host da sessão"""
+        try:
+            # Verificar se há session_data
+            if not hasattr(netmaster_client, 'session_data') or not netmaster_client.session_data:
+                return False
+                
+            session_data = netmaster_client.session_data
+            my_player_id = getattr(netmaster_client, 'player_id', None)
+            host_id = session_data.get('host_player_id', None)  # CORREÇÃO: usar host_player_id
+            
+            is_host = (my_player_id == host_id)
+            print(f"[SESSION_TIMER] Verificação Host: my_id={my_player_id}, host_id={host_id}, is_host={is_host}")
+            
+            return is_host
+        except Exception as e:
+            print(f"[SESSION_TIMER] Erro ao verificar se é Host: {e}")
+            return False
+    
+    def send_timer_sync(self):
+        """Enviar sincronização do timer para todos os jogadores (apenas Host)"""
+        try:
+            if 'netmaster_client' in globals() and netmaster_client:
+                sync_data = {
+                    'type': 'timer_sync',
+                    'time_remaining': self.session_time_remaining,
+                    'timer_active': self.session_timer_active,
+                    'timestamp': time.time()
+                }
+                
+                print(f"[TIMER_SYNC] HOST enviando: {self.session_time_remaining:.1f}s")
+                
+                # Enviar a mensagem de forma assíncrona
+                async def send_async():
+                    try:
+                        await netmaster_client.send_message(sync_data)
+                        print(f"[TIMER_SYNC] ✓ Mensagem timer_sync enviada com sucesso")
+                    except Exception as e:
+                        print(f"[TIMER_SYNC] ✗ Erro ao enviar timer_sync: {e}")
+                
+                # Executar de forma assíncrona
+                asyncio.create_task(send_async())
+                
+        except Exception as e:
+            print(f"[TIMER_SYNC] Erro ao enviar sincronização: {e}")
+    
+    def update_timer_display(self):
+        """Atualizar display do timer na interface"""
+        if not hasattr(self, 'session_time_remaining'):
+            print(f"[SESSION_TIMER] DEBUG: session_time_remaining não existe")
+            return
+            
+        # Converter para minutos e segundos
+        minutes = int(self.session_time_remaining // 60)
+        seconds = int(self.session_time_remaining % 60)
+        
+        # Formato do timer SEM EMOJI
+        timer_text = f"{minutes:02d}:{seconds:02d}"
+        
+        # Cor baseada no tempo restante
+        if minutes < 2:  # Menos de 2 minutos - vermelho
+            timer_color = "#FF4444"
+        elif minutes < 5:  # Menos de 5 minutos - amarelo
+            timer_color = "#FFAA00"
+        else:  # Mais de 5 minutos - verde
+            timer_color = "#44FF44"
+        
+        print(f"[SESSION_TIMER] DEBUG: Atualizando timer: {timer_text} (cor: {timer_color})")
+        
+        # Atualizar label se existir E se ainda é válido
+        if hasattr(self, 'session_timer_label') and self.session_timer_label:
+            try:
+                # CORREÇÃO: Verificar se o widget ainda existe antes de tentar actualizar
+                if self.session_timer_label.winfo_exists():
+                    self.session_timer_label.configure(text=timer_text, fg=timer_color)
+                    print(f"[SESSION_TIMER] DEBUG: Timer atualizado com sucesso")
+                else:
+                    print(f"[SESSION_TIMER] DEBUG: Widget timer não existe mais - limpando referência")
+                    self.session_timer_label = None
+            except Exception as e:
+                print(f"[SESSION_TIMER] Erro ao atualizar label: {e}")
+                # Se há erro, limpar a referência para evitar tentativas futuras
+                self.session_timer_label = None
+        else:
+            # NOVO: Log quando não há timer visível mas tempo continua a passar
+            print(f"[SESSION_TIMER] DEBUG: Timer a contar em background: {timer_text} (sem display)")
+    
+    def create_session_timer_display(self, parent_widget):
+        """Criar display do timer de sessão numa interface"""
+        try:
+            # CORREÇÃO: Verificar se estamos em modo multiplayer primeiro
+            is_multiplayer = (hasattr(netmaster_client, 'session_data') and 
+                             netmaster_client.session_data is not None)
+            
+            # Verificar se o timer está ativo OU se estamos em modo multiplayer
+            timer_active = getattr(self, 'session_timer_active', False)
+            has_timer_time = getattr(self, 'session_time_remaining', 0) > 0
+            
+            # CORREÇÃO: Se é multiplayer, sempre criar o timer display
+            if not timer_active and not is_multiplayer:
+                print(f"[SESSION_TIMER] DEBUG: Timer não está ativo e sem dados multiplayer - não criando display")
+                print(f"[SESSION_TIMER] DEBUG: timer_active={timer_active}, is_multiplayer={is_multiplayer}, has_timer_time={has_timer_time}")
+                return
+            
+            # Se é multiplayer mas não tem timer ativo, ativar o timer primeiro
+            if is_multiplayer and not timer_active:
+                session_data = netmaster_client.session_data
+                duration_minutes = session_data.get('duration_minutes', 15)
+                print(f"[SESSION_TIMER] Ativando timer para interface principal: {duration_minutes} minutos")
+                self.session_time_remaining = duration_minutes * 60
+                self.session_timer_active = True
+                # CORREÇÃO: Não iniciar timer local - aguardar updates do servidor
+                # if self.is_session_host():
+                #     self.after(1000, self.update_session_timer) # REMOVIDO
+                print(f"[SESSION_TIMER] Timer ativado - aguardando updates do servidor")
+            
+            # Evitar criação duplicada
+            if hasattr(self, 'session_timer_label') and self.session_timer_label:
+                print(f"[SESSION_TIMER] DEBUG: Timer label já existe - atualizando posição")
+                # Apenas reposicionar se já existe
+                self.update_timer_display()
+                return
+            
+            print(f"[SESSION_TIMER] DEBUG: Criando timer display na interface principal...")
+            
+            # Criar label do timer SEM EMOJI - TAMANHO REDUZIDO e posicionado acima do nome do jogador
+            self.session_timer_label = tk.Label(
+                parent_widget,
+                text="--:--",
+                font=("Arial", 14, "bold"),  # Reduzido de 18 para 14
+                fg="#44FF44",
+                bg="black"
+            )
+            
+            # Posicionar acima do nome do jogador (no topo da interface)
+            self.session_timer_label.place(relx=0.5, y=0, anchor="n")
+            
+            print(f"[SESSION_TIMER] DEBUG: Segunda instância do display criada acima do nome do jogador")
+            
+            # Atualizar imediatamente
+            self.update_timer_display()
+            
+        except Exception as e:
+            print(f"[SESSION_TIMER] Erro ao criar display (segunda instância): {e}")
+            import traceback
+            traceback.print_exc()
+            self.session_timer_label = None
+    # *** FIM MÉTODOS DO TIMER DE SESSÃO ***
 
     def try_mostrar_carta(self, path):
         try:
@@ -9241,6 +12277,10 @@ class PlayerDashboard(tk.Toplevel):
 
     def adicionar_carta_inventario(self, carta_path, carta_tipo):
         if carta_tipo in self.inventario:
+            print(f"DEBUG: [ADICIONAR_CARTA] === INICIANDO ADIÇÃO DE CARTA ===")
+            print(f"DEBUG: [ADICIONAR_CARTA] Carta: {os.path.basename(carta_path)}")
+            print(f"DEBUG: [ADICIONAR_CARTA] Tipo: {carta_tipo}")
+            
             # CORREÇÃO CRÍTICA: Verificar se será primeira na fila ANTES de adicionar ao tracking
             will_be_first_in_queue = False
             if carta_tipo in ["actions", "events"]:
@@ -9252,6 +12292,7 @@ class PlayerDashboard(tk.Toplevel):
                     print(f"DEBUG: [TEMPORAL] Fila com {len(self._actions_events_order)} cartas - {carta_tipo} vai para o fim: {os.path.basename(carta_path)}")
             
             self.inventario[carta_tipo].append(carta_path)
+            print(f"DEBUG: [ADICIONAR_CARTA] Carta adicionada ao inventário {carta_tipo}")
             
             # SISTEMA FIFO SIMPLES: Nova carta sempre vai para o fim da fila
             if carta_tipo in ["actions", "events"]:
@@ -9285,58 +12326,282 @@ class PlayerDashboard(tk.Toplevel):
             
             # Se for uma carta Event, registrar no tracking mas só ativar se for posição 0
             if carta_tipo == "events":
+                # CORREÇÃO CRÍTICA: Garantir que os atributos de tracking existem antes de usar
+                if not hasattr(self, '_event_start_turns'):
+                    self._event_start_turns = {}
+                    print(f"DEBUG: [ADD_EVENT] _event_start_turns inicializado")
+                
+                if not hasattr(self, '_event_duration_tracking'):
+                    self._event_duration_tracking = {}
+                    print(f"DEBUG: [ADD_EVENT] _event_duration_tracking inicializado")
+                
                 current_turn = getattr(self, '_current_turn', 0)
                 
                 # Obter duration_turns da carta
                 from cards_database import get_event_duration
                 duration_turns = get_event_duration(carta_path)
                 
-                if duration_turns is not None:
+                # CORREÇÃO: Verificar se duration_turns é uma string "variable"
+                if duration_turns == "variable":
+                    # Para events com duração variável, não converter para número - manter como "variable"
+                    print(f"DEBUG: [ADD_EVENT] Event com duração variável - mantendo duration_turns = 'variable'")
+                elif isinstance(duration_turns, str):
+                    # Tentar converter string para número
+                    try:
+                        duration_turns = int(duration_turns)
+                    except (ValueError, TypeError):
+                        duration_turns = 3  # Fallback para 3 turnos
+                        print(f"DEBUG: [ADD_EVENT] Erro ao converter duração - usando 3 turnos por padrão")
+                elif duration_turns is None:
+                    duration_turns = 3  # Fallback para 3 turnos
+                    print(f"DEBUG: [ADD_EVENT] Duração não encontrada - usando 3 turnos por padrão")
+                
+                if duration_turns is not None and (isinstance(duration_turns, int) or duration_turns == "variable"):
                     # NOVA LÓGICA: Verificar se uma carta foi removida recentemente
                     card_should_be_inactive_initially = False
                     
                     # Se uma Action ou Event foi removido recentemente, próxima carta deve ficar inativa inicialmente
-                    if self._action_recently_removed or self._event_recently_removed:
+                    if getattr(self, '_action_recently_removed', False) or getattr(self, '_event_recently_removed', False):
                         card_should_be_inactive_initially = True
                         print(f"DEBUG: [CARD_SEQUENCING] Event {os.path.basename(carta_path)} deve ficar INATIVO inicialmente - carta anterior foi removida")
                     
                     # CORREÇÃO: Usar a verificação feita antes de adicionar ao tracking
                     if will_be_first_in_queue and not card_should_be_inactive_initially:
                         # Event vai para posição 0 e não há sequenciamento - ativar imediatamente
-                        self._event_start_turns[carta_path] = current_turn
-                        self._event_duration_tracking[carta_path] = {
-                            'start_turn': current_turn,
-                            'duration_turns': duration_turns,
-                            'expires_turn': current_turn + duration_turns,
-                            'is_active': True  # Marcador para indicar que está ativo
-                        }
-                        print(f"DEBUG: [ADD_EVENT] Event adicionado na posição 0 cronológica (ativo): {os.path.basename(carta_path)}")
+                        if duration_turns == "variable":
+                            # Event com duração variável - não definir start_turn nem expires_turn ainda
+                            self._event_start_turns[carta_path] = None  # Será definido após lançar dado
+                            self._event_duration_tracking[carta_path] = {
+                                'start_turn': None,  # Será definido após lançar dado
+                                'duration_turns': duration_turns,  # Manter "variable"
+                                'expires_turn': None,  # Será definido após lançar dado
+                                'is_active': True  # Marcador para indicar que está ativo
+                            }
+                            print(f"DEBUG: [ADD_EVENT] ★★★ Event VARIÁVEL ATIVADO (posição 0, aguardando dado): {os.path.basename(carta_path)} ★★★")
+                            print(f"DEBUG: [ADD_EVENT] - start_turn: None (será definido após lançar dado)")
+                            print(f"DEBUG: [ADD_EVENT] - duration_turns: variable")
+                            print(f"DEBUG: [ADD_EVENT] - expires_turn: None (será definido após lançar dado)")
+                            print(f"DEBUG: [ADD_EVENT] - is_active: True")
+                        else:
+                            # Event com duração fixa - ativar normalmente
+                            self._event_start_turns[carta_path] = current_turn
+                            self._event_duration_tracking[carta_path] = {
+                                'start_turn': current_turn,
+                                'duration_turns': duration_turns,
+                                'expires_turn': current_turn + duration_turns,
+                                'is_active': True  # Marcador para indicar que está ativo
+                            }
+                            print(f"DEBUG: [ADD_EVENT] ★★★ Event ATIVADO IMEDIATAMENTE (posição 0, sem sequenciamento): {os.path.basename(carta_path)} ★★★")
+                            print(f"DEBUG: [ADD_EVENT] - start_turn: {current_turn}")
+                            print(f"DEBUG: [ADD_EVENT] - duration_turns: {duration_turns}")
+                            print(f"DEBUG: [ADD_EVENT] - expires_turn: {current_turn + duration_turns}")
+                            print(f"DEBUG: [ADD_EVENT] - is_active: True")
                     else:
                         # Event vai para fila OU deve ficar inativo devido ao sequenciamento - não ativar ainda
                         self._event_start_turns[carta_path] = None  # Não ativo ainda
                         self._event_duration_tracking[carta_path] = {
                             'start_turn': None,  # Será definido quando ativar no próximo turno
-                            'duration_turns': duration_turns,
+                            'duration_turns': duration_turns,  # Pode ser "variable" ou número
                             'expires_turn': None,  # Será calculado quando ativar
                             'is_active': False,  # Em fila ou inativo por sequenciamento
                             'pending_activation': card_should_be_inactive_initially  # Marca se está esperando ativação por sequenciamento
                         }
                         if card_should_be_inactive_initially:
-                            print(f"DEBUG: [ADD_EVENT] Event adicionado na posição 0 mas INATIVO por sequenciamento: {os.path.basename(carta_path)}")
+                            print(f"DEBUG: [ADD_EVENT] Event INATIVO por sequenciamento (posição 0): {os.path.basename(carta_path)}")
+                            print(f"DEBUG: [ADD_EVENT] - Motivo: carta anterior foi removida")
+                            print(f"DEBUG: [ADD_EVENT] - pending_activation: True")
                         else:
-                            print(f"DEBUG: [ADD_EVENT] Event adicionado na fila cronológica (inativo): {os.path.basename(carta_path)}")
+                            print(f"DEBUG: [ADD_EVENT] Event INATIVO (vai para fila): {os.path.basename(carta_path)}")
+                            print(f"DEBUG: [ADD_EVENT] - Motivo: não é primeira na fila (will_be_first_in_queue: {will_be_first_in_queue})")
+                        print(f"DEBUG: [ADD_EVENT] - is_active: False")
+                else:
+                    print(f"DEBUG: [ADD_EVENT] ERRO: Não foi possível obter duration_turns para {os.path.basename(carta_path)} - Event NÃO ATIVADO")
                         
                 self._ensure_active_event_tracking()
 
             # NOVA LÓGICA: Implementar sequenciamento para Actions também
             if carta_tipo == "actions":
                 # Se uma Action ou Event foi removido recentemente, marcar próxima Action como inativa inicialmente
-                if self._action_recently_removed or self._event_recently_removed:
+                if getattr(self, '_action_recently_removed', False) or getattr(self, '_event_recently_removed', False):
                     if not hasattr(self, '_actions_pending_activation'):
                         self._actions_pending_activation = {}
                     
                     self._actions_pending_activation[carta_path] = True
                     print(f"DEBUG: [CARD_SEQUENCING] Action {os.path.basename(carta_path)} marcada como INATIVA inicialmente - carta anterior foi removida")
+            
+            print(f"DEBUG: [ADICIONAR_CARTA] === ADIÇÃO CONCLUÍDA ===")
+
+    def ensure_events_have_tracking(self):
+        """
+        Garante que todos os Events no inventário têm tracking apropriado.
+        Se um Event está na posição 0 da fila cronológica, deve estar ativo.
+        """
+        print(f"DEBUG: [ENSURE_TRACKING] === VERIFICANDO TRACKING DE EVENTS ===")
+        
+        # Garantir que todos os atributos necessários existem
+        if not hasattr(self, '_event_start_turns'):
+            self._event_start_turns = {}
+            print(f"DEBUG: [ENSURE_TRACKING] _event_start_turns inicializado")
+        
+        if not hasattr(self, '_event_duration_tracking'):
+            self._event_duration_tracking = {}
+            print(f"DEBUG: [ENSURE_TRACKING] _event_duration_tracking inicializado")
+        
+        if not hasattr(self, '_action_recently_removed'):
+            self._action_recently_removed = False
+            print(f"DEBUG: [ENSURE_TRACKING] _action_recently_removed inicializado como False")
+        
+        if not hasattr(self, '_event_recently_removed'):
+            self._event_recently_removed = False
+            print(f"DEBUG: [ENSURE_TRACKING] _event_recently_removed inicializado como False")
+        
+        events_no_inventario = self.inventario.get("events", [])
+        if not events_no_inventario:
+            print(f"DEBUG: [ENSURE_TRACKING] Nenhum Event no inventário")
+            return
+        
+        print(f"DEBUG: [ENSURE_TRACKING] Events no inventário: {[os.path.basename(e) for e in events_no_inventario]}")
+        
+        # Obter ordem cronológica
+        chronological_order = self._get_chronological_actions_events_order()
+        if not chronological_order:
+            print(f"DEBUG: [ENSURE_TRACKING] Nenhuma ordem cronológica encontrada")
+            return
+        
+        # Encontrar primeiro Event na fila cronológica
+        first_event = None
+        first_event_position = -1
+        for i, entry in enumerate(chronological_order):
+            if entry['type'] == 'events':
+                first_event = entry['path']
+                first_event_position = i
+                break
+        
+        if first_event:
+            print(f"DEBUG: [ENSURE_TRACKING] Primeiro Event na fila cronológica: {os.path.basename(first_event)} (posição {first_event_position})")
+            
+            # Se o primeiro Event não tem tracking, criar
+            if first_event not in self._event_duration_tracking:
+                print(f"DEBUG: [ENSURE_TRACKING] PRIMEIRO EVENT SEM TRACKING - CRIANDO ATIVO")
+                
+                # Obter duration_turns da carta
+                from cards_database import get_event_duration
+                duration_turns = get_event_duration(first_event)
+                current_turn = getattr(self, '_current_turn', 0)
+                
+                # CORREÇÃO: Verificar se duration_turns é uma string "variable"
+                if duration_turns == "variable":
+                    # Para events com duração variável, não definir expires_turn até o dado ser lançado
+                    print(f"DEBUG: [ENSURE_TRACKING] Event com duração variável - expires_turn será definido após lançar dado")
+                    self._event_start_turns[first_event] = None  # Não definir start_turn ainda
+                    self._event_duration_tracking[first_event] = {
+                        'start_turn': None,  # Será definido quando clicar no ?
+                        'duration_turns': duration_turns,
+                        'expires_turn': None,  # Será definido após o dado
+                        'is_active': True  # ATIVO porque é o primeiro na fila
+                    }
+                elif isinstance(duration_turns, str):
+                    # Tentar converter string para número
+                    try:
+                        duration_turns = int(duration_turns)
+                    except (ValueError, TypeError):
+                        duration_turns = 3  # Fallback para 3 turnos
+                        print(f"DEBUG: [ENSURE_TRACKING] Erro ao converter duração - usando 3 turnos por padrão")
+                elif duration_turns is None:
+                    duration_turns = 3  # Fallback para 3 turnos
+                    print(f"DEBUG: [ENSURE_TRACKING] Duração não encontrada - usando 3 turnos por padrão")
+                
+                # Para Events com duração fixa
+                if duration_turns != "variable" and duration_turns is not None and isinstance(duration_turns, int):
+                    self._event_start_turns[first_event] = current_turn
+                    self._event_duration_tracking[first_event] = {
+                        'start_turn': current_turn,
+                        'duration_turns': duration_turns,
+                        'expires_turn': current_turn + duration_turns,
+                        'is_active': True  # ATIVO porque é o primeiro na fila
+                    }
+                    print(f"DEBUG: [ENSURE_TRACKING] ✓ TRACKING CRIADO PARA PRIMEIRO EVENT: {os.path.basename(first_event)}")
+                    if duration_turns == "variable":
+                        print(f"DEBUG: [ENSURE_TRACKING] - start_turn: None (será definido após lançar dado)")
+                        print(f"DEBUG: [ENSURE_TRACKING] - duration_turns: variable")
+                        print(f"DEBUG: [ENSURE_TRACKING] - expires_turn: None (será definido após lançar dado)")
+                        print(f"DEBUG: [ENSURE_TRACKING] - is_active: True")
+                    else:
+                        print(f"DEBUG: [ENSURE_TRACKING] - start_turn: {current_turn}")
+                        print(f"DEBUG: [ENSURE_TRACKING] - duration_turns: {duration_turns}")
+                        print(f"DEBUG: [ENSURE_TRACKING] - expires_turn: {current_turn + duration_turns}")
+                        print(f"DEBUG: [ENSURE_TRACKING] - is_active: True")
+                else:
+                    print(f"DEBUG: [ENSURE_TRACKING] ❌ ERRO: Não foi possível obter duration_turns para {os.path.basename(first_event)}")
+            else:
+                tracking_data = self._event_duration_tracking[first_event]
+                is_active = tracking_data.get('is_active', False)
+                print(f"DEBUG: [ENSURE_TRACKING] Primeiro Event tem tracking - is_active: {is_active}")
+                
+                # Se não está ativo, ativar
+                if not is_active:
+                    print(f"DEBUG: [ENSURE_TRACKING] ATIVANDO PRIMEIRO EVENT QUE ESTAVA INATIVO")
+                    tracking_data['is_active'] = True
+                    current_turn = getattr(self, '_current_turn', 0)
+                    if tracking_data.get('start_turn') is None:
+                        tracking_data['start_turn'] = current_turn
+                        tracking_data['expires_turn'] = current_turn + tracking_data.get('duration_turns', 2)
+                    print(f"DEBUG: [ENSURE_TRACKING] ✓ PRIMEIRO EVENT ATIVADO: {os.path.basename(first_event)}")
+        else:
+            print(f"DEBUG: [ENSURE_TRACKING] Nenhum Event na fila cronológica")
+        
+        print(f"DEBUG: [ENSURE_TRACKING] === VERIFICAÇÃO CONCLUÍDA ===")
+        
+        # DIAGNÓSTICO COMPLETO: Verificar todos os Events
+        print(f"DEBUG: [ENSURE_TRACKING] === DIAGNÓSTICO COMPLETO ===")
+        for event_path in events_no_inventario:
+            if event_path in self._event_duration_tracking:
+                tracking = self._event_duration_tracking[event_path]
+                print(f"DEBUG: [ENSURE_TRACKING] Event {os.path.basename(event_path)}:")
+                print(f"DEBUG: [ENSURE_TRACKING]   - is_active: {tracking.get('is_active', False)}")
+                print(f"DEBUG: [ENSURE_TRACKING]   - start_turn: {tracking.get('start_turn')}")
+                print(f"DEBUG: [ENSURE_TRACKING]   - duration_turns: {tracking.get('duration_turns')}")
+            else:
+                print(f"DEBUG: [ENSURE_TRACKING] Event {os.path.basename(event_path)}: SEM TRACKING")
+
+    def test_add_event_to_inventory(self):
+        """Teste para reproduzir o problema do Event inativo"""
+        print(f"DEBUG: [TEST] === TESTANDO ADIÇÃO DE EVENT AO INVENTÁRIO ===")
+        
+        # Simular Event_110.png sendo tirado de uma casa Events
+        event_path = "/home/joaorebolo2/netmaster_menu/img/cartas/events/Residential-level/Green/Event_110.png"
+        
+        # Verificar se o Event existe no inventário antes
+        events_antes = self.inventario.get("events", []).copy()
+        print(f"DEBUG: [TEST] Events antes: {[os.path.basename(e) for e in events_antes]}")
+        
+        # Adicionar o Event ao inventário como se fosse tirado de uma casa
+        print(f"DEBUG: [TEST] Adicionando Event_110.png ao inventário...")
+        self.adicionar_carta_inventario(event_path, "events")
+        
+        # Verificar estado após adição
+        events_depois = self.inventario.get("events", []).copy()
+        print(f"DEBUG: [TEST] Events depois: {[os.path.basename(e) for e in events_depois]}")
+        
+        # Verificar tracking
+        if hasattr(self, '_event_duration_tracking') and event_path in self._event_duration_tracking:
+            tracking = self._event_duration_tracking[event_path]
+            print(f"DEBUG: [TEST] Event_110.png tracking:")
+            print(f"DEBUG: [TEST]   - is_active: {tracking.get('is_active', False)}")
+            print(f"DEBUG: [TEST]   - start_turn: {tracking.get('start_turn')}")
+            print(f"DEBUG: [TEST]   - duration_turns: {tracking.get('duration_turns')}")
+        else:
+            print(f"DEBUG: [TEST] ❌ Event_110.png SEM TRACKING")
+        
+        # Verificar função get_active_cards_for_type
+        cartas_ativas = self.get_active_cards_for_type("events")
+        print(f"DEBUG: [TEST] Cartas Events ativas: {len(cartas_ativas)} de {len(events_depois)} total")
+        
+        # Mostrar o inventário Actions/Events para testar
+        print(f"DEBUG: [TEST] Abrindo inventário Actions/Events para verificar...")
+        self.show_inventory_matrix(["actions", "events"])
+        
+        print(f"DEBUG: [TEST] === TESTE CONCLUÍDO ===")
 
     def _is_first_card_in_actions_events_queue(self, carta_path):
         """Verifica se uma carta é a primeira na fila cronológica de Actions/Events"""
@@ -9452,32 +12717,24 @@ class PlayerDashboard(tk.Toplevel):
                 
                 # Verificar se a carta está ativa baseado no tipo
                 if carta_tipo == "actions":
-                    # Para Actions, verificar sistema de sequenciamento
-                    # Action só está ativa se é a primeira na fila cronológica E não está pendente de ativação
+                    # CORREÇÃO: Para Actions, usar a mesma lógica de fila cronológica que is_card_active()
+                    # Action só está ativa se é a primeira na fila cronológica
                     chronological_order = self._get_chronological_actions_events_order()
                     if chronological_order:
-                        first_item = chronological_order[0]
-                        if first_item['type'] == 'actions' and first_item['path'] == carta_path:
-                            # É a primeira Action na fila, verificar se não está pendente
-                            is_pending = (hasattr(self, '_actions_pending_activation') and 
-                                        carta_path in self._actions_pending_activation and 
-                                        self._actions_pending_activation[carta_path])
-                            is_active = not is_pending
-                        else:
-                            # Não é a primeira Action na fila, está inativa
-                            is_active = False
+                        first_card = chronological_order[0]
+                        is_active = (first_card['path'] == carta_path and first_card['type'] == 'actions')
+                        print(f"DEBUG: [get_active_cards_for_type] Action {os.path.basename(carta_path)} na posição 0 da fila? {is_active}")
                     else:
-                        # Sem fila cronológica, não está ativa
                         is_active = False
                 
                 elif carta_tipo == "events":
-                    # Para Events, verificar se está ativo no tracking
-                    if hasattr(self, '_event_duration_tracking') and carta_path in self._event_duration_tracking:
-                        tracking_data = self._event_duration_tracking[carta_path]
-                        is_active = tracking_data.get('is_active', False)
-                        # Verificar também se não está pendente de ativação
-                        if tracking_data.get('pending_activation', False):
-                            is_active = False
+                    # CORREÇÃO: Para Events, usar a mesma lógica de fila cronológica que is_card_active()
+                    # Events só estão ativos se estão na posição 0 da fila cronológica
+                    chronological_order = self._get_chronological_actions_events_order()
+                    if chronological_order:
+                        first_card = chronological_order[0]
+                        is_active = (first_card['path'] == carta_path and first_card['type'] == 'events')
+                        print(f"DEBUG: [get_active_cards_for_type] Event {os.path.basename(carta_path)} na posição 0 da fila? {is_active}")
                     else:
                         is_active = False
                 
@@ -9700,7 +12957,7 @@ class PlayerDashboard(tk.Toplevel):
         chronological_order = self._get_chronological_actions_events_order()
         
         if not chronological_order:
-            print("DEBUG: [ACTIVATE_EVENT] ❌ Fila cronológica vazia")
+            print("DEBUG: [ACTIVATE_EVENT] [ERROR] Fila cronológica vazia")
             return
         
         print(f"DEBUG: [ACTIVATE_EVENT] Verificando se o primeiro item da fila é um Event...")
@@ -9712,9 +12969,9 @@ class PlayerDashboard(tk.Toplevel):
         
         # Se o primeiro item NÃO for um Event, nenhum Event deve estar ativo
         if first_item['type'] != 'events':
-            print(f"DEBUG: [ACTIVATE_EVENT] ❌ Primeiro item não é Event - é {first_item['type']}")
-            print("DEBUG: [ACTIVATE_EVENT] ❌ Apenas Events na posição 0 podem estar ativos")
-            print("DEBUG: [ACTIVATE_EVENT] ❌ Desativando qualquer Event ativo...")
+            print(f"DEBUG: [ACTIVATE_EVENT] [ERROR] Primeiro item não é Event - é {first_item['type']}")
+            print("DEBUG: [ACTIVATE_EVENT] [ERROR] Apenas Events na posição 0 podem estar ativos")
+            print("DEBUG: [ACTIVATE_EVENT] [ERROR] Desativando qualquer Event ativo...")
             
             # Desativar todos os Events
             for event_path in list(self._event_duration_tracking.keys()):
@@ -9728,10 +12985,10 @@ class PlayerDashboard(tk.Toplevel):
         event_do_topo = first_item['path']
         
         if event_do_topo not in cartas_events:
-            print(f"DEBUG: [ACTIVATE_EVENT] ❌ Event do topo não está no inventário: {os.path.basename(event_do_topo)}")
+            print(f"DEBUG: [ACTIVATE_EVENT] [ERROR] Event do topo não está no inventário: {os.path.basename(event_do_topo)}")
             return
         
-        print(f"DEBUG: [ACTIVATE_EVENT] ✅ Event na posição 0 deve estar ativo: {os.path.basename(event_do_topo)}")
+        print(f"DEBUG: [ACTIVATE_EVENT] ✓ Event na posição 0 deve estar ativo: {os.path.basename(event_do_topo)}")
         
         # Verificar todos os outros itens na fila e desativar qualquer Event que não seja da posição 0
         for i, item in enumerate(chronological_order[1:], 1):  # Começar do índice 1
@@ -9752,7 +13009,7 @@ class PlayerDashboard(tk.Toplevel):
             
             # Se o Event já tem expires_turn definido e JÁ EXPIROU, removê-lo automaticamente
             if expires_turn is not None and current_turn >= expires_turn:
-                print(f"DEBUG: [ACTIVATE_EVENT] 🚨 CRITICAL: Event JÁ EXPIROU - removendo automaticamente")
+                print(f"DEBUG: [ACTIVATE_EVENT] CRITICAL: Event JÁ EXPIROU - removendo automaticamente")
                 print(f"DEBUG: [ACTIVATE_EVENT]   Event: {os.path.basename(event_do_topo)}")
                 print(f"DEBUG: [ACTIVATE_EVENT]   Turno atual: {current_turn}, Expira no turno: {expires_turn}")
                 print(f"DEBUG: [ACTIVATE_EVENT]   Chamando _mostrar_overlay_event_expirado()")
@@ -9764,7 +13021,7 @@ class PlayerDashboard(tk.Toplevel):
         # CORREÇÃO FUNDAMENTAL: Se o Event tem tracking existente, PRESERVAR e não criar emergencial
         if event_do_topo in self._event_duration_tracking:
             existing_tracking = self._event_duration_tracking[event_do_topo]
-            print(f"DEBUG: [ACTIVATE_EVENT] ✅ Event do topo JÁ TEM tracking existente - PRESERVANDO:")
+            print(f"DEBUG: [ACTIVATE_EVENT] ✓ Event do topo JÁ TEM tracking existente - PRESERVANDO:")
             print(f"DEBUG: [ACTIVATE_EVENT]   Event: {os.path.basename(event_do_topo)}")
             print(f"DEBUG: [ACTIVATE_EVENT]   start_turn: {existing_tracking.get('start_turn')}")
             print(f"DEBUG: [ACTIVATE_EVENT]   duration_turns: {existing_tracking.get('duration_turns')}")
@@ -9775,7 +13032,7 @@ class PlayerDashboard(tk.Toplevel):
             # EXCETO para Events com duração 'variable' - esses só definem start_turn quando clicam no ?
             duration = existing_tracking.get('duration_turns')
             if existing_tracking.get('start_turn') is None and duration != "variable":
-                print(f"DEBUG: [ACTIVATE_EVENT] 🔧 CORREÇÃO: start_turn era None para Event com duração FIXA, definindo para turno atual: {current_turn}")
+                print(f"DEBUG: [ACTIVATE_EVENT] [CONFIG] CORREÇÃO: start_turn era None para Event com duração FIXA, definindo para turno atual: {current_turn}")
                 self._event_duration_tracking[event_do_topo]['start_turn'] = current_turn
                 
                 # Se também não tem expires_turn e tem duração fixa, calcular agora
@@ -9783,9 +13040,9 @@ class PlayerDashboard(tk.Toplevel):
                     duration is not None and duration != "variable"):
                     expires_turn = current_turn + duration
                     self._event_duration_tracking[event_do_topo]['expires_turn'] = expires_turn
-                    print(f"DEBUG: [ACTIVATE_EVENT] 🔧 CORREÇÃO: expires_turn calculado: {expires_turn} (start: {current_turn} + duration: {duration})")
+                    print(f"DEBUG: [ACTIVATE_EVENT] [CONFIG] CORREÇÃO: expires_turn calculado: {expires_turn} (start: {current_turn} + duration: {duration})")
             elif existing_tracking.get('start_turn') is None and duration == "variable":
-                print(f"DEBUG: [ACTIVATE_EVENT] ⏳ Event com duração VARIABLE: start_turn permanece None até jogador clicar no ?")
+                print(f"DEBUG: [ACTIVATE_EVENT] [WAITING] Event com duração VARIABLE: start_turn permanece None até jogador clicar no ?")
                 print(f"DEBUG: [ACTIVATE_EVENT] Event será ativado apenas quando o dado for lançado")
             
             # CORREÇÃO CRÍTICA: NÃO forçar ativação se Event está pendente de ativação
@@ -9796,17 +13053,17 @@ class PlayerDashboard(tk.Toplevel):
             
             # NÃO sobrescrever - apenas garantir que está ativo se necessário E não pendente
             if not existing_tracking.get('is_active', False) and not is_pending_activation:
-                print(f"DEBUG: [ACTIVATE_EVENT] 🔄 Ativando Event com tracking preservado")
+                print(f"DEBUG: [ACTIVATE_EVENT] [RELOAD] Ativando Event com tracking preservado")
                 self._event_duration_tracking[event_do_topo]['is_active'] = True
             elif is_pending_activation:
-                print(f"DEBUG: [ACTIVATE_EVENT] ⏸️ Event está PENDENTE de ativação - não ativar ainda")
+                print(f"DEBUG: [ACTIVATE_EVENT] [PAUSE] Event está PENDENTE de ativação - não ativar ainda")
                 print(f"DEBUG: [ACTIVATE_EVENT] Event será ativado no próximo turno pelo sistema de sequenciamento")
             else:
-                print(f"DEBUG: [ACTIVATE_EVENT] ✅ Event já está ativo - nenhuma ação necessária")
+                print(f"DEBUG: [ACTIVATE_EVENT] ✓ Event já está ativo - nenhuma ação necessária")
             
             # Pular para verificação de ativação (não criar tracking emergencial)
         elif event_do_topo not in self._event_duration_tracking:
-            print(f"DEBUG: [ACTIVATE_EVENT] ❌ Event do topo SEM tracking - criando com turno de ativação...")
+            print(f"DEBUG: [ACTIVATE_EVENT] [ERROR] Event do topo SEM tracking - criando com turno de ativação...")
             
             # CORREÇÃO CRÍTICA: Ao criar tracking emergencial, usar uma heurística para determinar
             # quando o Event foi realmente ativado, não apenas o turno atual
@@ -9827,13 +13084,13 @@ class PlayerDashboard(tk.Toplevel):
                     original_start = event_backup[event_do_topo].get('start_turn')
                     if original_start is not None:
                         start_turn_to_use = original_start
-                        print(f"DEBUG: [ACTIVATE_EVENT] ✅ Start turn recuperado do backup: {original_start}")
+                        print(f"DEBUG: [ACTIVATE_EVENT] ✓ Start turn recuperado do backup: {original_start}")
                     else:
-                        print(f"DEBUG: [ACTIVATE_EVENT] ⚠️  Backup encontrado mas sem start_turn válido")
+                        print(f"DEBUG: [ACTIVATE_EVENT] [WARNING]  Backup encontrado mas sem start_turn válido")
                 else:
-                    print(f"DEBUG: [ACTIVATE_EVENT] ⚠️  Event não encontrado no backup - usando turno atual: {current_turn}")
+                    print(f"DEBUG: [ACTIVATE_EVENT] [WARNING]  Event não encontrado no backup - usando turno atual: {current_turn}")
             else:
-                print(f"DEBUG: [ACTIVATE_EVENT] ⚠️  Nenhum backup disponível - usando turno atual: {current_turn}")
+                print(f"DEBUG: [ACTIVATE_EVENT] [WARNING]  Nenhum backup disponível - usando turno atual: {current_turn}")
             
             # Determinar duração baseada no nome do arquivo
             duration_turns = None
@@ -9849,6 +13106,21 @@ class PlayerDashboard(tk.Toplevel):
                     from cards_database import get_event_duration
                     duration_turns = get_event_duration(event_do_topo)
                     print(f"DEBUG: [ACTIVATE_EVENT] Duração obtida da base de dados: {duration_turns}")
+                    
+                    # CORREÇÃO: Verificar se duration_turns é uma string "variable"  
+                    if duration_turns == "variable":
+                        # Manter como "variable" - será tratado abaixo
+                        pass
+                    elif isinstance(duration_turns, str):
+                        # Tentar converter string para número
+                        try:
+                            duration_turns = int(duration_turns)
+                        except (ValueError, TypeError):
+                            duration_turns = 3  # Fallback para 3 turnos
+                            print(f"DEBUG: [ACTIVATE_EVENT] Erro ao converter duração - usando 3 turnos por padrão")
+                    elif duration_turns is None:
+                        duration_turns = 3  # Fallback para 3 turnos
+                        print(f"DEBUG: [ACTIVATE_EVENT] Duração não encontrada - usando 3 turnos por padrão")
                 except Exception as e:
                     print(f"DEBUG: [ACTIVATE_EVENT] ERROR base de dados: {e}")
                     duration_turns = 3  # Fallback padrão
@@ -9869,7 +13141,7 @@ class PlayerDashboard(tk.Toplevel):
                     'expires_turn': start_turn_to_use + duration_turns,
                     'is_active': False  # Será ativado abaixo
                 }
-            print(f"DEBUG: [ACTIVATE_EVENT] ✅ Tracking criado com start_turn: {start_turn_to_use}")
+            print(f"DEBUG: [ACTIVATE_EVENT] ✓ Tracking criado com start_turn: {start_turn_to_use}")
 
         
         # NOVA LÓGICA SIMPLIFICADA: Se há tracking (preservado ou emergencial), apenas verificar ativação
@@ -9878,14 +13150,14 @@ class PlayerDashboard(tk.Toplevel):
             
             # Se não está ativo, ativar (sem alterar outros campos se já foram definidos)
             if not existing_tracking.get('is_active', False):
-                print(f"DEBUG: [ACTIVATE_EVENT] 🔄 Ativando Event: {os.path.basename(event_do_topo)}")
+                print(f"DEBUG: [ACTIVATE_EVENT] [RELOAD] Ativando Event: {os.path.basename(event_do_topo)}")
                 self._event_duration_tracking[event_do_topo]['is_active'] = True
                 
                 # Apenas sincronizar _event_start_turns se necessário
                 start_turn = existing_tracking.get('start_turn')
                 if start_turn is not None:
                     self._event_start_turns[event_do_topo] = start_turn
-                    print(f"DEBUG: [ACTIVATE_EVENT] ✅ Event ativado com tracking preservado: start_turn={start_turn}")
+                    print(f"DEBUG: [ACTIVATE_EVENT] ✓ Event ativado com tracking preservado: start_turn={start_turn}")
                 
                 # Log do estado final
                 print(f"DEBUG: [ACTIVATE_EVENT] Estado final do Event:")
@@ -9894,9 +13166,9 @@ class PlayerDashboard(tk.Toplevel):
                 print(f"DEBUG: [ACTIVATE_EVENT]   expires_turn: {existing_tracking.get('expires_turn')}")
                 print(f"DEBUG: [ACTIVATE_EVENT]   is_active: {existing_tracking.get('is_active')}")
             else:
-                print(f"DEBUG: [ACTIVATE_EVENT] ✅ Event já está ativo - nenhuma ação necessária")
+                print(f"DEBUG: [ACTIVATE_EVENT] ✓ Event já está ativo - nenhuma ação necessária")
         else:
-            print(f"DEBUG: [ACTIVATE_EVENT] ❌ ERRO: Event não tem tracking após verificação")
+            print(f"DEBUG: [ACTIVATE_EVENT] [ERROR] ERRO: Event não tem tracking após verificação")
         
         # Garantir que Events em outras posições permanecem inativos
         for i, carta_path in enumerate(cartas_events[1:], 1):  # Começar do índice 1
@@ -9946,14 +13218,14 @@ class PlayerDashboard(tk.Toplevel):
                 print(f"DEBUG: [VERIFICAR_EVENTS]   Event com expires_turn definido - verificando expiração")
                 
                 if current_turn >= expires_turn:
-                    print(f"DEBUG: [VERIFICAR_EVENTS]   ❌ Event EXPIROU: turno {current_turn} >= {expires_turn}")
+                    print(f"DEBUG: [VERIFICAR_EVENTS]   [ERROR] Event EXPIROU: turno {current_turn} >= {expires_turn}")
                     print(f"DEBUG: [VERIFICAR_EVENTS]   Chamando overlay de expiração...")
                     
                     # Mostrar overlay de expiração
                     self._mostrar_overlay_event_expirado(carta_path)
                     return  # Sair após mostrar o primeiro overlay (processar um de cada vez)
                 else:
-                    print(f"DEBUG: [VERIFICAR_EVENTS]   ✅ Event ainda válido até turno {expires_turn}")
+                    print(f"DEBUG: [VERIFICAR_EVENTS]   ✓ Event ainda válido até turno {expires_turn}")
             
             # LÓGICA LEGADA: Para Events ativos com duração fixa (não variável)
             elif is_active and start_turn is not None and duration_turns is not None:
@@ -9974,14 +13246,14 @@ class PlayerDashboard(tk.Toplevel):
                 print(f"DEBUG: [VERIFICAR_EVENTS]   Calculated expires_turn: {calculated_expires_turn}")
                 
                 if current_turn >= calculated_expires_turn:
-                    print(f"DEBUG: [VERIFICAR_EVENTS]   ❌ Event EXPIROU: turno {current_turn} >= {calculated_expires_turn}")
+                    print(f"DEBUG: [VERIFICAR_EVENTS]   [ERROR] Event EXPIROU: turno {current_turn} >= {calculated_expires_turn}")
                     print(f"DEBUG: [VERIFICAR_EVENTS]   Chamando overlay de expiração...")
                     
                     # Mostrar overlay de expiração
                     self._mostrar_overlay_event_expirado(carta_path)
                     return  # Sair após mostrar o primeiro overlay (processar um de cada vez)
                 else:
-                    print(f"DEBUG: [VERIFICAR_EVENTS]   ✅ Event ainda válido até turno {calculated_expires_turn}")
+                    print(f"DEBUG: [VERIFICAR_EVENTS]   ✓ Event ainda válido até turno {calculated_expires_turn}")
             else:
                 print(f"DEBUG: [VERIFICAR_EVENTS]   Event inativo ou sem dados suficientes - ignorando")
         
@@ -10596,7 +13868,7 @@ class PlayerDashboard(tk.Toplevel):
             command=lambda: self.show_dice_roll_screen(
                 self.player_name,
                 self.saldo,
-                self.other_players,
+                self.get_session_players_icons(),
                 self.screen_width,
                 self.screen_height
             )
@@ -10705,7 +13977,7 @@ class PlayerDashboard(tk.Toplevel):
                     
                     # Adicionar de volta à Store usando Store_v2
                     try:
-                        from Store_v2 import adicionar_carta_store
+                        from Store import adicionar_carta_store
                         adicionar_carta_store(carta_path, "events")
                         print(f"DEBUG: Event {carta_path} devolvido à Store com sucesso")
                     except ImportError:
@@ -10851,7 +14123,11 @@ class PlayerDashboard(tk.Toplevel):
         """Inicia o sistema de gestão de pacotes no Final Phase"""
         print("DEBUG: [GESTÃO_PACOTES] Iniciando sistema de gestão de pacotes")
         
-        # NOVO: Verificar se há Data Volume services com pacotes disponíveis
+        # Verificar se há Services TEMPORARY ativos
+        tem_temporary_services = self._has_active_temporary_services()
+        print(f"DEBUG: [GESTÃO_PACOTES] Services TEMPORARY ativos: {tem_temporary_services}")
+        
+        # Verificar se há Data Volume services com pacotes disponíveis
         tem_data_volume_packets = self._has_active_data_volume_services_with_packets()
         print(f"DEBUG: [GESTÃO_PACOTES] Data Volume services com pacotes: {tem_data_volume_packets}")
         
@@ -10862,17 +14138,20 @@ class PlayerDashboard(tk.Toplevel):
         cartas_ativas = self._obter_cartas_ativas_carrossel()
         print(f"DEBUG: [GESTÃO_PACOTES] Total de cartas ativas encontradas: {len(cartas_ativas)}")
         
-        # CORREÇÃO: Se não há cartas ativas OU não há Data Volume services com pacotes, não iniciar gestão
-        if not cartas_ativas or not tem_data_volume_packets:
+        # CORREÇÃO: Só iniciar gestão se há cartas ativas E (Services TEMPORARY ativos E Data Volume services com pacotes)
+        if not cartas_ativas or not tem_temporary_services or not tem_data_volume_packets:
             if not cartas_ativas:
                 print("DEBUG: [GESTÃO_PACOTES] Nenhuma carta ativa encontrada no carrossel")
+            if not tem_temporary_services:
+                print("DEBUG: [GESTÃO_PACOTES] Nenhum Service TEMPORARY ativo encontrado")
             if not tem_data_volume_packets:
                 print("DEBUG: [GESTÃO_PACOTES] Nenhum Data Volume service com pacotes disponíveis")
             
+            print("DEBUG: [GESTÃO_PACOTES] Gestão de pacotes NÃO iniciada - condições não atendidas")
             # CORREÇÃO: Garantir que gestão de pacotes não é ativada
             self._final_phase_gestao_ativa = False
             print("DEBUG: [GESTÃO_PACOTES] Flag _final_phase_gestao_ativa definida como False")
-            # Se não há cartas ativas ou pacotes disponíveis, ativar botão End Turn imediatamente
+            # Se não atende as condições, ativar botão End Turn imediatamente
             self._ativar_botao_end_turn()
             return
         
@@ -12480,13 +15759,13 @@ class PlayerDashboard(tk.Toplevel):
             
             # VALIDAÇÃO EXTRA: Confirmar que To send é realmente 0 antes de mostrar overlay
             if to_send_atual > 0:
-                print(f"DEBUG: [COMPLETION] ❌ ERRO CRÍTICO: Completion calculado incorretamente!")
+                print(f"DEBUG: [COMPLETION] [ERROR] ERRO CRÍTICO: Completion calculado incorretamente!")
                 print(f"DEBUG: [COMPLETION] completion_achieved = {completion_achieved}")
                 print(f"DEBUG: [COMPLETION] Mas to_send_atual = {to_send_atual} (deveria ser 0)")
                 print(f"DEBUG: [COMPLETION] CANCELANDO overlay - valores inconsistentes")
                 return
             
-            print(f"DEBUG: [COMPLETION] ✅ Validação confirmada: To send = 0, mostrando overlay")
+            print(f"DEBUG: [COMPLETION] ✓ Validação confirmada: To send = 0, mostrando overlay")
             
             # Mostrar overlay de congratulações
             self._mostrar_overlay_completion(carta_atual, dados_carta)
@@ -12548,15 +15827,15 @@ class PlayerDashboard(tk.Toplevel):
             
             # REGRA CRÍTICA: Para Challenges e Activities, To send DEVE ser 0 para completion normal
             if to_send_atual > 0:
-                print(f"DEBUG: [COMPLETION] ❌ ERRO CRÍTICO: Completion inválido!")
+                print(f"DEBUG: [COMPLETION] [ERROR] ERRO CRÍTICO: Completion inválido!")
                 print(f"DEBUG: [COMPLETION] To send deve ser 0, mas é {to_send_atual}")
                 print(f"DEBUG: [COMPLETION] CANCELANDO overlay de completion - condições não atendidas")
                 print(f"DEBUG: [COMPLETION] ===== OVERLAY CANCELADO =====")
                 return  # NÃO mostrar overlay se condições não estão atendidas
             
-            print(f"DEBUG: [COMPLETION] ✅ VALIDAÇÃO PASSOU: To send = 0, pode mostrar completion")
+            print(f"DEBUG: [COMPLETION] ✓ VALIDAÇÃO PASSOU: To send = 0, pode mostrar completion")
         else:
-            print(f"DEBUG: [COMPLETION] ✅ COMPLETION POR TEMPO LIMITE: Validação bypassed")
+            print(f"DEBUG: [COMPLETION] ✓ COMPLETION POR TEMPO LIMITE: Validação bypassed")
         
         print(f"DEBUG: [COMPLETION] Mostrando overlay de congratulações")
         print(f"DEBUG: [COMPLETION] Sequencial: {is_sequential}")
@@ -12592,7 +15871,7 @@ class PlayerDashboard(tk.Toplevel):
         
         # Calcular reward baseado no tipo de carta e regras específicas usando índice correto
         reward_value = self._calcular_reward_completion(carta_path, dados_carta, card_type, carta_index)
-        print(f"DEBUG: [COMPLETION] Reward calculado: {reward_value} picoins")
+        print(f"DEBUG: [COMPLETION] Reward calculado: {reward_value} PICoins")
         
         # NOVO FORMATO: Overlay fullscreen igual ao de ativação
         # Limpar TODOS os widgets para criar overlay fullscreen
@@ -12690,14 +15969,14 @@ class PlayerDashboard(tk.Toplevel):
                 coin_lbl.pack(side="left")
             else:
                 # Fallback para emoji
-                coin_lbl = tk.Label(won_frame, text="🪙", 
+                coin_lbl = tk.Label(won_frame, text="$", 
                                    font=("Helvetica", 14), 
                                    fg="#FFD700", bg="black")
                 coin_lbl.pack(side="left")
         except Exception as e:
             print(f"DEBUG: Erro ao carregar ícone picoin: {e}")
             # Fallback para emoji
-            coin_lbl = tk.Label(won_frame, text="🪙", 
+            coin_lbl = tk.Label(won_frame, text="$", 
                                font=("Helvetica", 14), 
                                fg="#FFD700", bg="black")
             coin_lbl.pack(side="left")
@@ -12720,6 +15999,27 @@ class PlayerDashboard(tk.Toplevel):
             # Atualizar saldo do jogador
             self.saldo += reward_value
             print(f"DEBUG: [COMPLETION] Saldo atualizado: +{reward_value}, novo saldo: {self.saldo}")
+            
+            # NOVO: Sincronizar saldo com servidor
+            print(f"DEBUG: [COMPLETION] Chamando sync_score_with_server para recompensa +{reward_value}")
+            print(f"DEBUG: [COMPLETION] Estado antes da sincronização - saldo atual: {self.saldo}")
+            print(f"DEBUG: [COMPLETION] Verificando se estamos em modo multiplayer...")
+            
+            # Verificar se temos cliente disponível
+            import __main__
+            if hasattr(__main__, 'netmaster_client'):
+                client = __main__.netmaster_client
+                print(f"DEBUG: [COMPLETION] Cliente existe: {client}")
+                if client:
+                    print(f"DEBUG: [COMPLETION] Cliente conectado: {getattr(client, 'connected', 'N/A')}")
+                    print(f"DEBUG: [COMPLETION] Player ID: {getattr(client, 'player_id', 'N/A')}")
+                    print(f"DEBUG: [COMPLETION] Session ID: {getattr(client, 'session_id', 'N/A')}")
+                else:
+                    print(f"DEBUG: [COMPLETION] Cliente é None")
+            else:
+                print(f"DEBUG: [COMPLETION] Nenhum cliente encontrado - modo single player?")
+            
+            self.sync_score_with_server(f"recompensa +{reward_value}")
             
             # NOVO: Limpar tracking de Challenge se for Challenge completado
             if card_type == "Challenge":
@@ -13214,7 +16514,7 @@ class PlayerDashboard(tk.Toplevel):
         self.lift()       # Trazer para a frente
         self.focus_force()  # Forçar foco
         
-        print(f"DEBUG: [COMPLETION] Overlay criado, tipo: {card_type}, recompensa: {reward_value} picoins")
+        print(f"DEBUG: [COMPLETION] Overlay criado, tipo: {card_type}, recompensa: {reward_value} PICoins")
         print(f"DEBUG: [COMPLETION] Widgets criados no overlay: {len(completion_frame.winfo_children())} widgets")
         print(f"DEBUG: [COMPLETION] Botão OK widget: {ok_btn}")
         print(f"DEBUG: [COMPLETION] Botão OK visível: {ok_btn.winfo_viewable()}")
@@ -13441,7 +16741,7 @@ class PlayerDashboard(tk.Toplevel):
         if carta_path in self._challenge_start_turns:
             turno_inicio = self._challenge_start_turns[carta_path]
             turnos_ativa = self._current_turn_number - turno_inicio + 1
-            print(f"DEBUG: [TURNS_ELAPSED] ✅ Registo encontrado por caminho exato:")
+            print(f"DEBUG: [TURNS_ELAPSED] ✓ Registo encontrado por caminho exato:")
             print(f"DEBUG: [TURNS_ELAPSED]   Turno de ativação: {turno_inicio}")
             print(f"DEBUG: [TURNS_ELAPSED]   Turno atual: {self._current_turn_number}")
             print(f"DEBUG: [TURNS_ELAPSED]   Fórmula: {self._current_turn_number} - {turno_inicio} + 1 = {turnos_ativa}")
@@ -13450,7 +16750,7 @@ class PlayerDashboard(tk.Toplevel):
             return turnos_ativa
         
         # CORREÇÃO CRÍTICA: Se não encontrou por caminho exato, procurar por basename
-        print(f"DEBUG: [TURNS_ELAPSED] ⚠️ Caminho exato não encontrado, procurando por basename: {carta_filename}")
+        print(f"DEBUG: [TURNS_ELAPSED] [WARNING] Caminho exato não encontrado, procurando por basename: {carta_filename}")
         print(f"DEBUG: [TURNS_ELAPSED] ANÁLISE DETALHADA do tracking disponível:")
         
         for i, (tracked_path, turno_inicio) in enumerate(self._challenge_start_turns.items(), 1):
@@ -13464,7 +16764,7 @@ class PlayerDashboard(tk.Toplevel):
             
             if match_basename:
                 turnos_ativa = self._current_turn_number - turno_inicio + 1
-                print(f"DEBUG: [TURNS_ELAPSED] ✅ MATCH ENCONTRADO por basename!")
+                print(f"DEBUG: [TURNS_ELAPSED] ✓ MATCH ENCONTRADO por basename!")
                 print(f"DEBUG: [TURNS_ELAPSED]   Tracking path: {tracked_path}")
                 print(f"DEBUG: [TURNS_ELAPSED]   Basename match: {tracked_basename} == {carta_filename}")
                 print(f"DEBUG: [TURNS_ELAPSED]   Turno de ativação: {turno_inicio}")
@@ -13475,7 +16775,7 @@ class PlayerDashboard(tk.Toplevel):
                 return turnos_ativa
         
         # Se nem por basename encontrou, então realmente não foi registada
-        print(f"DEBUG: [TURNS_ELAPSED] ❌ ERRO CRÍTICO: Challenge {carta_filename} não tem registo de ativação!")
+        print(f"DEBUG: [TURNS_ELAPSED] [ERROR] ERRO CRÍTICO: Challenge {carta_filename} não tem registo de ativação!")
         print(f"DEBUG: [TURNS_ELAPSED] Nem por caminho exato nem por basename foi encontrada no tracking")
         print(f"DEBUG: [TURNS_ELAPSED] CAUSA POSSÍVEL: Challenge não foi registada quando adicionada ao carrossel")
         print(f"DEBUG: [TURNS_ELAPSED] DIAGNÓSTICO:")
@@ -13485,17 +16785,17 @@ class PlayerDashboard(tk.Toplevel):
         print(f"DEBUG: [TURNS_ELAPSED]   - Método de busca: caminho exato + basename fallback")
         
         # CORREÇÃO AUTOMÁTICA: Tentar recuperar Challenge sem tracking
-        print(f"DEBUG: [TURNS_ELAPSED] 🔧 TENTANDO RECUPERAÇÃO AUTOMÁTICA...")
+        print(f"DEBUG: [TURNS_ELAPSED] [CONFIG] TENTANDO RECUPERAÇÃO AUTOMÁTICA...")
         if self._tentar_recuperar_challenge_perdida(carta_path):
             # Se conseguiu recuperar, tentar novamente
-            print(f"DEBUG: [TURNS_ELAPSED] ✅ Challenge recuperado! Tentando novamente...")
+            print(f"DEBUG: [TURNS_ELAPSED] ✓ Challenge recuperado! Tentando novamente...")
             if carta_path in self._challenge_start_turns:
                 turno_inicio = self._challenge_start_turns[carta_path]
                 turnos_ativa = self._current_turn_number - turno_inicio + 1
-                print(f"DEBUG: [TURNS_ELAPSED] ✅ RECUPERAÇÃO SUCESSO: Challenge ativa há {turnos_ativa} turnos")
+                print(f"DEBUG: [TURNS_ELAPSED] ✓ RECUPERAÇÃO SUCESSO: Challenge ativa há {turnos_ativa} turnos")
                 return turnos_ativa
         
-        print(f"DEBUG: [TURNS_ELAPSED] ❌ RECUPERAÇÃO FALHADA: Retornando 0 turnos")
+        print(f"DEBUG: [TURNS_ELAPSED] [ERROR] RECUPERAÇÃO FALHADA: Retornando 0 turnos")
         print(f"DEBUG: [TURNS_ELAPSED] CORREÇÃO SUGERIDA: Verificar _register_challenge_start_turn() ou _substituir_activity_por_challenge()")
         return 0
     
@@ -13543,9 +16843,9 @@ class PlayerDashboard(tk.Toplevel):
             for backup_source, nome_fonte in fontes_backup:
                 if carta_path in backup_source:
                     turno_correto = backup_source[carta_path]
-                    print(f"DEBUG: [RECOVERY] ✅ ENCONTRADO em {nome_fonte}: turno {turno_correto}")
+                    print(f"DEBUG: [RECOVERY] ✓ ENCONTRADO em {nome_fonte}: turno {turno_correto}")
                     self._challenge_start_turns[carta_path] = turno_correto
-                    print(f"DEBUG: [RECOVERY] ✅ RECUPERAÇÃO DE BACKUP: Challenge registado no turno {turno_correto}")
+                    print(f"DEBUG: [RECOVERY] ✓ RECUPERAÇÃO DE BACKUP: Challenge registado no turno {turno_correto}")
                     print(f"DEBUG: [RECOVERY] === FIM RECUPERAÇÃO (BACKUP) ===")
                     return True
             
@@ -13558,13 +16858,13 @@ class PlayerDashboard(tk.Toplevel):
             
             # Registar no turno atual
             self._challenge_start_turns[carta_path] = turno_atual
-            print(f"DEBUG: [RECOVERY] ✅ Challenge registado como RECÉM ACEITE no turno {turno_atual}")
+            print(f"DEBUG: [RECOVERY] ✓ Challenge registado como RECÉM ACEITE no turno {turno_atual}")
             print(f"DEBUG: [RECOVERY] Challenge ficará ativo por toda a sua duração normal")
             print(f"DEBUG: [RECOVERY] === FIM RECUPERAÇÃO (NOVA CHALLENGE) ===")
             return True
             
         except Exception as e:
-            print(f"DEBUG: [RECOVERY] ❌ ERRO durante recuperação: {e}")
+            print(f"DEBUG: [RECOVERY] [ERROR] ERRO durante recuperação: {e}")
             print(f"DEBUG: [RECOVERY] === FIM RECUPERAÇÃO (ERRO) ===")
             return False
     
@@ -13602,7 +16902,7 @@ class PlayerDashboard(tk.Toplevel):
                     print(f"DEBUG: [TRACKING_DEBUG]   Tem tracking basename: {has_tracking_basename}")
                     
                     if not has_tracking and not has_tracking_basename:
-                        print(f"DEBUG: [TRACKING_DEBUG]   ⚠️ PROBLEMA: Challenge sem tracking!")
+                        print(f"DEBUG: [TRACKING_DEBUG]   [WARNING] PROBLEMA: Challenge sem tracking!")
         
         print(f"DEBUG: [TRACKING_DEBUG] ========== FIM ANÁLISE TRACKING ==========")
     
@@ -13905,7 +17205,7 @@ class PlayerDashboard(tk.Toplevel):
                 info_text += f"Packets Received: {stats['Rxd']}\n"
                 info_text += f"Packets Lost: {stats['Lost']}\n"
             
-            info_text += f"\nReward obtido: {reward} picoins"
+            info_text += f"\nReward obtido: {reward} PICoins"
             
             info_label = tk.Label(
                 overlay,
@@ -14036,7 +17336,7 @@ class PlayerDashboard(tk.Toplevel):
             if carta_path in self._challenge_start_turns:
                 del self._challenge_start_turns[carta_path]
                 challenges_removidos += 1
-                print(f"DEBUG: [ORPHAN_CLEANUP] ✅ Tracking órfão removido: {os.path.basename(carta_path)}")
+                print(f"DEBUG: [ORPHAN_CLEANUP] ✓ Tracking órfão removido: {os.path.basename(carta_path)}")
         
         # CORREÇÃO CRÍTICA: Limpar tracking órfão de TODOS os backups também
         backup_locations = []
@@ -14081,7 +17381,7 @@ class PlayerDashboard(tk.Toplevel):
                 if carta_path in backup_dict:
                     del backup_dict[carta_path]
                     backup_removidos += 1
-                    print(f"DEBUG: [ORPHAN_CLEANUP] ✅ Backup órfão removido de {backup_name}: {os.path.basename(carta_path)}")
+                    print(f"DEBUG: [ORPHAN_CLEANUP] ✓ Backup órfão removido de {backup_name}: {os.path.basename(carta_path)}")
             
             if backup_removidos > 0:
                 backups_limpos += 1
@@ -14094,7 +17394,7 @@ class PlayerDashboard(tk.Toplevel):
         print(f"DEBUG: [ORPHAN_CLEANUP] Tracking final: {len(self._challenge_start_turns)} entradas")
         
         if challenges_removidos > 0:
-            print(f"DEBUG: [ORPHAN_CLEANUP] ✅ SUCCESS: {challenges_removidos} Challenge(s) órfão(s) removido(s) do tracking")
+            print(f"DEBUG: [ORPHAN_CLEANUP] ✓ SUCCESS: {challenges_removidos} Challenge(s) órfão(s) removido(s) do tracking")
             # Mostrar tracking final limpo
             if self._challenge_start_turns:
                 print("DEBUG: [ORPHAN_CLEANUP] Tracking restante:")
@@ -14190,7 +17490,7 @@ class PlayerDashboard(tk.Toplevel):
                     challenge_name = os.path.basename(challenge_path)
                     if challenge_path not in challenge_tracking_consolidado:
                         challenge_tracking_consolidado[challenge_path] = turno
-                        print(f"DEBUG: [BACKUP_COUNTERS] ✅ {challenge_name} consolidado de '{source_name}': turno {turno}")
+                        print(f"DEBUG: [BACKUP_COUNTERS] ✓ {challenge_name} consolidado de '{source_name}': turno {turno}")
                     else:
                         print(f"DEBUG: [BACKUP_COUNTERS] {challenge_name} já existe no consolidado: turno {challenge_tracking_consolidado[challenge_path]}")
         
@@ -14394,7 +17694,7 @@ class PlayerDashboard(tk.Toplevel):
                 
                 for carta_path, turno in emergency_backup.items():
                     self._challenge_start_turns[carta_path] = turno
-                    print(f"DEBUG: [RESTORE_COUNTERS] 🚨 CAMADA 1: Challenge {os.path.basename(carta_path)} restaurado: turno {turno}")
+                    print(f"DEBUG: [RESTORE_COUNTERS] CAMADA 1: Challenge {os.path.basename(carta_path)} restaurado: turno {turno}")
                     backup_encontrado = True
                 
                 delattr(self.master, '_challenge_tracking_emergency_backup')
@@ -14422,7 +17722,7 @@ class PlayerDashboard(tk.Toplevel):
                         for carta_path, turno in root_backup.items():
                             if carta_path not in self._challenge_start_turns:
                                 self._challenge_start_turns[carta_path] = turno
-                                print(f"DEBUG: [RESTORE_COUNTERS] 🌐 CAMADA 3: Challenge {os.path.basename(carta_path)} restaurado: turno {turno}")
+                                print(f"DEBUG: [RESTORE_COUNTERS] [NETWORK] CAMADA 3: Challenge {os.path.basename(carta_path)} restaurado: turno {turno}")
                                 backup_encontrado = True
             except:
                 print("DEBUG: [RESTORE_COUNTERS] CAMADA 3: Root não acessível")
@@ -14434,7 +17734,7 @@ class PlayerDashboard(tk.Toplevel):
                 for carta_path, turno in self._challenge_backup_registry.items():
                     if carta_path not in self._challenge_start_turns:
                         self._challenge_start_turns[carta_path] = turno
-                        print(f"DEBUG: [RESTORE_COUNTERS] 📋 CAMADA 4: Challenge {os.path.basename(carta_path)} restaurado: turno {turno}")
+                        print(f"DEBUG: [RESTORE_COUNTERS] [CLIPBOARD] CAMADA 4: Challenge {os.path.basename(carta_path)} restaurado: turno {turno}")
                         backup_encontrado = True
             
             # CAMADA 5: Backup global (último recurso)
@@ -14445,7 +17745,7 @@ class PlayerDashboard(tk.Toplevel):
                 for carta_path, turno in builtins._global_challenge_backup.items():
                     if carta_path not in self._challenge_start_turns:
                         self._challenge_start_turns[carta_path] = turno
-                        print(f"DEBUG: [RESTORE_COUNTERS] 🌍 CAMADA 5: Challenge {os.path.basename(carta_path)} restaurado: turno {turno}")
+                        print(f"DEBUG: [RESTORE_COUNTERS] [WORLD] CAMADA 5: Challenge {os.path.basename(carta_path)} restaurado: turno {turno}")
                         backup_encontrado = True
                 
                 # Limpar backup global após uso
@@ -14467,7 +17767,7 @@ class PlayerDashboard(tk.Toplevel):
                 # Integrar backup imediato no tracking restaurado
                 for carta_path, turno in backup_imediato.items():
                     self._challenge_start_turns[carta_path] = turno
-                    print(f"DEBUG: [RESTORE_COUNTERS] ✅ Challenge {os.path.basename(carta_path)} restaurado do backup imediato: turno {turno}")
+                    print(f"DEBUG: [RESTORE_COUNTERS] ✓ Challenge {os.path.basename(carta_path)} restaurado do backup imediato: turno {turno}")
                     backup_imediato_encontrado = True
                 
                 # Limpar backup imediato
@@ -14482,7 +17782,7 @@ class PlayerDashboard(tk.Toplevel):
                 # CORREÇÃO CRÍTICA: Integrar backup da Store usando caminho completo
                 for challenge_path, turno in backup_store.items():
                     self._challenge_start_turns[challenge_path] = turno
-                    print(f"DEBUG: [RESTORE_COUNTERS] ✅ Challenge {os.path.basename(challenge_path)} (caminho: {challenge_path}) restaurado do backup da Store: turno {turno}")
+                    print(f"DEBUG: [RESTORE_COUNTERS] ✓ Challenge {os.path.basename(challenge_path)} (caminho: {challenge_path}) restaurado do backup da Store: turno {turno}")
                     backup_imediato_encontrado = True
                 
                 # Limpar backup da Store
@@ -14499,7 +17799,7 @@ class PlayerDashboard(tk.Toplevel):
                     # Integrar backup imediato no tracking restaurado  
                     for carta_path, turno in backup_imediato.items():
                         self._challenge_start_turns[carta_path] = turno
-                        print(f"DEBUG: [RESTORE_COUNTERS] ✅ Challenge {os.path.basename(carta_path)} restaurado do backup imediato: turno {turno}")
+                        print(f"DEBUG: [RESTORE_COUNTERS] ✓ Challenge {os.path.basename(carta_path)} restaurado do backup imediato: turno {turno}")
                         backup_imediato_encontrado = True
                     
                     # Limpar backup imediato
@@ -14514,7 +17814,7 @@ class PlayerDashboard(tk.Toplevel):
                     # CORREÇÃO CRÍTICA: Integrar backup da Store usando caminho completo
                     for challenge_path, turno in backup_store.items():
                         self._challenge_start_turns[challenge_path] = turno
-                        print(f"DEBUG: [RESTORE_COUNTERS] ✅ Challenge {os.path.basename(challenge_path)} (caminho: {challenge_path}) restaurado do backup da Store: turno {turno}")
+                        print(f"DEBUG: [RESTORE_COUNTERS] ✓ Challenge {os.path.basename(challenge_path)} (caminho: {challenge_path}) restaurado do backup da Store: turno {turno}")
                         backup_imediato_encontrado = True
                     
                     # Limpar backup da Store do root
@@ -14525,7 +17825,7 @@ class PlayerDashboard(tk.Toplevel):
             print(f"DEBUG: [RESTORE_COUNTERS] WARNING: Erro ao processar backup imediato: {e}")
         
         if backup_imediato_encontrado:
-            print(f"DEBUG: [RESTORE_COUNTERS] ✅ BACKUP IMEDIATO INTEGRADO COM SUCESSO!")
+            print(f"DEBUG: [RESTORE_COUNTERS] ✓ BACKUP IMEDIATO INTEGRADO COM SUCESSO!")
             print(f"DEBUG: [RESTORE_COUNTERS] Tracking final com backup imediato: {self._challenge_start_turns}")
         else:
             print(f"DEBUG: [RESTORE_COUNTERS] Nenhum backup imediato encontrado")
@@ -14586,13 +17886,13 @@ class PlayerDashboard(tk.Toplevel):
             has_tracking = False
             if carta_path in self._challenge_start_turns:
                 has_tracking = True
-                print(f"DEBUG: [CHALLENGE_INTEGRITY]   ✅ Tracking por caminho exato: turno {self._challenge_start_turns[carta_path]}")
+                print(f"DEBUG: [CHALLENGE_INTEGRITY]   ✓ Tracking por caminho exato: turno {self._challenge_start_turns[carta_path]}")
             else:
                 # Procurar por basename
                 for tracked_path, turno in self._challenge_start_turns.items():
                     if os.path.basename(tracked_path) == os.path.basename(carta_path):
                         has_tracking = True
-                        print(f"DEBUG: [CHALLENGE_INTEGRITY]   ✅ Tracking por basename: turno {turno} (migrar chave)")
+                        print(f"DEBUG: [CHALLENGE_INTEGRITY]   ✓ Tracking por basename: turno {turno} (migrar chave)")
                         # Migrar chave para o caminho correto
                         del self._challenge_start_turns[tracked_path]
                         self._challenge_start_turns[carta_path] = turno
@@ -14600,7 +17900,7 @@ class PlayerDashboard(tk.Toplevel):
             
             if not has_tracking:
                 challenges_without_tracking += 1
-                print(f"DEBUG: [CHALLENGE_INTEGRITY]   ❌ SEM TRACKING para {os.path.basename(carta_path)}")
+                print(f"DEBUG: [CHALLENGE_INTEGRITY]   [ERROR] SEM TRACKING para {os.path.basename(carta_path)}")
                 
                 # CORREÇÃO CRÍTICA: Se _current_turn_number é 1 (valor padrão), NÃO registar automaticamente
                 # Isto evita sobrescrever tracking correto com valores incorretos durante reconstruções
@@ -14749,7 +18049,7 @@ class PlayerDashboard(tk.Toplevel):
             
             # 2. Verificar se há pacotes suficientes
             if total_packets < packets_consumed:
-                print(f"DEBUG: [DATA_VOLUME] ⚠️ POOL INSUFICIENTE: {total_packets} disponíveis, {packets_consumed} requisitados")
+                print(f"DEBUG: [DATA_VOLUME] [WARNING] POOL INSUFICIENTE: {total_packets} disponíveis, {packets_consumed} requisitados")
                 packets_consumed = total_packets  # Consumir só o que está disponível
             
             if packets_consumed <= 0:
@@ -15895,7 +19195,7 @@ class PlayerDashboard(tk.Toplevel):
             
             # Fallback: adicionar diretamente aos baralhos globais
             try:
-                from Store_v2 import baralhos
+                from Store import baralhos
                 if cor_carta not in baralhos:
                     baralhos[cor_carta] = {}
                 if "challenges" not in baralhos[cor_carta]:
@@ -15928,7 +19228,7 @@ class PlayerDashboard(tk.Toplevel):
             
             # Fallback: adicionar diretamente aos baralhos globais
             try:
-                from Store_v2 import baralhos
+                from Store import baralhos
                 if cor_carta not in baralhos:
                     baralhos[cor_carta] = {}
                 if "activities" not in baralhos[cor_carta]:
@@ -15961,7 +19261,7 @@ class PlayerDashboard(tk.Toplevel):
             
             # Fallback: adicionar diretamente aos baralhos globais da Store
             try:
-                from Store_v2 import baralhos
+                from Store import baralhos
                 if cor_carta not in baralhos:
                     baralhos[cor_carta] = {}
                 if "services" not in baralhos[cor_carta]:
@@ -15975,7 +19275,7 @@ class PlayerDashboard(tk.Toplevel):
                 print(f"DEBUG: [DEVOLVER_SERVICE] ERRO: Não foi possível importar baralhos da Store: {e}")
                 # Fallback adicional: tentar diretamente através de Store_v2
                 try:
-                    from Store_v2 import StoreWindow
+                    from Store import StoreWindow
                     # Criar instância temporária da Store para adicionar carta
                     # Nota: Isto é um fallback extremo, normalmente a store_window deve estar disponível
                     print(f"DEBUG: [DEVOLVER_SERVICE] Tentando fallback via StoreWindow direto")
@@ -16525,7 +19825,7 @@ class PlayerDashboard(tk.Toplevel):
                 
                 # DEBUG ESPECÍFICO: Se Challenge deveria estar expirado, fazer análise detalhada
                 if tempo_limite_atingido:
-                    print(f"DEBUG: [SETA_COMPLETION] ⚠️ CHALLENGE EXPIRADO DETECTADO!")
+                    print(f"DEBUG: [SETA_COMPLETION] [WARNING] CHALLENGE EXPIRADO DETECTADO!")
                     print(f"DEBUG: [SETA_COMPLETION] Fazendo análise completa do tracking...")
                     self._debug_challenge_tracking_state()
                 
@@ -16535,7 +19835,7 @@ class PlayerDashboard(tk.Toplevel):
                     
                     # VALIDAÇÃO DUPLA: Confirmar que to_send é realmente 0
                     if current_to_send != 0:
-                        print(f"DEBUG: [SETA_COMPLETION] ❌ ERRO CRÍTICO: Validation failed!")
+                        print(f"DEBUG: [SETA_COMPLETION] [ERROR] ERRO CRÍTICO: Validation failed!")
                         print(f"DEBUG: [SETA_COMPLETION] challenge_pode_ser_completado = {challenge_pode_ser_completado}")  
                         print(f"DEBUG: [SETA_COMPLETION] Mas current_to_send = {current_to_send} (deveria ser 0)")
                         print(f"DEBUG: [SETA_COMPLETION] CANCELANDO completion - condições inconsistentes")
@@ -16643,7 +19943,7 @@ class PlayerDashboard(tk.Toplevel):
                         
                         # VALIDAÇÃO DUPLA: Confirmar que to_send é realmente 0
                         if current_to_send != 0:
-                            print(f"DEBUG: [SETA_COMPLETION] ❌ ERRO CRÍTICO: Activity validation failed!")
+                            print(f"DEBUG: [SETA_COMPLETION] [ERROR] ERRO CRÍTICO: Activity validation failed!")
                             print(f"DEBUG: [SETA_COMPLETION] activity_completada = {activity_completada}")
                             print(f"DEBUG: [SETA_COMPLETION] Mas current_to_send = {current_to_send} (deveria ser 0)")
                             print(f"DEBUG: [SETA_COMPLETION] CANCELANDO completion - condições inconsistentes")
@@ -17144,7 +20444,7 @@ class PlayerDashboard(tk.Toplevel):
                 # Fallback se imagem não existir
                 coin_lbl = tk.Label(
                     lost_frame,
-                    text="🪙",
+                    text="$",
                     font=("Helvetica", 14),
                     fg="gold",
                     bg="black"
@@ -17155,7 +20455,7 @@ class PlayerDashboard(tk.Toplevel):
             # Fallback emoji
             coin_lbl = tk.Label(
                 lost_frame,
-                text="🪙",
+                text="$",
                 font=("Helvetica", 14),
                 fg="gold",
                 bg="black"
@@ -17188,6 +20488,9 @@ class PlayerDashboard(tk.Toplevel):
             self.saldo -= challenge_quit_fee
             print(f"DEBUG: [QUIT_CHALLENGE] Saldo decrementado: -{challenge_quit_fee}, novo saldo: {self.saldo}")
             self._atualizar_display_saldo()
+            
+            # NOVO: Sincronizar saldo com servidor
+            self.sync_score_with_server(f"taxa desistência -{challenge_quit_fee}")
             
             # CORREÇÃO: Remover carta do inventário do jogador ANTES de devolver ao baralho
             if 'challenges' in self.inventario and carta_path in self.inventario['challenges']:
@@ -17764,7 +21067,90 @@ class PlayerDashboard(tk.Toplevel):
         self._cleanup_orphaned_challenge_tracking()
         print("DEBUG: [END_TURN] === FIM LIMPEZA ÓRFÃ FINAL ===")
         
-        print("DEBUG: [END_TURN] SUCCESS: Método end_turn() terminado com sucesso - retornando controle para _criar_botao_end_turn()")
+        # NOVO: Enviar mensagem de fim de turno para o servidor (multiplayer)
+        self._send_end_turn_to_server()
+        
+        print("DEBUG: [END_TURN] SUCCESS: Método end_turn() terminado com sucesso - retornando controlo para _criar_botao_end_turn()")
+
+    def _send_end_turn_to_server(self):
+        """Envia mensagem de fim de turno para o servidor (multiplayer)"""
+        try:
+            # Verificar se estamos numa sessão multiplayer
+            if not hasattr(netmaster_client, 'session_data') or not netmaster_client.session_data:
+                print("DEBUG: [END_TURN] Não há session_data - não é multiplayer, ignorando envio")
+                return
+            
+            if not netmaster_client.connected:
+                print("DEBUG: [END_TURN] Cliente não conectado - não é possível enviar end_turn")
+                return
+            
+            print("DEBUG: [END_TURN] === ENVIANDO MENSAGEM DE FIM DE TURNO PARA SERVIDOR ===")
+            
+            # Obter dados da sessão
+            session_data = netmaster_client.session_data
+            current_player_id = netmaster_client.player_id
+            session_id = session_data.get('id') or getattr(netmaster_client, 'session_id', None)
+            
+            print(f"DEBUG: [END_TURN] Player ID: {current_player_id}")
+            print(f"DEBUG: [END_TURN] Session ID: {session_id}")
+            
+            if not current_player_id or not session_id:
+                print("DEBUG: [END_TURN] Dados de sessão incompletos - não enviando end_turn")
+                return
+            
+            # Criar mensagem de fim de turno
+            end_turn_message = {
+                'type': 'end_turn',
+                'session_id': session_id,
+                'player_id': current_player_id
+            }
+            
+            print(f"DEBUG: [END_TURN] Mensagem a enviar: {end_turn_message}")
+            
+            # Usar asyncio para enviar a mensagem de forma assíncrona
+            async def send_message_async():
+                try:
+                    success = await netmaster_client.send_message(end_turn_message)
+                    if success:
+                        print("DEBUG: [END_TURN] ✓ Mensagem end_turn enviada com sucesso!")
+                    else:
+                        print("DEBUG: [END_TURN] ✗ Falha ao enviar mensagem end_turn")
+                except Exception as e:
+                    print(f"DEBUG: [END_TURN] ✗ Erro ao enviar end_turn: {e}")
+                    import traceback
+                    traceback.print_exc()
+            
+            # Executar na thread principal
+            try:
+                import threading
+                import asyncio
+                
+                # Verificar se estamos numa thread que tem loop asyncio
+                try:
+                    loop = asyncio.get_running_loop()
+                    # Se há loop ativo, criar task
+                    task = loop.create_task(send_message_async())
+                    print("DEBUG: [END_TURN] Task de envio criada no loop existente")
+                except RuntimeError:
+                    # Se não há loop ativo, executar usando run_until_complete em nova thread
+                    def run_async():
+                        try:
+                            asyncio.run(send_message_async())
+                        except Exception as e:
+                            print(f"DEBUG: [END_TURN] ✗ Erro na thread assíncrona: {e}")
+                    
+                    thread = threading.Thread(target=run_async, daemon=True)
+                    thread.start()
+                    print("DEBUG: [END_TURN] Thread de envio iniciada")
+            except Exception as e:
+                print(f"DEBUG: [END_TURN] ✗ Erro na configuração assíncrona: {e}")
+            
+            print("DEBUG: [END_TURN] === MENSAGEM DE FIM DE TURNO AGENDADA ===")
+        
+        except Exception as e:
+            print(f"DEBUG: [END_TURN] ✗ Erro ao processar envio de end_turn: {e}")
+            import traceback
+            traceback.print_exc()
 
     def _aplicar_router_upgrade(self, router_id):
         """
@@ -23422,6 +26808,10 @@ class PlayerDashboard(tk.Toplevel):
         title.place(relx=0.5, y=65, anchor="n")
         # Verificar se é Actions/Events ou Activities/Challenges para organização especial em colunas
         if set(tipos) == set(["actions", "events"]):
+            # CORREÇÃO CRÍTICA: Garantir que Events têm tracking antes de mostrar inventário
+            print(f"DEBUG: [show_inventory_matrix] Verificando tracking de Events antes de mostrar inventário")
+            self.ensure_events_have_tracking()
+            
             # NOVA IMPLEMENTAÇÃO: Fila única centrada combinando Actions e Events
             # CORREÇÃO: Mostrar TODAS as cartas do inventário em fila FIFO única
             cartas_actions_raw = self.inventario.get("actions", [])
@@ -26605,6 +29995,9 @@ class PlayerDashboard(tk.Toplevel):
                     self.saldo += valor
                     print(f"DEBUG: Player vendeu carta por {valor}, novo saldo: {self.saldo}")
                     
+                    # NOVO: Sincronizar saldo com servidor
+                    self.sync_score_with_server(f"venda carta +{valor}")
+                    
                     # Store paga pela carta (perde dinheiro)
                     if store_window:
                         store_window.saldo -= valor
@@ -26657,7 +30050,7 @@ class PlayerDashboard(tk.Toplevel):
                                     
                                     # Sincronização com baralho global
                                     try:
-                                        from Store_v2 import baralhos
+                                        from Store import baralhos
                                         if baralhos and cor_carta in baralhos and carta_tipo in baralhos[cor_carta]:
                                             if carta_path not in baralhos[cor_carta][carta_tipo]:
                                                 baralhos[cor_carta][carta_tipo].append(carta_path)
@@ -29980,7 +33373,7 @@ class PlayerDashboard(tk.Toplevel):
                     self.master._backup_turn_counters['_challenge_start_turns'][carta_challenge_path] = turno_aceitacao_real
                     print(f"DEBUG: [processar_challenge_aceite] Challenge salvo no _backup_turn_counters com turno {turno_aceitacao_real}")
                 
-                print(f"DEBUG: [processar_challenge_aceite] ✅ TRACKING TOTALMENTE PROTEGIDO com 3 backups independentes")
+                print(f"DEBUG: [processar_challenge_aceite] ✓ TRACKING TOTALMENTE PROTEGIDO com 3 backups independentes")
                 
             except Exception as e:
                 print(f"DEBUG: [processar_challenge_aceite] Erro no backup múltiplo: {e}")
@@ -30094,7 +33487,7 @@ class PlayerDashboard(tk.Toplevel):
             
             # 3. NOVO: Se não encontrou no tracking local, tentar recuperar dos backups
             if turno_ja_registado is None:
-                print(f"DEBUG: [_substituir_activity_por_challenge] ⚠️ Challenge não encontrado no tracking local - tentando backups...")
+                print(f"DEBUG: [_substituir_activity_por_challenge] [WARNING] Challenge não encontrado no tracking local - tentando backups...")
                 
                 # Verificar backup no root
                 try:
@@ -30104,7 +33497,7 @@ class PlayerDashboard(tk.Toplevel):
                             for backup_path, backup_turno in root._backup_challenge_tracking.items():
                                 if os.path.basename(backup_path) == challenge_basename:
                                     turno_ja_registado = backup_turno
-                                    print(f"DEBUG: [_substituir_activity_por_challenge] ✅ Challenge recuperado do backup ROOT: turno {backup_turno}")
+                                    print(f"DEBUG: [_substituir_activity_por_challenge] ✓ Challenge recuperado do backup ROOT: turno {backup_turno}")
                                     break
                 except Exception as e:
                     print(f"DEBUG: [_substituir_activity_por_challenge] Erro ao verificar backup ROOT: {e}")
@@ -30116,7 +33509,7 @@ class PlayerDashboard(tk.Toplevel):
                             for backup_path, backup_turno in self.master._challenge_start_turns_backup.items():
                                 if os.path.basename(backup_path) == challenge_basename:
                                     turno_ja_registado = backup_turno
-                                    print(f"DEBUG: [_substituir_activity_por_challenge] ✅ Challenge recuperado do backup MASTER: turno {backup_turno}")
+                                    print(f"DEBUG: [_substituir_activity_por_challenge] ✓ Challenge recuperado do backup MASTER: turno {backup_turno}")
                                     break
                     except Exception as e:
                         print(f"DEBUG: [_substituir_activity_por_challenge] Erro ao verificar backup MASTER: {e}")
@@ -30124,19 +33517,19 @@ class PlayerDashboard(tk.Toplevel):
                 # Se encontrou nos backups, restaurar no tracking local
                 if turno_ja_registado is not None:
                     self._challenge_start_turns[carta_challenge_path] = turno_ja_registado
-                    print(f"DEBUG: [_substituir_activity_por_challenge] ✅ Tracking restaurado dos backups: {challenge_basename} = turno {turno_ja_registado}")
+                    print(f"DEBUG: [_substituir_activity_por_challenge] ✓ Tracking restaurado dos backups: {challenge_basename} = turno {turno_ja_registado}")
             
             if turno_ja_registado is not None:
-                print(f"DEBUG: [_substituir_activity_por_challenge] ✅ Challenge {challenge_basename} tem tracking: turno {turno_ja_registado}")
+                print(f"DEBUG: [_substituir_activity_por_challenge] ✓ Challenge {challenge_basename} tem tracking: turno {turno_ja_registado}")
                 print(f"DEBUG: [_substituir_activity_por_challenge] PRESERVANDO turno de registo existente - NÃO sobrescrever!")
             else:
                 # FALLBACK CRÍTICO: Se não foi registado em lugar nenhum, registar AGORA com turno atual
-                print(f"DEBUG: [_substituir_activity_por_challenge] ❌ Challenge NÃO encontrado em local nenhum - REGISTANDO AGORA!")
+                print(f"DEBUG: [_substituir_activity_por_challenge] [ERROR] Challenge NÃO encontrado em local nenhum - REGISTANDO AGORA!")
                 
                 turno_aceitacao = self._current_turn_number
                 self._register_challenge_start_turn(carta_challenge_path, turno_especifico=turno_aceitacao)
                 turno_ja_registado = turno_aceitacao
-                print(f"DEBUG: [_substituir_activity_por_challenge] ✅ Challenge {challenge_basename} registado para turno {turno_aceitacao}")
+                print(f"DEBUG: [_substituir_activity_por_challenge] ✓ Challenge {challenge_basename} registado para turno {turno_aceitacao}")
             
             # BACKUP IMEDIATO APÓS VERIFICAÇÃO/REGISTO
             print(f"DEBUG: [_substituir_activity_por_challenge] === BACKUP IMEDIATO PÓS-REGISTO ===")
@@ -30151,7 +33544,7 @@ class PlayerDashboard(tk.Toplevel):
                     if not hasattr(self.master, '_challenge_start_turns_backup_imediato'):
                         self.master._challenge_start_turns_backup_imediato = {}
                     self.master._challenge_start_turns_backup_imediato[carta_challenge_path] = turno_ja_registado
-                    print(f"DEBUG: [_substituir_activity_por_challenge] ✅ BACKUP IMEDIATO no master: Challenge_13={turno_ja_registado}")
+                    print(f"DEBUG: [_substituir_activity_por_challenge] ✓ BACKUP IMEDIATO no master: Challenge_13={turno_ja_registado}")
                 
                 if hasattr(self, 'winfo_toplevel'):
                     root = self.winfo_toplevel()
@@ -30159,7 +33552,7 @@ class PlayerDashboard(tk.Toplevel):
                         if not hasattr(root, '_challenge_start_turns_backup_imediato'):
                             root._challenge_start_turns_backup_imediato = {}
                         root._challenge_start_turns_backup_imediato[carta_challenge_path] = turno_ja_registado
-                        print(f"DEBUG: [_substituir_activity_por_challenge] ✅ BACKUP IMEDIATO no root: Challenge_13={turno_ja_registado}")
+                        print(f"DEBUG: [_substituir_activity_por_challenge] ✓ BACKUP IMEDIATO no root: Challenge_13={turno_ja_registado}")
                 
                 # BACKUP CRÍTICO ADICIONAL: Salvar também no _backup_turn_counters para garantir persistência durante reconstrução
                 if hasattr(self, 'master') and self.master is not None:
@@ -30168,7 +33561,7 @@ class PlayerDashboard(tk.Toplevel):
                     if '_challenge_start_turns' not in self.master._backup_turn_counters:
                         self.master._backup_turn_counters['_challenge_start_turns'] = {}
                     self.master._backup_turn_counters['_challenge_start_turns'][carta_challenge_path] = turno_ja_registado
-                    print(f"DEBUG: [_substituir_activity_por_challenge] ✅ BACKUP ADICIONAL no _backup_turn_counters: {carta_challenge_path}={turno_ja_registado}")
+                    print(f"DEBUG: [_substituir_activity_por_challenge] ✓ BACKUP ADICIONAL no _backup_turn_counters: {carta_challenge_path}={turno_ja_registado}")
                 
             except Exception as e:
                 print(f"DEBUG: [_substituir_activity_por_challenge] ERRO no backup imediato: {e}")
@@ -30653,12 +34046,12 @@ class PlayerDashboard(tk.Toplevel):
                 page = 0
             self.show_inventory_for_sell(carta_tipo, None, page)
     
-    def show_game_result_screen(self, game_result):
+    def show_game_result_screen(self, game_data):
         """
         Mostra a tela de resultado final do jogo com o vencedor e ranking
         
         Args:
-            game_result: Dicionário com dados do resultado (winner, ranking, total_players)
+            game_data: Dicionário com dados completos da mensagem game_finished
         """
         # Limpar toda a interface
         for widget in self.winfo_children():
@@ -30666,63 +34059,127 @@ class PlayerDashboard(tk.Toplevel):
         
         self.configure(bg="black")
         
-        # Obter dimensões da tela
-        screen_width = self.winfo_screenwidth()
-        screen_height = self.winfo_screenheight()
+        # Carregar e adicionar padrão de rede igual ao das páginas Create/Join Game
+        try:
+            # Tentar carregar a imagem do padrão de rede
+            possible_network_pattern_paths = [
+                os.path.join(IMG_DIR, "network_pattern.png"),  # Caminho padrão
+                os.path.join("/home/joaorebolo2/netmaster_menu/img", "network_pattern.png"),  # Raspberry Pi
+            ]
+            
+            network_pattern_img = None
+            for pattern_path in possible_network_pattern_paths:
+                try:
+                    if os.path.exists(pattern_path):
+                        # Carregar e redimensionar para a largura da tela
+                        pattern_img = Image.open(pattern_path)
+                        screen_width = 800  # Largura padrão
+                        new_height = 120  # Altura fixa
+                        
+                        network_pattern_img = ImageTk.PhotoImage(
+                            pattern_img.resize((screen_width, new_height), Image.LANCZOS)
+                        )
+                        print(f"DEBUG: [GAME_RESULT] Network pattern carregado: {pattern_path}")
+                        break
+                except Exception as e:
+                    print(f"DEBUG: [GAME_RESULT] Erro ao carregar network pattern de {pattern_path}: {e}")
+                    continue
+            
+            if network_pattern_img:
+                # Padrão superior - posicionado mais acima
+                top_pattern = tk.Label(self, image=network_pattern_img, bg="black")
+                top_pattern.image = network_pattern_img  # manter referência
+                top_pattern.place(x=0, y=-55, width=800, height=120, anchor="nw")
+                print("DEBUG: [GAME_RESULT] Top pattern adicionado com sucesso")
+                
+                # Padrão inferior - posicionado mais para baixo no ecrã
+                bottom_pattern = tk.Label(self, image=network_pattern_img, bg="black")
+                bottom_pattern.image = network_pattern_img  # manter referência
+                bottom_pattern.place(x=0, y=450, width=800, height=120, anchor="nw")
+                print("DEBUG: [GAME_RESULT] Bottom pattern adicionado com sucesso")
+            else:
+                print("DEBUG: [GAME_RESULT] Network pattern não encontrado")
+                
+        except Exception as e:
+            print(f"DEBUG: [GAME_RESULT] Erro ao carregar/adicionar network patterns: {e}")
         
-        # Frame principal centralizado
-        main_frame = tk.Frame(self, bg="black")
-        main_frame.place(relx=0.5, rely=0.5, anchor="center")
+        # Logo NetMaster (mesmo posicionamento e dimensão do menu principal)
+        # Verificar se temos as imagens do menu system disponíveis
+        use_netmaster_img = False
+        netmaster_img = None
         
-        # Título principal
-        title_text = "🏆 GAME FINISHED 🏆"
+        try:
+            # Tentar carregar a mesma imagem que o IntegratedMenuSystem usa
+            logo_path = os.path.join(IMG_DIR, "logo_netmaster_icon_v3.png")
+            if os.path.exists(logo_path):
+                logo_img = Image.open(logo_path)
+                logo_resized = logo_img.resize((140, 55), Image.LANCZOS)
+                netmaster_img = ImageTk.PhotoImage(logo_resized)
+                use_netmaster_img = True
+        except Exception as e:
+            print(f"DEBUG: [GAME_RESULT] Erro ao carregar logo: {e}")
+        
+        if use_netmaster_img and netmaster_img:
+            logo_label = tk.Label(self, image=netmaster_img, bg="black")
+            logo_label.image = netmaster_img  # manter referência
+            logo_label.place(relx=0.5, y=10, anchor="n")
+        else:
+            # Fallback para texto
+            logo_label = tk.Label(self, text="NetMaster", font=("Helvetica", 20, "bold"), bg="black", fg="white")
+            logo_label.place(relx=0.5, y=10, anchor="n")
+        
+        # Título principal - GAME FINISHED em vermelho
+        title_text = "GAME FINISHED"
         title_label = tk.Label(
-            main_frame, 
+            self, 
             text=title_text,
-            font=("Helvetica", 48, "bold"),
-            fg="gold",
+            font=("Helvetica", 24, "bold"),
+            fg="red",  # Mudado de "gold" para "red"
             bg="black"
         )
-        title_label.pack(pady=(0, 30))
+        title_label.place(relx=0.5, rely=0.22, anchor="center")
         
-        # Informações do vencedor
+        # Frame principal para conteúdo central
+        content_frame = tk.Frame(self, bg="black")
+        content_frame.place(relx=0.5, rely=0.5, anchor="center")
+        
+        # CORREÇÃO: Extrair game_result dos dados da mensagem
+        game_result = game_data.get('game_result', {})
+        
+        # DEBUG: Verificar dados recebidos
+        print(f"DEBUG: [GAME_RESULT] Dados completos recebidos: {game_data}")
+        print(f"DEBUG: [GAME_RESULT] game_result: {game_result}")
+        if 'winner' in game_result:
+            print(f"DEBUG: [GAME_RESULT] Winner data: {game_result['winner']}")
+        if 'ranking' in game_result:
+            print(f"DEBUG: [GAME_RESULT] Ranking data: {game_result['ranking']}")
+        
+        # Verificar se há dados do jogo
+        if not game_result or 'winner' not in game_result:
+            # Fallback se não há dados de resultado
+            error_label = tk.Label(
+                content_frame,
+                text="Game finished but no result data available",
+                font=("Helvetica", 20),
+                fg="red",
+                bg="black"
+            )
+            error_label.pack(pady=50)
+            return
+        
+        # Informações do vencedor (sem mostrar score)
         winner = game_result['winner']
-        winner_text = f"🥇 WINNER: {winner['player_name']}"
+        winner_text = f"WINNER: {winner['player_name']}"
         winner_label = tk.Label(
-            main_frame,
+            content_frame,
             text=winner_text,
-            font=("Helvetica", 36, "bold"),
+            font=("Helvetica", 28, "bold"),
             fg="lime",
             bg="black"
         )
-        winner_label.pack(pady=(0, 10))
+        winner_label.pack(pady=(0, 30))  # Aumentado o pady de 10 para 30 para compensar a remoção do score
         
-        # Pontuação do vencedor
-        winner_score_text = f"💰 Final Score: {winner['score']} PiCoins"
-        winner_score_label = tk.Label(
-            main_frame,
-            text=winner_score_text,
-            font=("Helvetica", 24),
-            fg="yellow",
-            bg="black"
-        )
-        winner_score_label.pack(pady=(0, 40))
-        
-        # Frame do ranking
-        ranking_frame = tk.Frame(main_frame, bg="black")
-        ranking_frame.pack(pady=(0, 30))
-        
-        # Título do ranking
-        ranking_title = tk.Label(
-            ranking_frame,
-            text="📊 FINAL RANKING",
-            font=("Helvetica", 28, "bold"),
-            fg="cyan",
-            bg="black"
-        )
-        ranking_title.pack(pady=(0, 20))
-        
-        # Lista do ranking
+        # Lista do ranking (sem título "FINAL RANKING")
         for player_rank in game_result['ranking']:
             position = player_rank['position']
             name = player_rank['player_name']
@@ -30730,18 +34187,18 @@ class PlayerDashboard(tk.Toplevel):
             color = player_rank['player_color']
             is_winner = player_rank['is_winner']
             
-            # Emoji para posições
+            # Posições sem emojis
             if position == 1:
-                emoji = "🥇"
+                pos_text = "1st"
                 text_color = "gold"
             elif position == 2:
-                emoji = "🥈"
+                pos_text = "2nd"
                 text_color = "silver"
             elif position == 3:
-                emoji = "🥉"
+                pos_text = "3rd"
                 text_color = "#CD7F32"  # bronze
             else:
-                emoji = f"{position}."
+                pos_text = f"{position}th"
                 text_color = "white"
             
             # Destacar se é o jogador atual
@@ -30749,66 +34206,21 @@ class PlayerDashboard(tk.Toplevel):
                 text_color = "lime"
                 name = f">>> {name} <<<"
             
-            rank_text = f"{emoji} {name} - {score} PiCoins"
+            rank_text = f"{pos_text} {name} - {score} PICoins"
             rank_label = tk.Label(
-                ranking_frame,
+                content_frame,
                 text=rank_text,
-                font=("Helvetica", 20, "bold" if is_winner else "normal"),
+                font=("Helvetica", 16, "bold" if is_winner else "normal"),
                 fg=text_color,
                 bg="black"
             )
-            rank_label.pack(pady=5)
-        
-        # Botão para voltar ao menu
-        back_button = tk.Button(
-            main_frame,
-            text="🏠 Back to Menu",
-            font=("Helvetica", 18, "bold"),
-            bg="darkblue",
-            fg="white",
-            activebackground="blue",
-            activeforeground="white",
-            padx=30,
-            pady=15,
-            command=self.return_to_main_menu
-        )
-        back_button.pack(pady=(30, 0))
-        
-        # Adicionar padrões de rede decorativos (similar ao menu)
-        try:
-            self.add_game_result_decorations()
-        except:
-            pass  # Se não conseguir adicionar decorações, continuar sem elas
+            rank_label.pack(pady=3)
         
         print(f"DEBUG: [GAME_RESULT] Tela de resultado mostrada:")
         print(f"DEBUG: [GAME_RESULT]   Vencedor: {winner['player_name']} ({winner['score']} pontos)")
         print(f"DEBUG: [GAME_RESULT]   Total jogadores: {game_result['total_players']}")
     
-    def add_game_result_decorations(self):
-        """Adiciona decorações de padrão de rede à tela de resultado"""
-        # Implementação simples de decorações
-        screen_width = self.winfo_screenwidth()
-        screen_height = self.winfo_screenheight()
-        
-        # Adicionar alguns elementos decorativos nos cantos
-        decorative_elements = [
-            "🌐", "📡", "🔗", "💻", "📊", "⚡", "🚀", "⭐"
-        ]
-        
-        import random
-        for i in range(8):
-            element = random.choice(decorative_elements)
-            x = random.randint(50, screen_width - 100)
-            y = random.randint(50, screen_height - 100)
-            
-            deco_label = tk.Label(
-                self,
-                text=element,
-                font=("Helvetica", 24),
-                fg="gray",
-                bg="black"
-            )
-            deco_label.place(x=x, y=y)
+    
     
     def return_to_main_menu(self):
         """Volta ao menu principal"""
@@ -30833,10 +34245,10 @@ class PlayerDashboard(tk.Toplevel):
             # Em caso de erro, pelo menos fechar a aplicação graciosamente
             import sys
             sys.exit(0)
-    
+
     def show_waiting_for_turn_screen(self, current_player_name, current_player_color):
         """Mostra tela de espera quando não é a vez do jogador"""
-        print(f"⏳ [WAITING] Mostrando tela de espera para {current_player_name} ({current_player_color})")
+        print(f"[WAITING] [WAITING] Mostrando tela de espera para {current_player_name} ({current_player_color})")
         
         # Limpar a interface atual
         for widget in self.winfo_children():
@@ -30844,74 +34256,110 @@ class PlayerDashboard(tk.Toplevel):
         
         self.configure(bg="black")
         
-        # Obter dimensões da tela
+        # Obter dimensões da tela e configurar fullscreen como na interface principal
         screen_width = self.winfo_screenwidth()
         screen_height = self.winfo_screenheight()
+        self.geometry(f"{screen_width}x{screen_height}+0+0")
+        self.overrideredirect(True)  # Remove barra de título
+        self.attributes("-fullscreen", True)  # Garante fullscreen
         
-        # Configurar imagens do TopBar baseado na cor do jogador atual
-        topbar_color_map = {
-            "red": "TopBar_red.png",
-            "blue": "TopBar_blue.png", 
-            "green": "TopBar_green.png",
-            "yellow": "TopBar_yellow.png"
-        }
-        
-        topbar_img_name = topbar_color_map.get(current_player_color, "TopBar_red.png")
-        topbar_img_path = os.path.join(IMG_DIR, topbar_img_name)
-        
-        # TopBar
-        if os.path.exists(topbar_img_path):
-            topbar_pil = Image.open(topbar_img_path)
-            topbar_pil = topbar_pil.resize((screen_width, 120), Image.Resampling.LANCZOS)
-            topbar_img = ImageTk.PhotoImage(topbar_pil)
-            topbar_label = tk.Label(self, image=topbar_img, bg="black")
-            topbar_label.image = topbar_img
-            topbar_label.place(x=0, y=0)
-        
-        # Nome do jogador no TopBar
-        player_name_label = tk.Label(
-            self,
-            text=self.player_name,
-            font=("Helvetica", 18, "bold"),
-            fg="white",
-            bg="black"
-        )
-        player_name_label.place(x=200, y=40)
-        
-        # Ícone e saldo do picoin
-        coin_img_path = os.path.join(IMG_DIR, "picoin.png")
-        if os.path.exists(coin_img_path):
-            coin_pil = Image.open(coin_img_path)
-            coin_pil = coin_pil.resize((40, 40), Image.Resampling.LANCZOS)
-            coin_img = ImageTk.PhotoImage(coin_pil)
-            coin_label = tk.Label(self, image=coin_img, bg="black")
-            coin_label.image = coin_img
-            coin_label.place(x=screen_width - 200, y=35)
+        # Criar TopBar usando a cor do PRÓPRIO jogador (não do jogador atual)
+        # CORREÇÃO: Usar player_color (próprio jogador) em vez de current_player_color
+        try:
+            topbar_img_path = os.path.join(IMG_DIR, f"TopBar_{self.player_color.lower()}.png")
+            print(f"DEBUG: [WAITING] Tentando carregar TopBar de: {topbar_img_path}")
             
-            # Saldo
-            saldo_label = tk.Label(
-                self,
-                text=str(self.saldo),
-                font=("Helvetica", 18, "bold"),
-                fg="white",
-                bg="black"
-            )
-            saldo_label.place(x=screen_width - 150, y=45)
+            if os.path.exists(topbar_img_path):
+                img = Image.open(topbar_img_path).convert("RGBA")
+                img = img.resize((screen_width, 60), Image.Resampling.LANCZOS)
+                topbar_img = ImageTk.PhotoImage(img)
+                self.topbar_label = tk.Label(self, image=topbar_img, bg="black", borderwidth=0, highlightthickness=0)
+                self.topbar_label.image = topbar_img
+                self.topbar_label.pack(side="top", fill="x")
+                print("DEBUG: [WAITING] TopBar criada com sucesso!")
+            else:
+                print(f"DEBUG: [WAITING] Arquivo TopBar não encontrado, criando fallback")
+                # Criar barra superior fallback
+                topbar_frame = tk.Frame(self, bg=self.bar_color, height=60)
+                topbar_frame.pack(side="top", fill="x")
+                topbar_frame.pack_propagate(False)
+                self.topbar_label = topbar_frame
+                print("DEBUG: [WAITING] TopBar fallback criada!")
+        except Exception as e:
+            print(f"DEBUG: [WAITING] ERRO ao criar TopBar: {e}")
+            # Criar barra superior fallback em caso de erro
+            topbar_frame = tk.Frame(self, bg=self.bar_color, height=60)
+            topbar_frame.pack(side="top", fill="x")
+            topbar_frame.pack_propagate(False)
+            self.topbar_label = topbar_frame
+            print("DEBUG: [WAITING] TopBar fallback criada após erro!")
         
-        # Ícones dos jogadores no canto superior esquerdo
-        self.create_player_icons_waiting(screen_width, screen_height)
+        # Ícones dos outros jogadores (esquerda) - seguindo o padrão da interface principal
+        session_players = self.get_session_players_icons()
+        for idx, player_info in enumerate(session_players):
+            if idx < len(USER_ICONS):
+                try:
+                    # Usar ícone baseado na cor do jogador da sessão
+                    color_icon_map = {
+                        "red": "red_user_icon.png",
+                        "blue": "blue_user_icon.png", 
+                        "green": "green_user_icon.png",
+                        "yellow": "yellow_user_icon.png"
+                    }
+                    
+                    icon_name = color_icon_map.get(player_info.get('color', 'red'), "red_user_icon.png")
+                    icon_path = os.path.join(IMG_DIR, icon_name)
+                    
+                    if os.path.exists(icon_path):
+                        icon_img = ImageTk.PhotoImage(Image.open(icon_path).resize((30,30)))
+                        lbl = tk.Label(self, image=icon_img, bg=self.bar_color)
+                        lbl.image = icon_img
+                        lbl.place(x=5+idx*40, y=20)
+                        print(f"DEBUG: [WAITING] [ICONS] Ícone criado para {player_info.get('name')} ({player_info.get('color')})")
+                    else:
+                        print(f"DEBUG: [WAITING] [ICONS] Ícone não encontrado: {icon_path}")
+                except Exception as e:
+                    print(f"DEBUG: [WAITING] [ICONS] Erro ao criar ícone {idx}: {e}")
+                    # Fallback para ícone padrão se houver erro
+                    if idx < len(USER_ICONS):
+                        icon_img = ImageTk.PhotoImage(Image.open(USER_ICONS[idx]).resize((30,30)))
+                        lbl = tk.Label(self, image=icon_img, bg=self.bar_color)
+                        lbl.image = icon_img
+                        lbl.place(x=5+idx*40, y=20)
+
+        # Nome do jogador (centro) - seguindo o padrão da interface principal
+        name_lbl = tk.Label(self, text=self.player_name, font=("Helvetica", 18, "bold"), bg=self.bar_color, fg="black", borderwidth=0)
+        name_lbl.place(relx=0.5, y=25, anchor="n")
         
-        # Texto principal: "Waiting for your turn..."
+        # --- BARRA INFERIOR COM IMAGEM (seguindo o padrão da interface principal) ---
+        try:
+            belowbar_img_path = os.path.join(IMG_DIR, f"BelowBar_{self.player_color.lower()}.png")
+            belowbar_img = ImageTk.PhotoImage(Image.open(belowbar_img_path).resize((screen_width, 50)))
+            belowbar_label = tk.Label(self, image=belowbar_img, bg="black")
+            belowbar_label.image = belowbar_img
+            belowbar_label.pack(side="bottom", fill="x")
+            print(f"DEBUG: [WAITING] Barra inferior BelowBar_{self.player_color.lower()}.png carregada com sucesso")
+        except Exception as e:
+            print(f"DEBUG: [WAITING] Erro ao carregar BelowBar_{self.player_color.lower()}.png: {e}")
+            # Fallback: criar uma barra simples da cor do jogador se a imagem não existir
+            belowbar_frame = tk.Frame(self, bg=self.bar_color, height=50)
+            belowbar_frame.pack(side="bottom", fill="x")
+            belowbar_frame.pack_propagate(False)
+        
+        # Saldo no canto inferior direito (sobre a BelowBar) - seguindo o padrão da interface principal
+        self.after(100, lambda: self.create_coin_saldo_overlay_waiting(screen_width, screen_height, self.saldo))
+        
+        # Texto principal: "Waiting for your turn..." (movido para cima)
         waiting_text = tk.Label(
             self,
             text="Waiting for your turn...",
-            font=("Helvetica", 36, "bold"),
+            font=("Helvetica", 24, "bold"),
             fg="white",
             bg="black"
         )
-        waiting_text.place(relx=0.5, rely=0.45, anchor="center")
+        waiting_text.place(relx=0.5, rely=0.35, anchor="center")
         
-        # Subtexto com informação de quem está jogando
+        # Subtexto com informação de quem está jogando (movido para cima)
         current_player_text = tk.Label(
             self,
             text=f"{current_player_name} is playing",
@@ -30919,13 +34367,36 @@ class PlayerDashboard(tk.Toplevel):
             fg="gray",
             bg="black"
         )
-        current_player_text.place(relx=0.5, rely=0.55, anchor="center")
+        current_player_text.place(relx=0.5, rely=0.45, anchor="center")
         
         # Loading wheel animada
         self.create_loading_wheel_waiting(screen_width, screen_height)
         
-        # Adicionar decorações de rede
-        self.add_network_pattern_decorations_waiting()
+        # *** GARANTIR QUE O TIMER APARECE NA TELA DE ESPERA ***
+        # O timer agora é controlado pelo servidor, então deve estar sempre presente
+        print(f"[SESSION_TIMER] Verificando timer na tela de espera...")
+        
+        # Garantir que existe session_timer_active e session_time_remaining
+        if not hasattr(self, 'session_timer_active'):
+            self.session_timer_active = True  # Forçar timer ativo em multiplayer
+            print(f"[SESSION_TIMER] session_timer_active definido como True (tela de espera)")
+        
+        if not hasattr(self, 'session_time_remaining'):
+            # Calcular tempo restante baseado na sessão
+            if hasattr(netmaster_client, 'session_data') and netmaster_client.session_data:
+                duration_minutes = netmaster_client.session_data.get('duration_minutes', 15)
+                self.session_time_remaining = duration_minutes * 60  # converter para segundos
+                print(f"[SESSION_TIMER] session_time_remaining definido como {self.session_time_remaining}s (tela de espera)")
+            else:
+                self.session_time_remaining = 900  # 15 minutos padrão
+                print(f"[SESSION_TIMER] session_time_remaining definido como padrão: 900s (tela de espera)")
+        
+        # Sempre criar o display do timer na tela de espera
+        print(f"[SESSION_TIMER] Criando timer display na tela de espera (FORÇADO)")
+        self.after(500, lambda: self.create_session_timer_display(self))
+        
+        # IMPORTANTE: NÃO iniciar countdown local - apenas display
+        # O timer será atualizado via timer_sync do servidor
     
     def create_player_icons_waiting(self, screen_width, screen_height):
         """Cria ícones dos jogadores no canto superior esquerdo da tela de espera"""
@@ -30974,7 +34445,7 @@ class PlayerDashboard(tk.Toplevel):
         self.waiting_loading_angle = 0
         self.waiting_loading_active = True
         
-        # Canvas para a roda de loading
+        # Canvas para a roda de loading (movido para cima)
         canvas_size = 80
         self.waiting_canvas = tk.Canvas(
             self,
@@ -30983,7 +34454,7 @@ class PlayerDashboard(tk.Toplevel):
             bg="black",
             highlightthickness=0
         )
-        self.waiting_canvas.place(relx=0.5, rely=0.7, anchor="center")
+        self.waiting_canvas.place(relx=0.5, rely=0.6, anchor="center")
         
         # Iniciar animação
         self.animate_waiting_loading()
@@ -31032,32 +34503,367 @@ class PlayerDashboard(tk.Toplevel):
         except Exception as e:
             print(f"DEBUG: Erro na animação de loading: {e}")
     
-    def add_network_pattern_decorations_waiting(self):
-        """Adiciona decorações de padrão de rede à tela de espera"""
-        screen_width = self.winfo_screenwidth()
-        screen_height = self.winfo_screenheight()
-        
-        # Elementos decorativos
-        decorative_elements = ["📡", "🌐", "🔗", "💻", "⚡"]
-        
-        import random
-        for i in range(6):
-            element = random.choice(decorative_elements)
-            x = random.randint(50, screen_width - 100)
-            y = random.randint(150, screen_height - 100)
+    
+    def create_coin_saldo_overlay_waiting(self, screen_width, screen_height, saldo):
+        """Cria o overlay do coin e saldo para a tela de espera"""
+        try:
+            coin_img = ImageTk.PhotoImage(Image.open(COIN_IMG).resize((24,24)))
+            coin_lbl = tk.Label(self, image=coin_img, bg=self.bar_color, borderwidth=0)
+            coin_lbl.image = coin_img
+            coin_lbl.place(x=screen_width-100, y=30)
+            coin_lbl.lift()  # Garante que fica por cima
             
-            deco_label = tk.Label(
-                self,
-                text=element,
-                font=("Helvetica", 20),
-                fg="gray",
-                bg="black"
-            )
-            deco_label.place(x=x, y=y)
+            saldo_lbl = tk.Label(self, text=f"{saldo}", font=("Helvetica", 16, "bold"), bg=self.bar_color, fg="black", borderwidth=0)
+            saldo_lbl.place(x=screen_width-70, y=30)
+            saldo_lbl.lift()  # Garante que fica por cima
+            
+            print(f"DEBUG: [WAITING] Overlay coin/saldo criado com sucesso - saldo: {saldo}")
+        except Exception as e:
+            print(f"DEBUG: [WAITING] Erro ao criar overlay coin/saldo: {e}")
     
     def stop_waiting_animations(self):
         """Para todas as animações da tela de espera"""
         self.waiting_loading_active = False
+
+    # *** HANDLERS PARA MULTIPLAYER ***
+    
+    def on_multiplayer_turn_changed(self, data):
+        """Handler para mudanças de turno durante o jogo"""
+        print(f"[DASHBOARD_TURN_CHANGED] *** MUDANÇA DE TURNO RECEBIDA NO DASHBOARD ***")
+        print(f"[DASHBOARD_TURN_CHANGED] Data: {data}")
+        
+        current_player_id = data.get('current_player_id')
+        current_player_name = data.get('current_player_name', 'Unknown')
+        current_player_color = data.get('current_player_color', 'unknown')
+        player_order = data.get('player_order', [])
+        current_turn_index = data.get('current_turn_index', 0)
+        
+        print(f"[DASHBOARD_TURN_CHANGED] Jogador atual: {current_player_name} ({current_player_color})")
+        print(f"[DASHBOARD_TURN_CHANGED] Meu player_id: {getattr(netmaster_client, 'player_id', None)}")
+        
+        # Verificar se é a vez deste jogador
+        my_player_id = getattr(netmaster_client, 'player_id', None)
+        is_my_turn = (current_player_id == my_player_id)
+        
+        def update_ui():
+            if is_my_turn:
+                print(f"[DASHBOARD_TURN_CHANGED] ✓ É o meu turno! Mudando para dice roll screen")
+                # É a minha vez - ir para dice roll
+                self.waiting_for_turn = False
+                
+                # Obter parâmetros necessários para show_dice_roll_screen
+                player_name = current_player_name
+                saldo = getattr(self, 'saldo', 1000)  # Usar saldo actual ou default
+                
+                # Construir lista de outros jogadores
+                other_players = []
+                session_data = getattr(netmaster_client, 'session_data', {})
+                players = session_data.get('players', {})
+                for pid, pdata in players.items():
+                    if pid != my_player_id:  # Excluir o próprio jogador
+                        other_players.append({
+                            'name': pdata.get('name', 'Unknown'),
+                            'color': pdata.get('color', 'white'),
+                            'id': pid
+                        })
+                
+                # Obter dimensões da janela
+                screen_width = self.winfo_screenwidth()
+                screen_height = self.winfo_screenheight()
+                
+                print(f"[DASHBOARD_TURN_CHANGED] Parâmetros: player_name={player_name}, saldo={saldo}, outros_jogadores={len(other_players)}")
+                self.show_dice_roll_screen(player_name, saldo, other_players, screen_width, screen_height)
+            else:
+                print(f"[DASHBOARD_TURN_CHANGED] Continuo aguardando - mostrando waiting screen para {current_player_name}")
+                # Continuar aguardando - atualizar waiting screen
+                self.waiting_for_turn = True
+                self.current_turn_player_id = current_player_id
+                self.show_waiting_for_turn_screen(current_player_name, current_player_color)
+        
+        self.after(0, update_ui)
+    
+    def on_player_joined(self, data):
+        """Handler para quando jogador entra na sessão durante o jogo"""
+        print(f"[DASHBOARD_PLAYER_JOINED] Jogador entrou na sessão: {data}")
+        # TODO: Atualizar lista de jogadores se necessário
+    
+    def on_player_left(self, data):
+        """Handler para quando jogador sai da sessão durante o jogo"""
+        print(f"[DASHBOARD_PLAYER_LEFT] Jogador saiu da sessão: {data}")
+        # TODO: Atualizar lista de jogadores se necessário
+    
+    def on_heartbeat_ack(self, data):
+        """Handler para acknowledgment do heartbeat"""
+        # Implementação simples - apenas log se necessário
+        pass
+    
+    def on_timer_sync(self, data):
+        """Handler para sincronização do timer de sessão - apenas aceita atualizações do servidor"""
+        try:
+            # Verificar se a atualização vem do servidor
+            source = data.get('source')
+            if source != 'server':
+                print(f"[TIMER_SYNC] Ignorando timer_sync não-servidor (source: {source})")
+                return
+            
+            # Receber atualização do timer do servidor
+            time_remaining = data.get('time_remaining', 0)
+            
+            print(f"[TIMER_SYNC] Recebida atualização do timer do SERVIDOR: {time_remaining:.1f}s")
+            
+            # Atualizar estado local do timer (mas não executar countdown próprio)
+            self.session_time_remaining = time_remaining
+            self.session_timer_active = True  # Timer sempre ativo se vem do servidor
+            
+            # Atualizar display imediatamente se existir
+            if hasattr(self, 'session_timer_label') and self.session_timer_label:
+                self.update_timer_display()
+                
+        except Exception as e:
+            print(f"[TIMER_SYNC] Erro ao processar sincronização do timer: {e}")
+    
+    def _verificar_cartas_pendentes(self):
+        """
+        NOVO SISTEMA: Verifica no servidor se há cartas Actions/Events armazenadas para este jogador
+        Chamado quando o jogador inicia sua vez (interface principal)
+        """
+        print(f"[PENDING_CARDS] *** VERIFICANDO CARTAS PENDENTES PARA {self.player_color} ***")
+        
+        # Verificação corrigida da conexão
+        if not hasattr(__main__, 'netmaster_client') or not __main__.netmaster_client:
+            print(f"[PENDING_CARDS] NetMaster client não existe - pulando verificação")
+            return
+            
+        if not hasattr(__main__.netmaster_client, 'connected') or not __main__.netmaster_client.connected:
+            print(f"[PENDING_CARDS] Cliente não conectado - pulando verificação")
+            return
+            
+        if not hasattr(__main__.netmaster_client, 'player_id') or not __main__.netmaster_client.player_id:
+            print(f"[PENDING_CARDS] Player ID não disponível - pulando verificação")
+            return
+        
+        try:
+            # Mensagem para solicitar cartas pendentes
+            message = {
+                'type': 'get_pending_cards',
+                'player_id': __main__.netmaster_client.player_id,
+                'player_color': self.player_color
+            }
+            
+            print(f"[PENDING_CARDS] Solicitando cartas pendentes ao servidor: {message}")
+            print(f"[PENDING_CARDS] Player ID: {__main__.netmaster_client.player_id}")
+            print(f"[PENDING_CARDS] Session ID: {getattr(__main__.netmaster_client, 'session_id', 'N/A')}")
+            
+            # Enviar solicitação ao servidor usando threading para compatibilidade com Tkinter
+            import threading
+            import asyncio
+            
+            def enviar_mensagem():
+                try:
+                    # Criar novo loop de eventos para esta thread
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    
+                    # Executar o envio da mensagem
+                    resultado = loop.run_until_complete(__main__.netmaster_client.send_message(message))
+                    
+                    print(f"[PENDING_CARDS] Mensagem enviada com sucesso: {resultado}")
+                    
+                    # Fechar o loop
+                    loop.close()
+                    
+                except Exception as e:
+                    print(f"[PENDING_CARDS] Erro ao enviar mensagem em thread: {e}")
+                    import traceback
+                    print(f"[PENDING_CARDS] Traceback: {traceback.format_exc()}")
+            
+            # Executar em thread separada
+            thread = threading.Thread(target=enviar_mensagem, daemon=True)
+            thread.start()
+            
+        except Exception as e:
+            print(f"[PENDING_CARDS] ERROR: Erro ao verificar cartas pendentes: {e}")
+            import traceback
+            print(f"[PENDING_CARDS] Traceback: {traceback.format_exc()}")
+    
+    def on_pending_cards_received(self, data):
+        """
+        NOVO SISTEMA: Handler para receber cartas pendentes do servidor
+        Adiciona as cartas ao inventário do jogador
+        """
+        print(f"[PENDING_CARDS] *** RECEBIDAS CARTAS PENDENTES: {data} ***")
+        
+        try:
+            pending_cards = data.get('cards', [])
+            
+            if not pending_cards:
+                print(f"[PENDING_CARDS] Nenhuma carta pendente para {self.player_color}")
+                return
+            
+            print(f"[PENDING_CARDS] Processando {len(pending_cards)} cartas pendentes")
+            
+            # Processar cada carta pendente
+            for card_data in pending_cards:
+                try:
+                    card_path = card_data.get('card_path')
+                    card_type = card_data.get('card_type', '').lower()  # 'actions' ou 'events'
+                    from_player = card_data.get('from_player', 'Unknown')
+                    
+                    print(f"[PENDING_CARDS] Processando carta: {card_path} de {from_player} (tipo: {card_type})")
+                    
+                    # Adicionar carta ao inventário apropriado usando o método existente
+                    if card_type in ['actions', 'events']:
+                        self.adicionar_carta_inventario(card_path, card_type)
+                        print(f"[PENDING_CARDS] ✓ {card_type.title()} adicionada ao inventário")
+                        
+                        # CRÍTICO: Verificar posição na fila após adição
+                        is_first = self._is_first_card_in_actions_events_queue(card_path)
+                        is_active = self.is_card_active(card_path, card_type)
+                        print(f"[PENDING_CARDS] VERIFICAÇÃO: {os.path.basename(card_path)}")
+                        print(f"[PENDING_CARDS]   - É primeira na fila? {is_first}")
+                        print(f"[PENDING_CARDS]   - Está ativa? {is_active}")
+                        
+                        if is_active and not is_first:
+                            print(f"[PENDING_CARDS] INCONSISTÊNCIA: Carta ativa mas não é primeira na fila!")
+                        elif not is_active and is_first:
+                            print(f"[PENDING_CARDS] INCONSISTÊNCIA: Carta primeira na fila mas não ativa!")
+                        elif is_active and is_first:
+                            print(f"[PENDING_CARDS] ✓ CORRETO: Carta primeira na fila e ativa")
+                        else:
+                            print(f"[PENDING_CARDS] ✓ CORRETO: Carta não é primeira na fila e não está ativa")
+                    else:
+                        print(f"[PENDING_CARDS] Tipo de carta desconhecido: {card_type}")
+                    
+                except Exception as card_error:
+                    print(f"[PENDING_CARDS] ERROR: Erro ao processar carta individual: {card_error}")
+                    continue
+            
+            print(f"[PENDING_CARDS] ✓ SUCCESS: Todas as cartas pendentes processadas")
+            
+            # ADICIONAL: Mostrar estado final da fila cronológica
+            if hasattr(self, '_actions_events_order'):
+                print(f"[PENDING_CARDS] FILA FINAL Actions/Events ({len(self._actions_events_order)} cartas):")
+                for i, entry in enumerate(self._actions_events_order):
+                    card_name = os.path.basename(entry['path'])
+                    card_type = entry['type']
+                    timestamp = entry.get('timestamp', 0)
+                    is_active = self.is_card_active(entry['path'], card_type)
+                    status = "ATIVA" if is_active else "INATIVA"
+                    print(f"[PENDING_CARDS]   {i+1}. {card_name} ({card_type}) - t{timestamp} - {status}")
+            else:
+                print(f"[PENDING_CARDS] Nenhuma fila Actions/Events definida")
+            
+        except Exception as e:
+            print(f"[PENDING_CARDS] ERROR: Erro ao processar cartas pendentes: {e}")
+            import traceback
+            print(f"[PENDING_CARDS] Traceback: {traceback.format_exc()}")
+
+    def on_card_returned_to_store(self, data):
+        """
+        Handler para quando uma carta é devolvida à Store porque o jogador alvo não estava na sessão
+        """
+        try:
+            print(f"[CARD_RETURN] *** CARTA DEVOLVIDA À STORE ***")
+            print(f"[CARD_RETURN] Data: {data}")
+            
+            reason = data.get('reason', 'Unknown')
+            message = data.get('message', '')
+            card_path = data.get('card_path', '')
+            card_type = data.get('card_type', '')
+            status = data.get('status', '')
+            
+            print(f"[CARD_RETURN] Motivo: {reason}")
+            print(f"[CARD_RETURN] Mensagem: {message}")
+            print(f"[CARD_RETURN] Carta: {card_path}")
+            print(f"[CARD_RETURN] Tipo: {card_type}")
+            print(f"[CARD_RETURN] Status: {status}")
+            
+            if reason == 'target_player_not_in_session':
+                print(f"[CARD_RETURN] ✓ Carta devolvida à Store - jogador alvo não estava na sessão")
+                print(f"[CARD_RETURN] A carta {card_type} está novamente disponível na Store")
+                
+                # Opcionalmente, mostrar uma mensagem ao jogador
+                # Pode implementar um popup ou notificação visual aqui
+                
+            else:
+                print(f"[CARD_RETURN] Motivo de devolução desconhecido: {reason}")
+            
+            print(f"[CARD_RETURN] *** PROCESSAMENTO CONCLUÍDO ***")
+            
+        except Exception as e:
+            print(f"[CARD_RETURN] ERROR: Erro ao processar carta devolvida: {e}")
+            import traceback
+            print(f"[CARD_RETURN] Traceback: {traceback.format_exc()}")
+    
+    def sync_score_with_server(self, reason=""):
+        """Sincroniza o saldo atual com o servidor"""
+        print(f"DEBUG: [SCORE_SYNC] Iniciando sincronização: {reason}")
+        try:
+            # Verificar se temos acesso ao cliente global
+            import __main__
+            
+            # Debug: verificar existência do cliente
+            has_client = hasattr(__main__, 'netmaster_client')
+            print(f"DEBUG: [SCORE_SYNC] __main__.netmaster_client existe: {has_client}")
+            
+            if not has_client:
+                print(f"[SCORE_SYNC] AVISO: __main__.netmaster_client não existe - saldo não sincronizado ({reason})")
+                return
+            
+            netmaster_client = __main__.netmaster_client
+            print(f"DEBUG: [SCORE_SYNC] netmaster_client: {netmaster_client}")
+            
+            if not netmaster_client:
+                print(f"[SCORE_SYNC] AVISO: __main__.netmaster_client é None - saldo não sincronizado ({reason})")
+                return
+            
+            # Debug: verificar conexão
+            is_connected = getattr(netmaster_client, 'connected', False)
+            print(f"DEBUG: [SCORE_SYNC] netmaster_client.connected: {is_connected}")
+                
+            if not is_connected:
+                print(f"[SCORE_SYNC] AVISO: Não conectado ao servidor - saldo não sincronizado ({reason})")
+                return
+            
+            print(f"DEBUG: [SCORE_SYNC] Cliente encontrado e conectado")
+            
+            # Obter informações do jogador
+            player_id = getattr(netmaster_client, 'player_id', None)
+            session_id = getattr(netmaster_client, 'session_id', None)
+            
+            print(f"DEBUG: [SCORE_SYNC] player_id: {player_id}, session_id: {session_id}")
+            
+            if not player_id:
+                print(f"[SCORE_SYNC] AVISO: player_id não disponível - saldo não sincronizado ({reason})")
+                return
+            
+            # Enviar atualização de saldo para o servidor
+            score_update_message = {
+                'type': 'update_player_score',
+                'player_id': player_id,
+                'score': self.saldo,
+                'session_id': session_id,
+                'reason': reason  # Para debug/logging
+            }
+            
+            print(f"DEBUG: [SCORE_SYNC] Mensagem a enviar: {score_update_message}")
+            
+            # Usar threading para não bloquear a UI
+            def send_score_update():
+                try:
+                    import asyncio
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    loop.run_until_complete(netmaster_client.send_message(score_update_message))
+                    loop.close()
+                    print(f"[SCORE_SYNC] ✓ Saldo sincronizado: {self.saldo} PICoins ({reason})")
+                except Exception as e:
+                    print(f"[SCORE_SYNC] ❌ Erro ao sincronizar saldo: {e}")
+            
+            threading.Thread(target=send_score_update, daemon=True).start()
+            
+        except Exception as e:
+            print(f"[SCORE_SYNC] Erro na sincronização de saldo: {e}")
 
 # Exemplo de uso integrado com menu:
 if __name__ == "__main__":

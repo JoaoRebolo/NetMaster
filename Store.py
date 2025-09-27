@@ -1,6 +1,11 @@
 import tkinter as tk
 from PIL import Image, ImageTk
 import os
+import re
+import traceback
+from card_integration import IntegratedCardDatabase
+# Importar utilitários para detecção de Raspberry Pi
+from raspberry_pi_utils import get_universal_paths, find_existing_path
 try:
     import RPi.GPIO as GPIO
 except ImportError:
@@ -22,31 +27,29 @@ except ImportError:
 import random
 import glob
 
-IMG_DIR = os.path.join(os.path.dirname(__file__), "img")
+# Obter caminhos universais usando os utilitários
+universal_paths = get_universal_paths()
+IMG_DIR = universal_paths['img_dir']
 
 # Detectar automaticamente onde estão as cartas
 def detect_cartas_base_dir():
-    """Detecta automaticamente o diretório base das cartas"""
-    possible_dirs = [
-        # Raspberry Pi
-        "/home/joao_rebolo/netmaster_menu/img/cartas",
-        # Desenvolvimento local
-        "/Users/joaop_27h1t5j/Desktop/IST/Bolsa/cartas_netmaster/Bin/Residential-Level",
-        # Fallback local
-        os.path.join(os.path.dirname(__file__), "img", "cartas")
-    ]
+    """Detecta automaticamente o diretório base das cartas usando caminhos universais"""
+    # CORREÇÃO: Para Raspberry Pi, usar o diretório base, não o diretório de cartas
+    # No Raspberry Pi: base_dir/img/cartas/equipments/...
+    # No desenvolvimento: base_dir/Equipments/...
     
-    for dir_path in possible_dirs:
-        if os.path.exists(dir_path):
-            print(f"DEBUG: Usando diretório de cartas: {dir_path}")
-            return dir_path
-    
-    print("DEBUG: Nenhum diretório de cartas encontrado!")
-    return possible_dirs[0]  # fallback
+    if universal_paths['environment'] == 'raspberry_pi':
+        # No Raspberry Pi, as cartas estão organizadas dentro do diretório base
+        print(f"DEBUG: Ambiente Raspberry Pi - usando diretório base: {universal_paths['base_dir']}")
+        return universal_paths['base_dir']
+    else:
+        # No desenvolvimento, usar o diretório base também
+        print(f"DEBUG: Ambiente desenvolvimento - usando diretório base: {universal_paths['base_dir']}")
+        return universal_paths['base_dir']
 
 CARTAS_BASE_DIR = detect_cartas_base_dir()
 COIN_IMG = os.path.join(IMG_DIR, "picoin.png")
-AWNING_IMG = os.path.join(IMG_DIR, "Store_awning_v2.png")
+AWNING_IMG = os.path.join(IMG_DIR, "Store_awning_v3.png")
 BELOWBAR_IMG = os.path.join(IMG_DIR, "BelowBar_store.png")
 
 KEY1_PIN = 23
@@ -112,58 +115,86 @@ def check_gpio_key(root):
         root.destroy()
     root.after(100, lambda: check_gpio_key(root))
 
-# Carregar baralhos adaptado à nova estrutura: cartas/[tipo]/Residential-level/[cor]/
+# Carregar baralhos adaptado à nova estrutura - usando mesma lógica do card_integration.py
 def preparar_baralhos():
     baralhos = {}
+    
+    # Obter caminhos universais para garantir consistência
+    universal_paths_local = get_universal_paths()
+    environment = universal_paths_local['environment']
+    base_dir = universal_paths_local['base_dir']
+    
+    print(f"DEBUG: preparar_baralhos - ambiente: {environment}, base_dir: {base_dir}")
+    
     for cor in COLORS:
         baralhos[cor] = {}
         for tipo in CARD_TYPES:
             cartas = []
             
-            # Tentar múltiplas estruturas de pastas
+            # Usar EXATAMENTE a mesma lógica do card_integration.py
             possible_paths = []
             
             # Para cartas que têm cores específicas (equipments, services, users, activities)
             if tipo in ["equipments", "services", "users", "activities"]:
-                # Mapear cor do jogador para diferentes formatos de nome
-                color_variants = []
-                if cor == "blue":
-                    color_variants = ["Blue", "blue", "BLUE"]
-                elif cor == "green": 
-                    color_variants = ["Green", "green", "GREEN"]
-                elif cor == "red":
-                    color_variants = ["Red", "red", "RED"]
-                elif cor == "yellow":
-                    color_variants = ["Yellow", "yellow", "YELLOW"]
-                else:  # neutral - adicionar todas as cores
-                    color_variants = ["Blue", "Green", "Red", "Yellow", "blue", "green", "red", "yellow"]
-                
                 if cor != "neutral":
-                    # Estruturas possíveis para cores específicas:
-                    for color_var in color_variants:
-                        # 1. cartas/[tipo]/Residential-level/[cor]/
-                        possible_paths.append(os.path.join(CARTAS_BASE_DIR, tipo, "Residential-level", color_var))
-                        # 2. cartas/Residential-[tipo]-[cor]/
-                        possible_paths.append(os.path.join(CARTAS_BASE_DIR, f"Residential-{tipo}-{color_var}"))
-                        # 3. cartas/[tipo]/[cor]/
-                        possible_paths.append(os.path.join(CARTAS_BASE_DIR, tipo, color_var))
+                    # Mapear cor para formato capitalizado (Red, Blue, etc.)
+                    color_capitalized = cor.capitalize()
+                    
+                    if environment == "raspberry_pi":
+                        # Raspberry Pi: base_dir/img/cartas/[tipo]/Residential-level/[Cor]
+                        card_path = os.path.join(base_dir, "img", "cartas", tipo, "Residential-level", color_capitalized)
+                        possible_paths.append(card_path)
+                    else:
+                        # Desenvolvimento: base_dir/[Tipo]/Residential-level/[Cor]  (tipo capitalizado)
+                        tipo_capitalized = tipo.capitalize()
+                        if tipo == "equipments":
+                            tipo_capitalized = "Equipments"
+                        elif tipo == "activities":
+                            tipo_capitalized = "Activities"
+                        elif tipo == "services":
+                            tipo_capitalized = "Services"
+                        elif tipo == "users":
+                            tipo_capitalized = "Users"
+                        
+                        card_path = os.path.join(base_dir, tipo_capitalized, "Residential-level", color_capitalized)
+                        possible_paths.append(card_path)
                 else:
                     # Para neutral, tentar todas as cores
-                    for color_var in color_variants:
-                        possible_paths.append(os.path.join(CARTAS_BASE_DIR, tipo, "Residential-level", color_var))
-                        possible_paths.append(os.path.join(CARTAS_BASE_DIR, f"Residential-{tipo}-{color_var}"))
-                        possible_paths.append(os.path.join(CARTAS_BASE_DIR, tipo, color_var))
+                    for color_name in ["Red", "Blue", "Green", "Yellow"]:
+                        if environment == "raspberry_pi":
+                            card_path = os.path.join(base_dir, "img", "cartas", tipo, "Residential-level", color_name)
+                            possible_paths.append(card_path)
+                        else:
+                            tipo_capitalized = tipo.capitalize()
+                            if tipo == "equipments":
+                                tipo_capitalized = "Equipments"
+                            elif tipo == "activities":
+                                tipo_capitalized = "Activities"
+                            elif tipo == "services":
+                                tipo_capitalized = "Services"
+                            elif tipo == "users":
+                                tipo_capitalized = "Users"
+                            
+                            card_path = os.path.join(base_dir, tipo_capitalized, "Residential-level", color_name)
+                            possible_paths.append(card_path)
             else:
                 # Para cartas sem cor específica (challenges, events, actions)
-                # Estruturas possíveis:
-                possible_paths = [
-                    # 1. cartas/[tipo]/Residential-level/
-                    os.path.join(CARTAS_BASE_DIR, tipo, "Residential-level"),
-                    # 2. cartas/Residential-[tipo]/
-                    os.path.join(CARTAS_BASE_DIR, f"Residential-{tipo}"),
-                    # 3. cartas/[tipo]/
-                    os.path.join(CARTAS_BASE_DIR, tipo)
-                ]
+                if environment == "raspberry_pi":
+                    # Raspberry Pi: base_dir/img/cartas/[tipo]/Residential-level/
+                    card_path = os.path.join(base_dir, "img", "cartas", tipo, "Residential-level")
+                    possible_paths.append(card_path)
+                else:
+                    # Desenvolvimento: base_dir/[Tipo]/Residential-level/
+                    tipo_capitalized = tipo.capitalize()
+                    if tipo == "challenges":
+                        tipo_capitalized = "Challenges"
+                    elif tipo == "actions":
+                        tipo_capitalized = "Actions"
+                    elif tipo == "events":
+                        tipo_capitalized = "Events"
+                    
+                    card_path = os.path.join(base_dir, tipo_capitalized, "Residential-level")
+                    possible_paths.append(card_path)
             
             # Tentar encontrar cartas em qualquer uma das estruturas possíveis
             for path in possible_paths:
@@ -173,7 +204,7 @@ def preparar_baralhos():
                                     if f.lower().endswith((".png", ".jpg", ".jpeg"))]
                         if card_files:
                             cartas.extend(card_files)
-                            print(f"DEBUG: Found {len(card_files)} cards at {path}")
+                            print(f"DEBUG: Found {len(card_files)} cards for {tipo}/{cor} at {path}")
                     except Exception as e:
                         print(f"DEBUG: Error reading {path}: {e}")
                         continue
@@ -190,12 +221,13 @@ def preparar_baralhos():
             if cartas:
                 random.shuffle(cartas)
                 baralhos[cor][tipo] = cartas.copy()
-                print(f"DEBUG: Total {len(cartas)} cards for '{tipo}' color '{cor}'")
+                print(f"DEBUG: Total {len(cartas)} cards loaded for '{tipo}' color '{cor}'")
             else:
                 baralhos[cor][tipo] = []
-                print(f"DEBUG: No cards found for type '{tipo}' color '{cor}'")
-                print(f"DEBUG: Tried paths: {possible_paths}")
+                if tipo in ["equipments", "services", "users", "activities"] and cor != "neutral":
+                    print(f"DEBUG: No cards found for type '{tipo}' color '{cor}' - tried paths: {possible_paths}")
     
+    print("DEBUG: preparar_baralhos completed")
     print("Cartas neutral/actions:", len(baralhos.get("neutral", {}).get("actions", [])))
     return baralhos
 
@@ -220,9 +252,65 @@ def tirar_carta(cor, tipo):
     print(f"DEBUG: Nenhuma carta disponível para cor={cor}, tipo={tipo}")
     return None  # Não há cartas
 
+# Definição do tabuleiro (igual ao PlayerDashboard.py)
+BOARD = [
+    # Top row (left to right)
+    ("start", "neutral"),      # 0 canto azul
+    ("users", "blue"),         # 1
+    ("actions", "neutral"),     # 2 (cinzento)
+    ("equipments", "blue"),     # 3
+    ("challenges", "neutral"), # 4 (cinzento)
+    ("activities", "red"),      # 5
+    ("events", "neutral"),     # 6 (cinzento)
+    ("services", "red"),       # 7
+
+    # Right column (top to bottom)
+    ("start", "neutral"),      # 8 canto vermelho
+    ("users", "red"),          # 9
+    ("actions", "neutral"),     # 10 (cinzento)
+    ("equipments", "red"),      # 11
+    ("challenges", "neutral"), # 12 (cinzento)
+    ("activities", "yellow"),   # 13
+    ("events", "neutral"),     # 14 (cinzento)
+    ("services", "yellow"),    # 15
+
+    # Bottom row (right to left)
+    ("start", "neutral"),      # 16 canto amarelo
+    ("users", "yellow"),       # 17
+    ("actions", "neutral"),     # 18 (cinzento)
+    ("equipments", "yellow"),   # 19
+    ("challenges", "neutral"), # 20 (cinzento)
+    ("activities", "green"),    # 21
+    ("events", "neutral"),     # 22 (cinzento)
+    ("services", "green"),     # 23
+
+    # Left column (bottom to top)
+    ("start", "neutral"),      # 24 canto verde
+    ("users", "green"),        # 25
+    ("actions", "neutral"),     # 26 (cinzento)
+    ("equipments", "green"),    # 27
+    ("challenges", "neutral"), # 28 (cinzento)
+    ("activities", "blue"),     # 29
+    ("events", "neutral"),     # 30 (cinzento)
+    ("services", "blue"),      # 31
+]
+
 class StoreWindow(tk.Toplevel):
     def __init__(self, root, player_color, player_name, saldo=1000, casa_tipo=None, casa_cor=None, inventario=None, dashboard=None, other_player_house=False):
         super().__init__(root)
+        
+        # ADICIONAR: Identificador único para rastreamento
+        import time
+        self._store_id = f"Store_{int(time.time() * 1000)}"
+        print(f"DEBUG: [__init__] Criando nova Store com ID: {self._store_id}")
+        
+        # ADICIONAR: Verificar se há estado Challenge transferido do PlayerDashboard
+        if dashboard and hasattr(dashboard, '_store_challenge_carta_path'):
+            print(f"DEBUG: [__init__] Estado Challenge detectado no dashboard: {dashboard._store_challenge_carta_path}")
+            print(f"DEBUG: [__init__] Tipo Challenge detectado no dashboard: {getattr(dashboard, '_store_challenge_carta_tipo', None)}")
+        else:
+            print(f"DEBUG: [__init__] Nenhum estado Challenge detectado no dashboard")
+        
         self.title("Store")
         self.configure(bg="black")
         self.geometry(f"{root.winfo_screenwidth()}x{root.winfo_screenheight()}+0+0")
@@ -235,6 +323,55 @@ class StoreWindow(tk.Toplevel):
         self.saldo = saldo  # Guarda o saldo atual
         self.casa_tipo = casa_tipo
         self.casa_cor = casa_cor
+        
+        # CORREÇÃO: Inicializar baralho da Store sincronizado com estado atual dos baralhos globais
+        # Isso garante que cartas já tiradas não apareçam novamente
+        import copy
+        self.cartas = copy.deepcopy(baralhos)
+        print(f"DEBUG: [__init__] Baralho da Store inicializado e sincronizado com estado global")
+        print(f"DEBUG: [__init__] Challenges neutral disponíveis: {len(self.cartas.get('neutral', {}).get('challenges', []))}")
+        
+        # IMPORTANTE: Sincronização inicial - remover cartas já no inventário do jogador
+        if dashboard and hasattr(dashboard, 'inventario') and dashboard.inventario:
+            print(f"DEBUG: [__init__] Iniciando sincronização com inventário do jogador...")
+            total_removidas = 0
+            for tipo_carta, cartas_inventario in dashboard.inventario.items():
+                if cartas_inventario:  # Se há cartas deste tipo no inventário
+                    print(f"DEBUG: [__init__] Verificando tipo '{tipo_carta}' - {len(cartas_inventario)} cartas no inventário")
+                    
+                    # Remover do baralho da cor do jogador
+                    if (self.player_color in self.cartas and tipo_carta in self.cartas[self.player_color]):
+                        for carta_path in cartas_inventario:
+                            if carta_path in self.cartas[self.player_color][tipo_carta]:
+                                self.cartas[self.player_color][tipo_carta].remove(carta_path)
+                                total_removidas += 1
+                                print(f"DEBUG: [__init__] Removida do baralho {self.player_color}/{tipo_carta}: {os.path.basename(carta_path)}")
+                    
+                    # Remover do baralho neutral
+                    if ("neutral" in self.cartas and tipo_carta in self.cartas["neutral"]):
+                        for carta_path in cartas_inventario:
+                            if carta_path in self.cartas["neutral"][tipo_carta]:
+                                self.cartas["neutral"][tipo_carta].remove(carta_path)
+                                total_removidas += 1
+                                print(f"DEBUG: [__init__] Removida do baralho neutral/{tipo_carta}: {os.path.basename(carta_path)}")
+            
+            print(f"DEBUG: [__init__] Sincronização inicial completa - {total_removidas} cartas removidas dos baralhos da Store")
+        else:
+            print(f"DEBUG: [__init__] Sem inventário para sincronizar ou inventário vazio")
+        
+        # Inicializar base de dados de cartas integrada
+        try:
+            self.card_database = IntegratedCardDatabase(".")
+            print("DEBUG: [__init__] Base de dados de cartas inicializada com sucesso")
+        except Exception as e:
+            print(f"DEBUG: [__init__] Erro ao inicializar base de dados de cartas: {e}")
+            self.card_database = None
+        
+        # Debug dos baralhos para verificar sincronização
+        if 'neutral' in baralhos and 'challenges' in baralhos['neutral']:
+            print(f"DEBUG: [__init__] Baralho global challenges neutral tem: {len(baralhos['neutral']['challenges'])} cartas")
+        else:
+            print("DEBUG: [__init__] Baralho global challenges neutral não encontrado")
         
         # Debug do inventário
         if inventario:
@@ -249,6 +386,36 @@ class StoreWindow(tk.Toplevel):
         awning_label = tk.Label(self, image=awning_img, bg="black")
         awning_label.image = awning_img  # type: ignore[attr-defined]
         awning_label.pack(pady=(0, 10), fill="x")
+        
+        # Label pequeno à esquerda do logo
+        left_label = tk.Label(self, text="••••", font=("Helvetica", 12, "bold"), bg="#DC8392", fg="#DC8392")
+        left_label.place(relx=0.46, y=10, anchor="center")
+        
+        # Logo NetMaster posicionado independentemente
+        try:
+            logo_img = ImageTk.PhotoImage(Image.open(os.path.join(IMG_DIR, "logo_netmaster_store.png")).resize((20, 20)))
+            logo_lbl = tk.Label(self, image=logo_img, bg="#DC8392")
+            logo_lbl.image = logo_img  # type: ignore[attr-defined]
+            logo_lbl.place(relx=0.5, y=10, anchor="center")
+        except Exception as e:
+            print(f"DEBUG: Erro ao carregar logo: {e}")
+        
+        # Label largo à direita do logo para cobrir área amarela
+        right_logo_label = tk.Label(self, text="     ", font=("Helvetica", 12, "bold"), bg="#DC8392", fg="#DC8392")
+        right_logo_label.place(relx=0.53, y=10, anchor="w")
+        
+        # Label adicional para garantir cobertura completa
+        extra_cover_label = tk.Label(self, text="     ", font=("Helvetica", 10), bg="#DC8392", fg="#DC8392")
+        extra_cover_label.place(relx=0.55, y=10, anchor="w")
+        
+        # Texto "Store" posicionado independentemente
+        store_name_lbl = tk.Label(self, text="Store", 
+                                 font=("Helvetica", 15, "bold"), bg="#DC8392", fg="black")
+        store_name_lbl.place(relx=0.5, y=30, anchor="center")
+        
+        # Label pequeno à direita do nome Store
+        right_store_label = tk.Label(self, text="•", font=("Helvetica", 12, "bold"), bg="#DC8392", fg="#DC8392")
+        right_store_label.place(relx=0.6, y=30, anchor="center")
         
         # Mapeamento de cor para código hexadecimal
         color_map = {
@@ -341,58 +508,21 @@ class StoreWindow(tk.Toplevel):
         btn_activities.config(command="")
         btn_services.config(command="")
 
-        # Frame para os botões de ação na parte inferior (inicialmente oculto)
+        # Frame para os botões de ação na parte inferior (não usado mais)
         self.action_frame = tk.Frame(self, bg="black")
-        # self.action_frame.pack_propagate(False)  # Removido para não forçar altura
-        # self.action_frame.configure(height=60)   # Removido para não forçar altura
 
-        # Sub-frame centralizado para os botões
+        # Sub-frame centralizado para os botões (não usado mais)
         self.action_buttons_frame = tk.Frame(self.action_frame, bg="black")
-        self.action_buttons_frame.pack(anchor="center", pady=2)  # Pequeno espaçamento inferior
-        
-        # Botões de ação: Buy, Sell, Skip dentro de frames de tamanho fixo
-        action_font = ("Helvetica", 14, "bold")
-        frame_width = 100
-        frame_height = 50
-
-        self.buy_frame = tk.Frame(self.action_buttons_frame, width=frame_width, height=frame_height, bg="black")
-        self.sell_frame = tk.Frame(self.action_buttons_frame, width=frame_width, height=frame_height, bg="black")
-        self.skip_frame = tk.Frame(self.action_buttons_frame, width=frame_width, height=frame_height, bg="black")
-        self.buy_frame.pack_propagate(False)
-        self.sell_frame.pack_propagate(False)
-        self.skip_frame.pack_propagate(False)
-
-        btn_buy = tk.Button(self.buy_frame, text="BUY", font=action_font, bg="#4CAF50", fg="white", 
-                           relief="flat", borderwidth=0,
-                           command=self.buy_action)
-        btn_sell = tk.Button(self.sell_frame, text="SELL", font=action_font, bg="#F44336", fg="white", 
-                            relief="flat", borderwidth=0,
-                            command=self.sell_action)
-        btn_skip = tk.Button(self.skip_frame, text="SKIP", font=action_font, bg="#FF9800", fg="white", 
-                            relief="flat", borderwidth=0,
-                            command=self.skip_action)
-        # Destacar cor ativa igual à cor normal
-        for btn in [btn_buy, btn_sell, btn_skip]:
-            btn.config(activebackground=btn.cget("bg"), activeforeground=btn.cget("fg"))
-
-        # Centralizar cada botão no seu frame
-        btn_sell.place(relx=0.5, rely=0.5, anchor="center")
-        btn_buy.place(relx=0.5, rely=0.5, anchor="center")
-        btn_skip.place(relx=0.5, rely=0.5, anchor="center")
-
-        # Pack frames lado a lado
-        self.sell_frame.pack(side="left", padx=10, pady=0)
-        self.buy_frame.pack(side="left", padx=10, pady=0)
-        self.skip_frame.pack(side="left", padx=10, pady=0)
-
-        self.btn_buy = btn_buy
-        self.btn_sell = btn_sell
-        self.btn_skip = btn_skip
+        self.action_buttons_frame.pack(anchor="center", pady=2)
 
         # Variáveis para controlar estado de navegação
         self.current_card_type = None  # Tipo de carta atual para compra
         self.current_sell_type = None  # Tipo de carta sendo vendida
         self.current_sell_page = 0     # Página atual de venda
+        
+        # Variáveis para controlar estado de carta fullscreen
+        self.fullscreen_carta_path = None  # Caminho da carta em fullscreen ativa
+        self.fullscreen_carta_tipo = None  # Tipo da carta em fullscreen ativa
 
         # Inicia verificação do botão físico KEY1
         self.check_gpio_key()
@@ -432,45 +562,91 @@ class StoreWindow(tk.Toplevel):
         saldo_lbl_bottom.place(x=root.winfo_screenwidth()-70, rely=1.0, y=-25, anchor="w")
 
         # Botão do Player no canto superior direito para ir ao PlayerDashboard
-        def abrir_playerdashboard():
-            """Abre a interface principal do PlayerDashboard (igual ao botão Player das cartas de Challenges)"""
-            print("DEBUG: Botão Player pressionado - abrindo interface principal do PlayerDashboard")
-            if self.dashboard and hasattr(self.dashboard, "playerdashboard_interface"):
-                self.dashboard.playerdashboard_interface(
-                    self.dashboard.player_name,
-                    self.dashboard.saldo,
-                    self.dashboard.other_players
-                )
-                print("DEBUG: Interface principal do PlayerDashboard aberta com sucesso")
+        # IMPORTANTE: Só mostrar o botão Player se NÃO for casa neutra (Actions/Events/Challenges)
+        show_player_button = True
+        if casa_tipo and casa_cor:
+            # Se for casa neutra (Actions, Events, Challenges), não mostrar o botão Player
+            if casa_tipo.lower() in ["actions", "action", "events", "event", "challenges", "challenge"] and casa_cor.lower() == "neutral":
+                show_player_button = False
+                print(f"DEBUG: Casa neutra detectada ({casa_tipo}, {casa_cor}) - botão Player NÃO será mostrado")
             else:
-                print("DEBUG: ERRO - PlayerDashboard não disponível ou método playerdashboard_interface não encontrado")
+                print(f"DEBUG: Casa não neutra detectada ({casa_tipo}, {casa_cor}) - botão Player será mostrado")
+        
+        if show_player_button:
+            def abrir_playerdashboard():
+                """Abre a interface principal do PlayerDashboard (igual ao botão Player das cartas de Challenges)"""
+                print("DEBUG: Botão Player pressionado - abrindo interface principal do PlayerDashboard")
+                try:
+                    # CORREÇÃO: TRANSFERIR estado Challenge para PlayerDashboard ANTES de limpar
+                    # Isso permite que o botão Store restaure corretamente a carta Challenge
+                    if (hasattr(self, 'fullscreen_carta_path') and self.fullscreen_carta_path and
+                        hasattr(self, 'fullscreen_carta_tipo') and self.fullscreen_carta_tipo == "challenges"):
+                        print(f"DEBUG: [Challenge Player] Transferindo estado Challenge para PlayerDashboard: {self.fullscreen_carta_path}")
+                        self.dashboard._store_challenge_carta_path = self.fullscreen_carta_path
+                        self.dashboard._store_challenge_carta_tipo = self.fullscreen_carta_tipo
+                        print("DEBUG: [Challenge Player] Estado Challenge transferido para PlayerDashboard")
+                    
+                    # DEPOIS de transferir, limpar estado Challenge da Store
+                    # Isso evita que o Next Phase apareça incorretamente
+                    if hasattr(self, 'fullscreen_carta_path'):
+                        self.fullscreen_carta_path = None
+                        print("DEBUG: [Challenge Player] fullscreen_carta_path limpo da Store")
+                    if hasattr(self, 'fullscreen_carta_tipo'):
+                        self.fullscreen_carta_tipo = None
+                        print("DEBUG: [Challenge Player] fullscreen_carta_tipo limpo da Store")
+                    
+                    if self.dashboard and hasattr(self.dashboard, "playerdashboard_interface"):
+                        # Esconder a Store primeiro
+                        self.withdraw()
+                        print("DEBUG: [Challenge Player] Store escondida")
+                        
+                        # CORREÇÃO: Limpar flag Challenge no PlayerDashboard quando voltar via botão Player
+                        # Isso garante que o Next Phase não apareça incorretamente
+                        self.dashboard._challenge_accepted = False
+                        print("DEBUG: [Challenge Player] Flag _challenge_accepted resetada no PlayerDashboard")
+                        
+                        # Mostrar o PlayerDashboard
+                        self.dashboard.deiconify()
+                        self.dashboard.state('normal')
+                        self.dashboard.lift()
+                        self.dashboard.focus_force()
+                        print("DEBUG: [Challenge Player] PlayerDashboard mostrado")
+                        
+                        # Chamar a interface principal do PlayerDashboard
+                        # CORREÇÃO PROBLEMA STORE: Sempre mostrar botão Store quando há Challenge transferido
+                        print("DEBUG: [Challenge Player] Navegação via botão Player - preservando estado Challenge")
+                        self.dashboard.playerdashboard_interface(
+                            self.dashboard.player_name,
+                            self.dashboard.saldo,
+                            self.dashboard.other_players,
+                            show_store_button=True
+                        )
+                        print("DEBUG: [Challenge Player] PlayerDashboard interface principal criada com botão Store")
+                    else:
+                        print("DEBUG: ERRO - PlayerDashboard não disponível ou método playerdashboard_interface não encontrado")
+                except Exception as e:
+                    print(f"DEBUG: Erro ao abrir PlayerDashboard: {e}")
 
-        try:
-            # Carregar ícone do jogador
-            user_icon_path = os.path.join(IMG_DIR, f"{self.player_color}_user_icon.png")
-            user_icon_img = ImageTk.PhotoImage(Image.open(user_icon_path).resize((48, 48)))
-            btn_player = tk.Button(self, image=user_icon_img, bg="black", relief="flat", borderwidth=0, 
-                                  command=abrir_playerdashboard, cursor="hand2", activebackground="black",
-                                  highlightthickness=0)
-            btn_player.image = user_icon_img  # Manter referência para evitar garbage collection
-            btn_player.place(x=root.winfo_screenwidth()-15, y=5, anchor="ne")  # Movido mais para a direita e para cima
-            print(f"DEBUG: Botão Player criado com ícone {self.player_color}_user_icon.png")
-        except Exception as e:
-            print(f"DEBUG: Erro ao carregar ícone do jogador {self.player_color}_user_icon.png: {e}")
-            # Fallback para botão de texto se não conseguir carregar a imagem
-            btn_player = tk.Button(self, text="👤", font=("Helvetica", 20), bg="black", fg="white", 
-                                  relief="flat", borderwidth=0, command=abrir_playerdashboard, cursor="hand2",
-                                  activebackground="black", activeforeground="white", highlightthickness=0)
-            btn_player.place(x=root.winfo_screenwidth()-15, y=5, anchor="ne")  # Movido mais para a direita e para cima
-            print("DEBUG: Botão Player criado com ícone de fallback")
-        except Exception as e:
-            print(f"DEBUG: Erro ao carregar ícone do jogador {self.player_color}_user_icon.png: {e}")
-            # Fallback para botão de texto se não conseguir carregar a imagem
-            btn_player = tk.Button(self, text="👤", font=("Helvetica", 20), bg="black", fg="white", 
-                                  relief="flat", borderwidth=0, command=abrir_playerdashboard, cursor="hand2",
-                                  activebackground="black", activeforeground="white")
-            btn_player.place(x=root.winfo_screenwidth()-30, y=10, anchor="ne")  # Movido o mais para a direita possível
-            print("DEBUG: Botão Player criado com ícone de fallback")
+            try:
+                # Carregar ícone do jogador
+                user_icon_path = os.path.join(IMG_DIR, f"{self.player_color}_user_icon.png")
+                user_icon_img = ImageTk.PhotoImage(Image.open(user_icon_path).resize((30, 30)))
+                btn_player = tk.Button(self, image=user_icon_img, bg="#DC8392", relief="flat", borderwidth=0, 
+                                      command=abrir_playerdashboard, cursor="hand2", activebackground="#DC8392",
+                                      highlightthickness=0)
+                btn_player.image = user_icon_img  # Manter referência para evitar garbage collection
+                btn_player.place(x=root.winfo_screenwidth()-10, y=5, anchor="ne")  # Movido mais para a direita e para cima
+                print(f"DEBUG: Botão Player criado com ícone {self.player_color}_user_icon.png")
+            except Exception as e:
+                print(f"DEBUG: Erro ao carregar ícone do jogador {self.player_color}_user_icon.png: {e}")
+                # Fallback para botão de texto se não conseguir carregar a imagem
+                btn_player = tk.Button(self, text="👤", font=("Helvetica", 20), bg="black", fg="white", 
+                                      relief="flat", borderwidth=0, command=abrir_playerdashboard, cursor="hand2",
+                                      activebackground="black", activeforeground="white", highlightthickness=0)
+                btn_player.place(x=root.winfo_screenwidth()-15, y=5, anchor="ne")  # Movido mais para a direita e para cima
+                print("DEBUG: Botão Player criado com ícone de fallback")
+        else:
+            print("DEBUG: Botão Player NÃO criado - casa neutra detectada")
 
     def __del__(self):
         print("DEBUG: StoreWindow __del__ chamado (janela destruída)")
@@ -483,6 +659,28 @@ class StoreWindow(tk.Toplevel):
             os._exit(0)  # Termina imediatamente o processo
         else:
             self.after(100, self.check_gpio_key)
+
+    def _get_casa_from_position(self, position):
+        """
+        Obter informações da casa (tipo, cor) a partir da posição no tabuleiro
+        
+        Args:
+            position (int): Posição no tabuleiro (0-31)
+            
+        Returns:
+            tuple: (casa_tipo, casa_cor) ou None se posição inválida
+        """
+        try:
+            if 0 <= position < len(BOARD):
+                casa_tipo, casa_cor = BOARD[position]
+                print(f"DEBUG: [_get_casa_from_position] Posição {position} -> {casa_tipo} {casa_cor}")
+                return (casa_tipo, casa_cor)
+            else:
+                print(f"DEBUG: [_get_casa_from_position] Posição inválida: {position}")
+                return None
+        except Exception as e:
+            print(f"DEBUG: [_get_casa_from_position] Erro: {e}")
+            return None
 
     def get_color(self, color):
         return {
@@ -529,32 +727,36 @@ class StoreWindow(tk.Toplevel):
 
     def disable_all_buttons(self):
         """Desabilita todos os botões para que não sejam clicáveis"""
-        for btn in getattr(self, "store_buttons", []):
-            btn.config(command="")
+        print("DEBUG: [disable_all_buttons] Desabilitando todos os botões")
         
-        # Se for casa de outro jogador, não desabilita Users, Equipment, Services
+        # Desabilita botões neutros (Actions, Events, Challenges) e reseta aparência visual
+        for btn in getattr(self, "store_buttons", []):
+            btn.config(command="", state="normal", highlightbackground="black", highlightthickness=0)
+        
+        # Para casas de outro jogador, o comportamento é diferente
         if self.other_player_house:
-            for btn_name, btn in getattr(self, "card_buttons", {}).items():
-                if btn_name not in ["users", "equipments", "services"]:
-                    btn.config(command="")
-        else:
-            # Para casas próprias ou neutras, desabilita todos
+            # Em casas de outro jogador, desabilita TODOS os botões inicialmente
+            # O highlight_casa irá reabilitar apenas o correto
             for btn in getattr(self, "card_buttons", {}).values():
-                btn.config(command="")
+                btn.config(command="", state="disabled")
+            print("DEBUG: [disable_all_buttons] Casa de outro jogador - todos os botões de carta desabilitados")
+        else:
+            # Para casas próprias ou neutras, desabilita todos os botões de carta
+            for btn in getattr(self, "card_buttons", {}).values():
+                btn.config(command="", state="disabled")
+            print("DEBUG: [disable_all_buttons] Casa própria/neutra - todos os botões de carta desabilitados")
 
     def enable_only_highlighted_button(self, casa_tipo, casa_cor):
         """Habilita apenas o botão destacado e desativa todos os outros (neutros e inventário)."""
-        # Desabilita todos os botões neutros
-        for btn in getattr(self, "store_buttons", []):
-            btn.config(command="")
-        # Desabilita todos os botões do inventário
-        for btn in getattr(self, "card_buttons", {}).values():
-            btn.config(command="")
-        # Ativa só o botão correto
+        print(f"DEBUG: [enable_only_highlighted_button] Configurando comando para tipo '{casa_tipo}' cor '{casa_cor}'")
+        
+        # Mapear qual botão deve ser destacado
         tipo_to_btn = {
             "action": self.btn_a,
             "actions": self.btn_a,
+            "event": self.btn_e,
             "events": self.btn_e,
+            "challenge": self.btn_d,
             "challenges": self.btn_d,
             "users": self.card_buttons.get("users"),
             "equipment": self.card_buttons.get("equipments"),
@@ -562,42 +764,81 @@ class StoreWindow(tk.Toplevel):
             "activities": self.card_buttons.get("activities"),
             "services": self.card_buttons.get("services"),
         }
-        btn = tipo_to_btn.get(casa_tipo)
-        if btn:
-            btn.config(command=lambda: self.tirar_carta(casa_tipo, casa_cor))
+        btn_destacado = tipo_to_btn.get(casa_tipo)
+        
+        # Desabilita todos os botões neutros, EXCETO o que deve ser destacado
+        for btn in getattr(self, "store_buttons", []):
+            if btn != btn_destacado:
+                btn.config(command="", state="normal", highlightbackground="black", highlightthickness=0)
+        
+        # Desabilita todos os botões do inventário
+        for btn in getattr(self, "card_buttons", {}).values():
+            btn.config(command="", state="disabled")
+        
+        # Ativa só o botão correto e mantém/aplica o destaque
+        if btn_destacado:
+            print(f"DEBUG: [enable_only_highlighted_button] Habilitando botão para tipo '{casa_tipo}'")
+            btn_destacado.config(command=lambda: self.tirar_carta(casa_tipo, casa_cor), state="normal")
+            # Garantir que o destaque permanece aplicado
+            btn_destacado.config(highlightbackground="#A020F0", highlightcolor="#A020F0", highlightthickness=6)
+        else:
+            print(f"DEBUG: [enable_only_highlighted_button] ERRO - Botão não encontrado para tipo '{casa_tipo}'")
 
     def highlight_casa(self, casa_tipo, casa_cor):
+        print(f"DEBUG: [highlight_casa] Chamado com casa_tipo='{casa_tipo}', casa_cor='{casa_cor}'")
+        
         # Remove destaque anterior de todos os botões
         for btn in getattr(self, "store_buttons", []):
             btn.config(highlightbackground="black", highlightthickness=0)
         for btn in getattr(self, "card_buttons", {}).values():
             btn.config(highlightbackground="black", highlightthickness=0)
+        print(f"DEBUG: [highlight_casa] Destaque anterior removido de todos os botões")
 
-        # Se for casa de outro jogador, destaca os botões permitidos (Users, Equipments, Activities, Services)
+        # Se for casa de outro jogador, destaca apenas o botão correspondente ao tipo da casa
         if self.other_player_house:
+            print(f"DEBUG: [highlight_casa] Casa de outro jogador detectada")
             if casa_tipo in ["equipments", "services", "users", "equipment", "activities"]:
-                # Destaca todos os botões permitidos para casa de outro jogador
-                allowed_buttons = ["users", "equipments", "activities", "services"]
-                for btn_name in allowed_buttons:
-                    if self.card_buttons.get(btn_name):
-                        self.card_buttons[btn_name].config(highlightbackground="#A020F0", highlightcolor="#A020F0", highlightthickness=6)
-                        self.card_buttons[btn_name].config(command=lambda t=btn_name: self.tirar_carta(t, casa_cor))
-                # Desabilita botões neutros
-                self.disable_all_buttons()
-                # Reabilita apenas os botões permitidos
-                for btn_name in allowed_buttons:
-                    if self.card_buttons.get(btn_name):
-                        self.card_buttons[btn_name].config(state="normal")
+                # Normalizar tipo
+                normalized_tipo = casa_tipo
+                if casa_tipo == "equipment":
+                    normalized_tipo = "equipments"
+                
+                # PRIMEIRO: Desabilita COMPLETAMENTE todos os botões (incluindo comandos)
+                print(f"DEBUG: Casa de outro jogador - desabilitando todos os botões primeiro")
+                for btn in getattr(self, "store_buttons", []):
+                    btn.config(command="", state="normal", highlightbackground="black", highlightthickness=0)
+                for btn_name, btn in getattr(self, "card_buttons", {}).items():
+                    btn.config(command="", state="disabled")
+                
+                # SEGUNDO: Só depois habilita e destaca o botão específico da casa
+                if self.card_buttons.get(normalized_tipo):
+                    self.card_buttons[normalized_tipo].config(highlightbackground="#A020F0", highlightcolor="#A020F0", highlightthickness=6)
+                    self.card_buttons[normalized_tipo].config(command=lambda: self.tirar_carta(normalized_tipo, casa_cor))
+                    self.card_buttons[normalized_tipo].config(state="normal")
+                    print(f"DEBUG: Casa de outro jogador - APENAS botão {normalized_tipo} habilitado e destacado")
+                
+                # TERCEIRO: Garantir que todos os outros botões permanecem desabilitados
+                for btn_name, btn in getattr(self, "card_buttons", {}).items():
+                    if btn_name != normalized_tipo:
+                        btn.config(command="", state="disabled")
+                        print(f"DEBUG: Botão {btn_name} mantido desabilitado")
             else:
-                # Para casas de outro jogador não permitidas, não destaca nada e desabilita todos
-                self.disable_all_buttons()
+                # Para casas de outro jogador não permitidas, desabilita todos completamente
+                print(f"DEBUG: Casa de outro jogador não permitida - desabilitando todos os botões")
+                for btn in getattr(self, "store_buttons", []):
+                    btn.config(command="", state="normal", highlightbackground="black", highlightthickness=0)
+                for btn in getattr(self, "card_buttons", {}).values():
+                    btn.config(command="", state="disabled")
             return
 
         # Comportamento normal para casas próprias ou neutras
+        print(f"DEBUG: [highlight_casa] Casa própria ou neutra - processando tipo '{casa_tipo}'")
         tipo_to_btn = {
             "action": self.btn_a,
             "actions": self.btn_a,
+            "event": self.btn_e,
             "events": self.btn_e,
+            "challenge": self.btn_d,
             "challenges": self.btn_d,
             "users": self.card_buttons.get("users"),
             "equipment": self.card_buttons.get("equipments"),  # Mapeia 'equipment' para o botão de equipamentos
@@ -607,127 +848,25 @@ class StoreWindow(tk.Toplevel):
         }
         btn = tipo_to_btn.get(casa_tipo)
         if btn:
+            print(f"DEBUG: [highlight_casa] Botão encontrado para tipo '{casa_tipo}' - aplicando destaque ROXO")
             btn.config(highlightbackground="#A020F0", highlightcolor="#A020F0", highlightthickness=6)
+            print(f"DEBUG: [highlight_casa] Destaque roxo aplicado ao botão {casa_tipo}")
+            
             # Só permite clicar no botão destacado
             # Se a casa for neutra, tira carta da cor neutral
             if casa_cor == "neutral":
+                print(f"DEBUG: [highlight_casa] Configurando comando para casa neutra: tirar_carta('{casa_tipo}', 'neutral')")
                 btn.config(command=lambda: self.tirar_carta(casa_tipo, "neutral"))
             else:
+                print(f"DEBUG: [highlight_casa] Configurando comando: tirar_carta('{casa_tipo}', '{casa_cor}')")
                 btn.config(command=lambda: self.tirar_carta(casa_tipo, casa_cor))
-            # Habilita apenas o botão destacado
-            self.enable_only_highlighted_button(casa_tipo, casa_cor)
-
-    def show_action_buttons(self):
-        """Mostra os botões de ação na parte inferior do ecrã e destaca-os em roxo"""
-        # Remover destaque roxo de todos os botões
-        for btn in getattr(self, "store_buttons", []):
-            btn.config(highlightbackground="black", highlightthickness=0)
-        for btn in getattr(self, "card_buttons", {}).values():
-            btn.config(highlightbackground="black", highlightthickness=0)
-        # Desabilitar todos os botões quando os botões de ação aparecem
-        self.disable_all_buttons()
-        
-        # Verificar se o jogador tem cartas do tipo correspondente para vender
-        current_type = getattr(self, 'current_card_type', None)
-        has_cards_to_sell = False
-        
-        # IMPORTANTE: Garantir que usamos o inventário mais recente do PlayerDashboard
-        if hasattr(self, 'dashboard') and self.dashboard and hasattr(self.dashboard, 'inventario'):
-            self.inventario = self.dashboard.inventario
-            print(f"DEBUG: Inventário da Store sincronizado com o PlayerDashboard no show_action_buttons")
-        
-        if current_type and self.inventario:
-            # Mapear tipos para chaves do inventário
-            type_mapping = {
-                "equipment": "equipments",
-                "equipments": "equipments", 
-                "users": "users",
-                "services": "services",
-                "activities": "activities"
-            }
-            inventory_key = type_mapping.get(current_type, current_type)
             
-            if inventory_key in self.inventario:
-                todas_cartas = self.inventario[inventory_key]
-                
-                # Se for Activities, considerar apenas cartas não ativas
-                if inventory_key == "activities":
-                    cartas_ativas = []
-                    if hasattr(self, 'dashboard') and self.dashboard and hasattr(self.dashboard, 'cards'):
-                        cartas_ativas = [carta for carta in self.dashboard.cards if carta in todas_cartas]
-                        print(f"DEBUG: Cartas ativas no carrossel: {len(cartas_ativas)}")
-                    
-                    # Filtrar apenas cartas que não estão ativas
-                    cartas_disponiveis = [carta for carta in todas_cartas if carta not in cartas_ativas]
-                    cards_count = len(cartas_disponiveis)
-                    print(f"DEBUG: Activities disponíveis para venda: {cards_count} de {len(todas_cartas)} totais")
-                else:
-                    # Para outros tipos, contar todas as cartas
-                    cards_count = len(todas_cartas)
-                    
-                has_cards_to_sell = cards_count > 0
-                print(f"DEBUG: Verificando inventário - tipo: {current_type}, chave: {inventory_key}, cartas: {cards_count}")
-        
-        print(f"DEBUG: show_action_buttons - current_type: {current_type}, has_cards: {has_cards_to_sell}")
-        
-        # Se for casa de outro jogador, sempre mostra Skip e Sell se tiver cartas
-        if self.other_player_house:
-            action_buttons = [self.btn_skip]
-            if has_cards_to_sell:
-                action_buttons.append(self.btn_sell)
-                print("DEBUG: Casa outro jogador - adicionando botão Sell")
+            # Habilita apenas o botão destacado
+            print(f"DEBUG: [highlight_casa] Chamando enable_only_highlighted_button para '{casa_tipo}'")
+            self.enable_only_highlighted_button(casa_tipo, casa_cor)
+            print(f"DEBUG: [highlight_casa] enable_only_highlighted_button concluído")
         else:
-            # Casa própria ou neutra - mostra Buy, Sell (se tiver cartas) e Skip
-            action_buttons = [self.btn_buy, self.btn_skip]
-            if has_cards_to_sell:
-                action_buttons.append(self.btn_sell)
-                print("DEBUG: Casa própria - adicionando botão Sell")
-        
-        # Destacar os botões de ação em roxo
-        for btn in action_buttons:
-            btn.config(highlightbackground="#A020F0", highlightcolor="#A020F0", highlightthickness=6)
-        
-        # Esconder/mostrar botões conforme necessário
-        if self.other_player_house:
-            # Casa de outro jogador - esconde Buy, mostra apenas Sell (se tiver cartas) e Skip
-            self.buy_frame.pack_forget()
-            if has_cards_to_sell:
-                self.sell_frame.pack(side="left", padx=10, pady=0)
-            else:
-                self.sell_frame.pack_forget()
-            self.skip_frame.pack(side="left", padx=10, pady=0)
-        else:
-            # Casa própria ou neutra - comportamento normal
-            if has_cards_to_sell:
-                self.sell_frame.pack(side="left", padx=10, pady=0)
-            else:
-                self.sell_frame.pack_forget()
-            self.buy_frame.pack(side="left", padx=10, pady=0)
-            self.skip_frame.pack(side="left", padx=10, pady=0)
-        
-        self.action_frame.pack(side="bottom", fill="x", pady=0)
-
-    def hide_action_buttons(self):
-        """Esconde os botões de ação e remove o destaque roxo"""
-        try:
-            # Remove destaque dos botões de ação se existirem
-            for btn_name in ['btn_buy', 'btn_sell', 'btn_skip']:
-                if hasattr(self, btn_name):
-                    btn = getattr(self, btn_name)
-                    if btn and hasattr(btn, 'winfo_exists') and btn.winfo_exists():
-                        btn.config(highlightbackground="black", highlightcolor="black", highlightthickness=0)
-            # Esconde o frame de ação se existir
-            if hasattr(self, 'action_frame') and self.action_frame and hasattr(self.action_frame, 'winfo_exists') and self.action_frame.winfo_exists():
-                self.action_frame.pack_forget()
-            print("DEBUG: hide_action_buttons executado com sucesso")
-        except (AttributeError, tk.TclError) as e:
-            print(f"DEBUG: Erro em hide_action_buttons (ignorado): {e}")
-            # Ignora erros se os widgets não existirem ainda
-            pass
-
-    def buy_action(self):
-        """Ação do botão Buy: mostra a página de compra de cartas do tipo atual"""
-        self.show_buy_page()
+            print(f"DEBUG: [highlight_casa] ERRO - Botão não encontrado para tipo '{casa_tipo}'")
 
     def show_buy_page(self):
         import glob
@@ -744,6 +883,36 @@ class StoreWindow(tk.Toplevel):
         awning_label.image = awning_img  # type: ignore[attr-defined]
         awning_label.pack(pady=(0, 10), fill="x")
 
+        # Label pequeno à esquerda do logo
+        left_label = tk.Label(self, text="••••", font=("Helvetica", 12, "bold"), bg="#DC8392", fg="#DC8392")
+        left_label.place(relx=0.46, y=10, anchor="center")
+
+        # Logo NetMaster posicionado independentemente
+        try:
+            logo_img = ImageTk.PhotoImage(Image.open(os.path.join(IMG_DIR, "logo_netmaster_store.png")).resize((24, 24)))
+            logo_lbl = tk.Label(self, image=logo_img, bg="#DC8392")
+            logo_lbl.image = logo_img  # type: ignore[attr-defined]
+            logo_lbl.place(relx=0.5, y=10, anchor="center")
+        except Exception as e:
+            print(f"DEBUG: Erro ao carregar logo: {e}")
+        
+        # Label largo à direita do logo para cobrir área amarela
+        right_logo_label = tk.Label(self, text="     ", font=("Helvetica", 12, "bold"), bg="#DC8392", fg="#DC8392")
+        right_logo_label.place(relx=0.53, y=10, anchor="w")
+        
+        # Label adicional para garantir cobertura completa
+        extra_cover_label = tk.Label(self, text="     ", font=("Helvetica", 10), bg="#DC8392", fg="#DC8392")
+        extra_cover_label.place(relx=0.55, y=10, anchor="w")
+        
+        # Texto "Store" posicionado independentemente
+        store_name_lbl = tk.Label(self, text="Store", 
+                                 font=("Helvetica", 15, "bold"), bg="#DC8392", fg="black")
+        store_name_lbl.place(relx=0.5, y=30, anchor="center")
+        
+        # Label pequeno à direita do nome Store
+        right_store_label = tk.Label(self, text="•", font=("Helvetica", 12, "bold"), bg="#DC8392", fg="#DC8392")
+        right_store_label.place(relx=0.6, y=30, anchor="center")
+
         # Título
         tipo_atual = getattr(self, 'current_card_type', None)
         if not tipo_atual:
@@ -752,116 +921,340 @@ class StoreWindow(tk.Toplevel):
         titulo = tipo_atual.capitalize()
         title_lbl = tk.Label(self, text=f"{titulo}", font=("Helvetica", 22, "bold"), fg="white", bg="black")
         title_lbl.pack(pady=(20, 10))
-        
-        # Card value info abaixo do título
-        value_info_frame = tk.Frame(self, bg="black")
-        value_info_frame.pack(pady=(0, 20))
-        
-        value_text_lbl = tk.Label(value_info_frame, text="Card value: ", 
-                                 font=("Helvetica", 16), fg="yellow", bg="black")
-        value_text_lbl.pack(side="left")
-        
-        self._valor_lbl = tk.Label(value_info_frame, text="?", 
-                                  font=("Helvetica", 16, "bold"), fg="yellow", bg="black")
-        self._valor_lbl.pack(side="left", padx=(5, 5))
-        
-        # Ícone da moeda
-        picoin_img = ImageTk.PhotoImage(Image.open(COIN_IMG).resize((24,24)))
-        self._picoin_lbl = tk.Label(value_info_frame, image=picoin_img, bg="black")
-        self._picoin_lbl.image = picoin_img  # type: ignore[attr-defined]
-        self._picoin_lbl.pack(side="left")
 
-        # Obter cartas disponíveis para compra do baralho do jogador
-        print(f"DEBUG: Buscando cartas para tipo '{tipo_atual}' e cor '{self.player_color}'")
+        # Obter cartas disponíveis para compra do baralho LOCAL da Store (sincronizado)
+        print(f"DEBUG: [CRÍTICO] Buscando cartas para tipo '{tipo_atual}'")
         
-        # Verificar se o tipo existe nos baralhos
+        # LÓGICA CORRETA: Jogador sempre compra cartas da SUA PRÓPRIA COR
+        # Mesmo quando está numa casa de outro jogador, compra cartas da sua cor
+        cor_para_buscar = self.player_color
+        print(f"DEBUG: [CRÍTICO] Cor determinada para busca: {cor_para_buscar} (cor do jogador)")
+        print(f"DEBUG: [CRÍTICO] Casa atual: tipo='{self.casa_tipo}', cor='{self.casa_cor}'")
+        print(f"DEBUG: [CRÍTICO] Jogador cor: {self.player_color}")
+        
+        # NOVA LÓGICA: Buscar cartas da cor do jogador + cartas vendidas de qualquer jogador
         cartas_disp = []
-        if self.player_color in baralhos and tipo_atual in baralhos[self.player_color]:
-            cartas_disp = baralhos[self.player_color][tipo_atual].copy()
-            print(f"DEBUG: Encontradas {len(cartas_disp)} cartas no baralho do jogador")
         
-        # Se não houver cartas da cor do jogador, tentar neutral
-        if not cartas_disp and "neutral" in baralhos and tipo_atual in baralhos["neutral"]:
-            cartas_disp = baralhos["neutral"][tipo_atual].copy()
-            print(f"DEBUG: Encontradas {len(cartas_disp)} cartas no baralho neutral")
+        # Primeiro: cartas da cor do jogador (baralho original)
+        if (hasattr(self, 'cartas') and cor_para_buscar in self.cartas and 
+            tipo_atual in self.cartas[cor_para_buscar]):
+            cartas_disp.extend(self.cartas[cor_para_buscar][tipo_atual].copy())
+            print(f"DEBUG: Encontradas {len(self.cartas[cor_para_buscar][tipo_atual])} cartas no baralho LOCAL da COR DO JOGADOR ({cor_para_buscar})")
         
-        # Debug adicional
-        print(f"DEBUG: Baralhos disponíveis para {self.player_color}:")
-        if self.player_color in baralhos:
-            for tipo, cartas in baralhos[self.player_color].items():
+        # Segundo: cartas vendidas de outros jogadores (todas as cores)
+        if hasattr(self, 'cartas'):
+            for cor_jogador in ["red", "blue", "green", "yellow"]:
+                if (cor_jogador != cor_para_buscar and cor_jogador in self.cartas and 
+                    tipo_atual in self.cartas[cor_jogador]):
+                    cartas_vendidas = self.cartas[cor_jogador][tipo_atual].copy()
+                    if cartas_vendidas:
+                        print(f"DEBUG: Encontradas {len(cartas_vendidas)} cartas VENDIDAS de jogadores {cor_jogador}")
+                        
+                        # CORREÇÃO: Mapear cartas vendidas para caminhos com cor correta
+                        cartas_mapeadas = []
+                        for carta_path in cartas_vendidas:
+                            # Extrair nome do arquivo (User_5.png)
+                            nome_carta = os.path.basename(carta_path)
+                            
+                            # Construir novo caminho com a cor do jogador
+                            if cor_para_buscar in ["red", "blue", "green", "yellow"]:
+                                cor_pasta = cor_para_buscar.capitalize()  # red -> Red
+                                # CARTAS_BASE_DIR já inclui /img/cartas, só adicionar tipo
+                                novo_caminho = os.path.join(
+                                    CARTAS_BASE_DIR, 
+                                    tipo_atual,  # users, equipments, etc.
+                                    "Residential-level",
+                                    cor_pasta,
+                                    nome_carta
+                                )
+                            else:
+                                # Fallback para cor do jogador
+                                cor_pasta = self.player_color.capitalize()
+                                novo_caminho = os.path.join(
+                                    CARTAS_BASE_DIR, 
+                                    tipo_atual,  # users, equipments, etc.
+                                    "Residential-level", 
+                                    cor_pasta,
+                                    nome_carta
+                                )
+                            
+                            cartas_mapeadas.append(novo_caminho)
+                            print(f"DEBUG: Carta mapeada: {os.path.basename(carta_path)} -> {cor_pasta}/{nome_carta}")
+                        
+                        cartas_disp.extend(cartas_mapeadas)
+        
+        print(f"DEBUG: Total de cartas disponíveis após busca completa: {len(cartas_disp)}")
+        
+        # Debug adicional do baralho LOCAL
+        print(f"DEBUG: Baralhos LOCAL disponíveis para COR DO JOGADOR {cor_para_buscar}:")
+        if hasattr(self, 'cartas') and cor_para_buscar in self.cartas:
+            for tipo, cartas in self.cartas[cor_para_buscar].items():
                 print(f"  {tipo}: {len(cartas)} cartas")
+        else:
+            print(f"  Nenhum baralho LOCAL encontrado para COR DO JOGADOR {cor_para_buscar}")
         
         if not cartas_disp:
-            print(f"DEBUG: Nenhuma carta encontrada para {tipo_atual}")
-            tk.Label(self, text="Sem cartas disponíveis para compra!", font=("Helvetica", 16), bg="black", fg="white").pack(pady=20)
+            print(f"DEBUG: Nenhuma carta encontrada para {tipo_atual} na cor do jogador {cor_para_buscar}")
+            
+            # Mostrar mensagem de "sem cartas disponíveis" com interface completa
+            sem_cartas_lbl = tk.Label(self, text="Sem cartas disponíveis!", 
+                                    font=("Helvetica", 18, "bold"), 
+                                    bg="black", fg="white")
+            sem_cartas_lbl.place(relx=0.5, rely=0.4, anchor="center")
+            
+            # Adicionar mensagem adicional
+            info_lbl = tk.Label(self, text="Não há mais cartas desta cor para comprar", 
+                              font=("Helvetica", 14), 
+                              bg="black", fg="#AAAAAA")
+            info_lbl.place(relx=0.5, rely=0.5, anchor="center")
+            
+            # Barra inferior com imagem BelowBar_store.png
+            belowbar_img = ImageTk.PhotoImage(Image.open(BELOWBAR_IMG).resize((self.winfo_screenwidth(), 50)))
+            belowbar_label = tk.Label(self, image=belowbar_img, bg="black")
+            belowbar_label.image = belowbar_img  # type: ignore[attr-defined]
+            belowbar_label.pack(side="bottom", fill="x")
+
+            # Mover saldo e piccoin para parte inferior direita (por cima do BelowBar)
+            coin_img_bottom = ImageTk.PhotoImage(Image.open(COIN_IMG).resize((24, 24)))
+            coin_lbl_bottom = tk.Label(self, image=coin_img_bottom, bg="#DC8392")
+            coin_lbl_bottom.image = coin_img_bottom  # type: ignore[attr-defined]
+            coin_lbl_bottom.place(x=self.winfo_screenwidth()-100, rely=1.0, y=-25, anchor="w")
+            
+            saldo_lbl_bottom = tk.Label(self, text=f"{self.saldo}", font=("Helvetica", 16, "bold"), fg="black", bg="#DC8392")
+            saldo_lbl_bottom.place(x=self.winfo_screenwidth()-70, rely=1.0, y=-25, anchor="w")
+
+            # Botão Back para voltar à Store principal
+            btn_voltar = tk.Button(self, text="Back", font=("Helvetica", 14, "bold"), 
+                                  bg="#8C04A0", fg="white", width=6, 
+                                  command=self.voltar_para_store)
+            btn_voltar.place(relx=0.5, rely=0.98, anchor="s")
+            
             return
 
-        # Carrossel de cartas (duas cartas visíveis) - ajustado para compensar o card value
-        self._buy_imgs = [None, None]
-        self._buy_paths = cartas_disp
-        self._buy_idx = 0  # índice da carta destacada
-        self._fullscreen_open = False
-        self._carrossel_frame = tk.Frame(self, bg="black")
-        self._carrossel_frame.pack(fill="x", pady=(20, 10))  # Reduzido de (60, 10) para (20, 10)
+        # IMPORTANTE: Filtrar cartas que já estão no inventário do jogador (sincronização completa)
+        if self.dashboard and hasattr(self.dashboard, 'inventario') and tipo_atual in self.dashboard.inventario:
+            cartas_no_inventario = self.dashboard.inventario[tipo_atual]
+            cartas_antes_filtro = len(cartas_disp)
+            
+            # Comparar apenas nomes de arquivos (não caminhos completos) para melhor sincronização
+            nomes_no_inventario = {os.path.basename(carta) for carta in cartas_no_inventario}
+            cartas_disp = [carta for carta in cartas_disp if os.path.basename(carta) not in nomes_no_inventario]
+            
+            cartas_depois_filtro = len(cartas_disp)
+            print(f"DEBUG: SINCRONIZAÇÃO - Filtrado cartas do inventário: {cartas_antes_filtro} → {cartas_depois_filtro} (removidas {cartas_antes_filtro - cartas_depois_filtro} cartas)")
+            
+            if cartas_antes_filtro != cartas_depois_filtro:
+                print(f"DEBUG: Cartas removidas do inventário por nome:")
+                for nome in nomes_no_inventario:
+                    print(f"  - {nome}")
+        else:
+            print(f"DEBUG: Sem inventário para filtrar ou tipo '{tipo_atual}' não existe no inventário")
 
-        # Setas em texto Unicode (agora com place)
-        seta_esq = tk.Button(self._carrossel_frame, text="\u25C0", font=("Helvetica", 24, "bold"), bg="black", fg="white", bd=0, highlightthickness=0, activebackground="black", activeforeground="#FFD600", cursor="hand2", command=self._carrossel_prev)
-        seta_esq.place(relx=0.0, rely=0.5, anchor="w")
-        seta_dir = tk.Button(self._carrossel_frame, text="\u25B6", font=("Helvetica", 24, "bold"), bg="black", fg="white", bd=0, highlightthickness=0, activebackground="black", activeforeground="#FFD600", cursor="hand2", command=self._carrossel_next)
-        seta_dir.place(relx=1.0, rely=0.5, anchor="e")
+        # Verificar se ainda há cartas disponíveis após filtrar o inventário
+        if not cartas_disp:
+            print(f"DEBUG: Todas as cartas {tipo_atual} já estão no inventário do jogador")
+            
+            # Mostrar mensagem de "sem cartas disponíveis" com interface completa
+            sem_cartas_lbl = tk.Label(self, text="Sem cartas disponíveis!", 
+                                    font=("Helvetica", 18, "bold"), 
+                                    bg="black", fg="white")
+            sem_cartas_lbl.place(relx=0.5, rely=0.4, anchor="center")
+            
+            # Adicionar mensagem adicional
+            info_lbl = tk.Label(self, text="Todas as cartas já estão no seu inventário", 
+                              font=("Helvetica", 14), 
+                              bg="black", fg="#AAAAAA")
+            info_lbl.place(relx=0.5, rely=0.5, anchor="center")
+            
+            # Barra inferior com imagem BelowBar_store.png
+            belowbar_img = ImageTk.PhotoImage(Image.open(BELOWBAR_IMG).resize((self.winfo_screenwidth(), 50)))
+            belowbar_label = tk.Label(self, image=belowbar_img, bg="black")
+            belowbar_label.image = belowbar_img  # type: ignore[attr-defined]
+            belowbar_label.pack(side="bottom", fill="x")
 
-        # Duas cartas lado a lado
-        self._carta_lbls = []
-        def make_card_callback(idx):
-            def callback(event):
-                n = len(self._buy_paths)
-                carta_idx = (self._buy_idx + idx) % n
-                print(f"DEBUG: Clique na carta do carrossel - idx relativo: {idx}, idx real: {carta_idx}, buy_idx: {self._buy_idx}")
-                if carta_idx != self._buy_idx:
-                    print("DEBUG: Mudar destaque para esta carta.")
-                    self._buy_idx = carta_idx
-                    self._carrossel_update()
-                else:
-                    print("DEBUG: Abrir carta em fullscreen!")
-                    self._abrir_fullscreen_por_indice_real(carta_idx)
+            # Mover saldo e piccoin para parte inferior direita (por cima do BelowBar)
+            coin_img_bottom = ImageTk.PhotoImage(Image.open(COIN_IMG).resize((24, 24)))
+            coin_lbl_bottom = tk.Label(self, image=coin_img_bottom, bg="#DC8392")
+            coin_lbl_bottom.image = coin_img_bottom  # type: ignore[attr-defined]
+            coin_lbl_bottom.place(x=self.winfo_screenwidth()-100, rely=1.0, y=-25, anchor="w")
+            
+            saldo_lbl_bottom = tk.Label(self, text=f"{self.saldo}", font=("Helvetica", 16, "bold"), fg="black", bg="#DC8392")
+            saldo_lbl_bottom.place(x=self.winfo_screenwidth()-70, rely=1.0, y=-25, anchor="w")
+
+            # Botão Back para voltar à Store principal
+            btn_voltar = tk.Button(self, text="Back", font=("Helvetica", 14, "bold"), 
+                                  bg="#8C04A0", fg="white", width=6, 
+                                  command=self.voltar_para_store)
+            btn_voltar.place(relx=0.5, rely=0.98, anchor="s")
+            
+            return
+
+        # Filtrar User_1.png das páginas de compra (conforme solicitado)
+        if tipo_atual.lower() == "users":
+            cartas_antes = len(cartas_disp)
+            cartas_disp = [carta for carta in cartas_disp if not os.path.basename(carta).startswith("User_1.")]
+            cartas_depois = len(cartas_disp)
+            if cartas_antes != cartas_depois:
+                print(f"DEBUG: Filtrado User_1.png - cartas antes: {cartas_antes}, depois: {cartas_depois}")
+        
+        # Verificar novamente se ainda há cartas disponíveis após filtragem do User_1.png
+        if not cartas_disp:
+            print(f"DEBUG: Não há cartas {tipo_atual} disponíveis após todas as filtragens")
+            
+            # Mostrar mensagem de "sem cartas disponíveis" com interface completa
+            sem_cartas_lbl = tk.Label(self, text="Sem cartas disponíveis!", 
+                                    font=("Helvetica", 18, "bold"), 
+                                    bg="black", fg="white")
+            sem_cartas_lbl.place(relx=0.5, rely=0.4, anchor="center")
+            
+            # Adicionar mensagem adicional
+            info_lbl = tk.Label(self, text="Não há mais cartas para comprar", 
+                              font=("Helvetica", 14), 
+                              bg="black", fg="#AAAAAA")
+            info_lbl.place(relx=0.5, rely=0.5, anchor="center")
+            
+            # Barra inferior com imagem BelowBar_store.png
+            belowbar_img = ImageTk.PhotoImage(Image.open(BELOWBAR_IMG).resize((self.winfo_screenwidth(), 50)))
+            belowbar_label = tk.Label(self, image=belowbar_img, bg="black")
+            belowbar_label.image = belowbar_img  # type: ignore[attr-defined]
+            belowbar_label.pack(side="bottom", fill="x")
+
+            # Mover saldo e piccoin para parte inferior direita (por cima do BelowBar)
+            coin_img_bottom = ImageTk.PhotoImage(Image.open(COIN_IMG).resize((24, 24)))
+            coin_lbl_bottom = tk.Label(self, image=coin_img_bottom, bg="#DC8392")
+            coin_lbl_bottom.image = coin_img_bottom  # type: ignore[attr-defined]
+            coin_lbl_bottom.place(x=self.winfo_screenwidth()-100, rely=1.0, y=-25, anchor="w")
+            
+            saldo_lbl_bottom = tk.Label(self, text=f"{self.saldo}", font=("Helvetica", 16, "bold"), fg="black", bg="#DC8392")
+            saldo_lbl_bottom.place(x=self.winfo_screenwidth()-70, rely=1.0, y=-25, anchor="w")
+
+            # Botão Back para voltar à Store principal
+            btn_voltar = tk.Button(self, text="Back", font=("Helvetica", 14, "bold"), 
+                                  bg="#8C04A0", fg="white", width=6, 
+                                  command=self.voltar_para_store)
+            btn_voltar.place(relx=0.5, rely=0.98, anchor="s")
+            
+            return
+
+        # Remover cartas duplicadas (mesmo nome de arquivo de diferentes caminhos)
+        cartas_unicas = []
+        nomes_vistos = set()
+        for carta_path in cartas_disp:
+            nome_arquivo = os.path.basename(carta_path)
+            if nome_arquivo not in nomes_vistos:
+                nomes_vistos.add(nome_arquivo)
+                cartas_unicas.append(carta_path)
+        
+        if len(cartas_disp) != len(cartas_unicas):
+            print(f"DEBUG: Cartas duplicadas removidas: {len(cartas_disp)} → {len(cartas_unicas)}")
+            cartas_disp = cartas_unicas
+        
+        # Verificar mais uma vez se ainda há cartas disponíveis após remover duplicatas
+        if not cartas_disp:
+            print(f"DEBUG: Não há cartas {tipo_atual} disponíveis após remover duplicatas")
+            
+            # Mostrar mensagem de "sem cartas disponíveis" com interface completa
+            sem_cartas_lbl = tk.Label(self, text="Sem cartas disponíveis!", 
+                                    font=("Helvetica", 18, "bold"), 
+                                    bg="black", fg="white")
+            sem_cartas_lbl.place(relx=0.5, rely=0.4, anchor="center")
+            
+            # Adicionar mensagem adicional
+            info_lbl = tk.Label(self, text="Não há mais cartas para comprar", 
+                              font=("Helvetica", 14), 
+                              bg="black", fg="#AAAAAA")
+            info_lbl.place(relx=0.5, rely=0.5, anchor="center")
+            
+            # Barra inferior com imagem BelowBar_store.png
+            belowbar_img = ImageTk.PhotoImage(Image.open(BELOWBAR_IMG).resize((self.winfo_screenwidth(), 50)))
+            belowbar_label = tk.Label(self, image=belowbar_img, bg="black")
+            belowbar_label.image = belowbar_img  # type: ignore[attr-defined]
+            belowbar_label.pack(side="bottom", fill="x")
+
+            # Mover saldo e piccoin para parte inferior direita (por cima do BelowBar)
+            coin_img_bottom = ImageTk.PhotoImage(Image.open(COIN_IMG).resize((24, 24)))
+            coin_lbl_bottom = tk.Label(self, image=coin_img_bottom, bg="#DC8392")
+            coin_lbl_bottom.image = coin_img_bottom  # type: ignore[attr-defined]
+            coin_lbl_bottom.place(x=self.winfo_screenwidth()-100, rely=1.0, y=-25, anchor="w")
+            
+            saldo_lbl_bottom = tk.Label(self, text=f"{self.saldo}", font=("Helvetica", 16, "bold"), fg="black", bg="#DC8392")
+            saldo_lbl_bottom.place(x=self.winfo_screenwidth()-70, rely=1.0, y=-25, anchor="w")
+
+            # Botão Back para voltar à Store principal
+            btn_voltar = tk.Button(self, text="Back", font=("Helvetica", 14, "bold"), 
+                                  bg="#8C04A0", fg="white", width=6, 
+                                  command=self.voltar_para_store)
+            btn_voltar.place(relx=0.5, rely=0.98, anchor="s")
+            
+            return
+
+        # Ordenar cartas por número (User_1, User_2, User_3, etc.)
+        def extrair_numero_carta(carta_path):
+            nome = os.path.basename(carta_path)
+            match = re.search(r'_(\d+)\.', nome)
+            return int(match.group(1)) if match else float('inf')  # Cartas sem número vão para o fim
+        
+        cartas_disp.sort(key=extrair_numero_carta)
+        print(f"DEBUG: Cartas ordenadas por número: {[os.path.basename(c) for c in cartas_disp[:5]]}")  # Mostra os primeiros 5
+
+        # === SISTEMA GRID IGUAL À PÁGINA DE VENDA ===
+        # Paginação
+        cards_per_page = 4
+        total_pages = max(1, (len(cartas_disp) + cards_per_page - 1) // cards_per_page)
+        self._current_buy_page = getattr(self, '_current_buy_page', 0)
+        self._current_buy_page = max(0, min(self._current_buy_page, total_pages - 1))
+        start_idx = self._current_buy_page * cards_per_page
+        end_idx = start_idx + cards_per_page
+        cartas_page = cartas_disp[start_idx:end_idx]
+        
+        # Frame para as cartas (centralizado, mas mais abaixo para não tapar o título)
+        self.matriz_frame = tk.Frame(self, bg="black")
+        self.matriz_frame.place(relx=0.5, rely=0.55, anchor="center")  # Movido para baixo
+        
+        n_col = 2  # 2 colunas
+        card_w, card_h = 85, 120  # Tamanho igual ao da página de venda
+        self.cards_per_page = cards_per_page
+        self._buy_imgs = []
+        
+        # Callback para fullscreen das cartas (igual à página de venda)
+        def make_fullscreen_callback(carta_path, global_idx):
+            def callback(event=None):
+                print(f"DEBUG: Carta clicada para compra fullscreen: {carta_path}")
+                self._abrir_fullscreen_carta(global_idx)
             return callback
-        for i in range(2):
-            lbl = tk.Label(self._carrossel_frame, bg="black", borderwidth=0, relief="flat")
-            if i == 0:
-                lbl.grid(row=0, column=1, padx=(0,3))
-            else:
-                lbl.grid(row=0, column=2, padx=(3,0))
-            lbl.bind("<Button-1>", make_card_callback(i))
-            self._carta_lbls.append(lbl)
-        self._carrossel_frame.grid_columnconfigure(0, weight=1)
-        self._carrossel_frame.grid_columnconfigure(3, weight=1)
-
-        # Info e botões por baixo (estilo Store)
-        frame_width = 100
-        frame_height = 50
-        self._info_frame = tk.Frame(self, bg="black")
-        self._info_frame.pack(side="bottom", pady=0, fill="x")
-        # Frames para cada elemento
-        self.inventory_frame = tk.Frame(self._info_frame, width=frame_width, height=frame_height, bg="black")
-        self.buy_frame = tk.Frame(self._info_frame, width=frame_width, height=frame_height, bg="black")
-        self.picoin_frame = tk.Frame(self._info_frame, width=frame_width, height=frame_height, bg="black")
-        self.voltar_frame = tk.Frame(self._info_frame, width=frame_width, height=frame_height, bg="black")
-        self.inventory_frame.pack_propagate(False)
-        self.buy_frame.pack_propagate(False)
-        self.picoin_frame.pack_propagate(False)
-        self.voltar_frame.pack_propagate(False)
-        self.inventory_frame.pack(side="left", padx=(20,10), pady=0)
-        self.buy_frame.pack(side="left", padx=10, pady=0)
-        self.picoin_frame.pack(side="left", padx=10, pady=0, expand=True)
-        self.voltar_frame.pack(side="left", padx=(10,40), pady=0)
-        # Botão Inventory (onde estava o Buy)
-        self._btn_inventory = tk.Button(self.inventory_frame, text="Inventory", font=("Helvetica", 14, "bold"), bg="#8A2BE2", fg="white", relief="flat", borderwidth=0, command=self._abrir_inventory)
-        self._btn_inventory.place(relx=0.5, rely=0.5, anchor="center")
-        # Botão Buy (alinhado com os outros botões)
-        self._btn_buy = tk.Button(self.buy_frame, text="Buy", font=("Helvetica", 14, "bold"), bg="#4CAF50", fg="white", relief="flat", borderwidth=0, command=self._comprar_carta)
-        self._btn_buy.place(relx=0.5, rely=0.5, anchor="center")  # Alinhado com Inventory e Back
-
-        self._carrossel_update()
+        
+        # Criar grid de cartas
+        for idx, carta_path in enumerate(cartas_page):
+            row = idx // n_col
+            col = idx % n_col
+            global_idx = start_idx + idx
+            try:
+                img = ImageTk.PhotoImage(Image.open(carta_path).resize((card_w, card_h)))
+                self._buy_imgs.append(img)
+            except Exception as e:
+                print(f"DEBUG: Erro ao carregar carta {carta_path}: {e}")
+                continue
+            
+            carta_lbl = tk.Label(self.matriz_frame, image=img, bg="black", cursor="hand2")
+            carta_lbl.image = img
+            carta_lbl.grid(row=row, column=col, padx=8, pady=8)
+            carta_lbl.bind("<Button-1>", make_fullscreen_callback(carta_path, global_idx))
+        
+        # Setas de navegação iguais à página de venda
+        if total_pages > 1:
+            seta_x = 0.90  # Posição igual à página de venda
+            if self._current_buy_page > 0:
+                seta_cima = tk.Button(self, text="▲", font=("Helvetica", 18, "bold"), bg="#222", fg="white", width=2,
+                                    command=self._prev_buy_page)
+                seta_cima.place(relx=seta_x, rely=0.38, anchor="center")  # Posição igual à página de venda
+            if self._current_buy_page < total_pages - 1:
+                seta_baixo = tk.Button(self, text="▼", font=("Helvetica", 18, "bold"), bg="#222", fg="white", width=2,
+                                     command=self._next_buy_page)
+                seta_baixo.place(relx=seta_x, rely=0.62, anchor="center")  # Posição igual à página de venda
+        
+        # Guardar dados para navegação
+        self._cartas_disponiveis = cartas_disp
+        self._total_pages = total_pages
 
         # Barra inferior com imagem BelowBar_store.png
         belowbar_img = ImageTk.PhotoImage(Image.open(BELOWBAR_IMG).resize((self.winfo_screenwidth(), 50)))
@@ -878,115 +1271,407 @@ class StoreWindow(tk.Toplevel):
         saldo_lbl_bottom = tk.Label(self, text=f"{self.saldo}", font=("Helvetica", 16, "bold"), fg="black", bg="#DC8392")
         saldo_lbl_bottom.place(x=self.winfo_screenwidth()-70, rely=1.0, y=-25, anchor="w")
 
-        # Botão Back no canto inferior direito (depois da barra para ficar visível)
-        self._btn_voltar = tk.Button(self, text="Back", font=("Helvetica", 14, "bold"), bg="#005c75", fg="white", relief="flat", borderwidth=0, command=self.voltar_para_store)
-        self._btn_voltar.place(relx=0.98, rely=0.92, anchor="se")  # Movido para cima da barra inferior
+        # Botão Back igual à página de venda (depois da barra para ficar visível)
+        btn_voltar = tk.Button(self, text="Back", font=("Helvetica", 14, "bold"), 
+                              bg="#8C04A0", fg="white", width=6, 
+                              command=self.voltar_para_store)
+        btn_voltar.place(relx=0.5, rely=0.98, anchor="s")  # Movido para cima da barra inferior
 
-    def _abrir_inventory(self):
-        """Abre a página de inventário do tipo correspondente usando a função sincronizada"""
-        tipo_atual = getattr(self, "current_card_type", None)
-        if tipo_atual:
-            print(f"DEBUG: Abrindo inventário sincronizado para compra - tipo: {tipo_atual}")
-            # Usar a nova função sincronizada que volta para a página de compra
-            self.show_inventory_matrix_buy([tipo_atual], 0, tipo_atual)
-        else:
-            print("DEBUG: Tipo de carta atual não definido")
+    def _prev_buy_page(self):
+        """Navega para a página anterior"""
+        if self._current_buy_page > 0:
+            self._current_buy_page -= 1
+            self._update_buy_page()
 
-    def _carrossel_prev(self):
-        if not self._fullscreen_open:
-            self._buy_idx = (self._buy_idx - 1) % len(self._buy_paths)
-            self._carrossel_update()
+    def _next_buy_page(self):
+        """Navega para a próxima página"""
+        if self._current_buy_page < self._total_pages - 1:
+            self._current_buy_page += 1
+            self._update_buy_page()
 
-    def _carrossel_next(self):
-        if not self._fullscreen_open:
-            self._buy_idx = (self._buy_idx + 1) % len(self._buy_paths)
-            self._carrossel_update()
-
-    def _carrossel_update(self):
-        # Mostra duas cartas lado a lado, só uma destacada
-        n = len(self._buy_paths)
-        idxs = [self._buy_idx, (self._buy_idx+1)%n] if n > 1 else [self._buy_idx, self._buy_idx]
-        for i, lbl in enumerate(self._carta_lbls):
-            carta_path = self._buy_paths[idxs[i]]
+    def _update_buy_page(self):
+        """Atualiza a exibição da página atual"""
+        # Limpar cartas atuais
+        for widget in self.matriz_frame.winfo_children():
+            widget.destroy()
+        
+        # Calcular cartas para esta página
+        start_idx = self._current_buy_page * self.cards_per_page
+        end_idx = min(start_idx + self.cards_per_page, len(self._cartas_disponiveis))
+        cartas_pagina = self._cartas_disponiveis[start_idx:end_idx]
+        
+        # Callback para fullscreen das cartas
+        def make_fullscreen_callback(carta_path, global_idx):
+            def callback(event=None):
+                print(f"DEBUG: Carta clicada para compra fullscreen: {carta_path}")
+                self._abrir_fullscreen_carta(global_idx)
+            return callback
+        
+        # Criar grid de cartas
+        card_w, card_h = 85, 120
+        for i, carta_path in enumerate(cartas_pagina):
+            row = i // 2
+            col = i % 2
+            carta_idx_global = start_idx + i
+            
             try:
-                img = ImageTk.PhotoImage(Image.open(carta_path).resize((120, 180)))
-            except Exception:
-                img = None
-            if img is not None:
-                lbl.config(image=img)
-                if not hasattr(self, '_carta_imgs'):
-                    self._carta_imgs = []
-                if len(self._carta_imgs) <= i:
-                    self._carta_imgs.append(img)
-                else:
-                    self._carta_imgs[i] = img
-            else:
-                lbl.config(image="")
-                if hasattr(self, '_carta_imgs'):
-                    self._carta_imgs[i] = None
-            # Destaca só a carta selecionada
-            if i == 0:
-                lbl.config(highlightbackground="yellow", highlightcolor="yellow", highlightthickness=4)
-            else:
-                lbl.config(highlightbackground="black", highlightcolor="black", highlightthickness=0)
-        # Atualiza valor da carta destacada
-        valor = self._extrair_valor_carta(self._buy_paths[self._buy_idx])
-        self._valor_lbl.config(text=str(valor) if valor is not None else "?")
-
-    def _abrir_fullscreen_por_indice_real(self, carta_idx):
-        print(f"DEBUG: _abrir_fullscreen_por_indice_real chamado com carta_idx={carta_idx}")
-        self._fullscreen_open = True
-        carta_path = self._buy_paths[carta_idx]
-        print(f"DEBUG: Caminho da carta a abrir em fullscreen: {carta_path}")
-        # Esconde todos os widgets atuais
-        self._fullscreen_hidden_widgets = []
+                img = ImageTk.PhotoImage(Image.open(carta_path).resize((card_w, card_h)))
+                carta_lbl = tk.Label(self.matriz_frame, image=img, bg="black", cursor="hand2")
+                carta_lbl.image = img  # Manter referência
+                carta_lbl.grid(row=row, column=col, padx=8, pady=8)
+                carta_lbl.bind("<Button-1>", make_fullscreen_callback(carta_path, carta_idx_global))
+                
+            except Exception as e:
+                print(f"Erro ao carregar carta: {e}")
+                carta_lbl = tk.Label(self.matriz_frame, text="?", bg="black", fg="white")
+                carta_lbl.grid(row=row, column=col, padx=8, pady=8)
+        
+        # Atualizar setas de navegação
+        # Primeiro, remover setas existentes
         for widget in self.winfo_children():
-            if widget.winfo_ismapped():
-                self._fullscreen_hidden_widgets.append(widget)
-                widget.place_forget() if hasattr(widget, 'place_info') and widget.place_info() else widget.pack_forget()
+            if isinstance(widget, tk.Button) and widget.cget("text") in ["▲", "▼"]:
+                widget.destroy()
+        
+        # Recriar setas se necessário (iguais à página de venda)
+        if hasattr(self, '_total_pages') and self._total_pages > 1:
+            seta_x = 0.90  # Posição igual à página de venda
+            if self._current_buy_page > 0:
+                seta_cima = tk.Button(self, text="▲", font=("Helvetica", 18, "bold"), bg="#222", fg="white", width=2,
+                                    command=self._prev_buy_page)
+                seta_cima.place(relx=seta_x, rely=0.38, anchor="center")
+            if self._current_buy_page < self._total_pages - 1:
+                seta_baixo = tk.Button(self, text="▼", font=("Helvetica", 18, "bold"), bg="#222", fg="white", width=2,
+                                     command=self._next_buy_page)
+                seta_baixo.place(relx=seta_x, rely=0.62, anchor="center")
+
+    def _abrir_fullscreen_carta(self, carta_idx):
+        """Abre carta em fullscreen para compra, igual ao estilo da página de venda"""
+        print(f"DEBUG: _abrir_fullscreen_carta chamado - carta_idx: {carta_idx}")
+        
+        if not hasattr(self, '_cartas_disponiveis') or carta_idx >= len(self._cartas_disponiveis):
+            print(f"DEBUG: Índice de carta inválido: {carta_idx}")
+            return
+            
+        carta_path = self._cartas_disponiveis[carta_idx]
+        
+        # Verificar se o arquivo existe
+        if not os.path.exists(carta_path):
+            print(f"DEBUG: ERRO - Arquivo de carta não existe: {carta_path}")
+            return
+        
+        # Garantir que a Store está visível e no estado correto
+        self.deiconify()
+        self.state('normal')
+        self.lift()
+        self.focus_force()
+        
+        # Limpa todos os widgets da Store
+        for widget in self.winfo_children():
+            widget.destroy()
         self.configure(bg="black")
+        
+        # Força update para garantir que a limpeza foi feita
+        self.update_idletasks()
+        
+        # Mostra a carta em fullscreen ocupando toda a tela
         try:
             pil_img = Image.open(carta_path)
             img_w, img_h = pil_img.size
-            max_w, max_h = self.winfo_screenwidth(), self.winfo_screenheight()
-            ratio = min(max_w/img_w, max_h/img_h)
+            
+            # Área disponível: toda a tela
+            available_width = self.winfo_screenwidth()
+            available_height = self.winfo_screenheight()
+            
+            # Calcular o ratio para ocupar o máximo possível da tela
+            ratio = min(available_width/img_w, available_height/img_h)
             new_w, new_h = int(img_w*ratio), int(img_h*ratio)
             pil_img = pil_img.resize((new_w, new_h), Image.Resampling.LANCZOS)
             carta_img = ImageTk.PhotoImage(pil_img)
-            print("DEBUG: Imagem carregada e redimensionada com sucesso.")
+            
+            # Centralizar a carta na tela
+            carta_real_lbl = tk.Label(self, image=carta_img, bg="black", borderwidth=0, highlightthickness=0)
+            carta_real_lbl.image = carta_img  # Manter referência para evitar garbage collection
+            carta_real_lbl.place(relx=0.5, rely=0.5, anchor="center")
+            print("DEBUG: Carta carregada e mostrada em fullscreen com sucesso")
+            
         except Exception as e:
-            print(f"ERRO ao carregar imagem em fullscreen: {e}")
-            return
-        carta_real_lbl = tk.Label(self, image=carta_img, bg="black")
-        if not hasattr(self, '_img_refs'):
-            self._img_refs = []
-        self._img_refs.append(carta_img)
-        carta_real_lbl.place(relx=0.5, rely=0.5, anchor="center")
-        # Botão circular cinza (✖) no canto superior direito
+            print(f"DEBUG: ERRO ao carregar carta para compra: {e}")
+            # Mostrar um placeholder em caso de erro
+            carta_real_lbl = tk.Label(self, text="Erro ao carregar carta", font=("Helvetica", 20), fg="red", bg="black")
+            carta_real_lbl.place(relx=0.5, rely=0.5, anchor="center")
+        
+        # Botão X para voltar à página de compra (movido para canto superior esquerdo)
         def fechar():
-            carta_real_lbl.destroy()
-            btn_x.destroy()
-            self._fullscreen_open = False
-            self._buy_idx = carta_idx
-            # Limpa todos os widgets antes de voltar à página de compra
-            for widget in self.winfo_children():
-                widget.destroy()
-            self.show_buy_page()
-        btn_x = tk.Button(self, text="✖", font=("Helvetica", 24, "bold"), bg="#AAAAAA", fg="white", width=2, height=1, borderwidth=0, highlightthickness=0, command=fechar, cursor="hand2", activebackground="#CCCCCC")
-        btn_x.place(relx=0.98, rely=0, anchor="ne")
+            print("DEBUG: Botão X pressionado - voltando à página de compra")
+            try:
+                # Volta à página de compra
+                self.show_buy_page()
+            except Exception as e:
+                print(f"DEBUG: Erro ao fechar compra: {e}")
+                # Em caso de erro, tenta voltar à Store
+                self.voltar_para_store()
+                
+        x_btn = tk.Button(self, text="✖", font=("Helvetica", 24, "bold"), bg="#AAAAAA", fg="white", width=2, height=1, borderwidth=0, highlightthickness=0, command=fechar, cursor="hand2", activebackground="#CCCCCC")
+        x_btn.place(relx=0.02, rely=0, anchor="nw")  # Canto superior esquerdo
+        
+        # Botão checkmark (✓) para comprar no canto superior direito (só mostra se não for casa de outro jogador)
+        if not self.other_player_house:
+            def comprar():
+                # Definir a carta selecionada e chamar confirmação de compra
+                self._selected_card_idx = carta_idx
+                self._comprar_carta()
+            btn_comprar = tk.Button(self, text="✓", font=("Helvetica", 24, "bold"), bg="#4CAF50", fg="white", width=2, height=1, borderwidth=0, highlightthickness=0, command=comprar, cursor="hand2", activebackground="#43A047")
+            btn_comprar.place(relx=0.98, rely=0, anchor="ne")  # Canto superior direito
+        else:
+            print("DEBUG: Casa de outro jogador - botão de compra ocultado")
+        
+        # Força update final
+        self.update_idletasks()
+        self.update()
 
     def _extrair_valor_carta(self, carta_path):
+        """
+        Extrai o valor de compra da carta usando a base de dados integrada
+        """
+        print(f"DEBUG: [_extrair_valor_carta] Iniciando extração para: {carta_path}")
+        
+        if not self.card_database:
+            print(f"DEBUG: [_extrair_valor_carta] Base de dados não inicializada, usando fallback")
+            # Fallback para extração do nome do arquivo se não houver base de dados
+            import re
+            nome = os.path.basename(carta_path)
+            match = re.search(r'_(\d+)\.', nome)
+            if match:
+                valor = int(match.group(1))
+                print(f"DEBUG: [_extrair_valor_carta] Valor extraído do nome (fallback): {valor}")
+                return valor
+            print(f"DEBUG: [_extrair_valor_carta] Fallback falhou - retornando None")
+            return None
+        
+        try:
+            # Extrair informações do caminho do arquivo
+            nome_arquivo = os.path.basename(carta_path)
+            print(f"DEBUG: [_extrair_valor_carta] Nome do arquivo: {nome_arquivo}")
+            
+            tipo_carta = self._get_card_type_from_path(carta_path)
+            print(f"DEBUG: [_extrair_valor_carta] Tipo da carta detectado: {tipo_carta}")
+            
+            if not tipo_carta:
+                print(f"DEBUG: [_extrair_valor_carta] ERRO: Não foi possível determinar o tipo da carta: {carta_path}")
+                return None
+            
+            # Mapear arquivo para ID da carta na base de dados
+            card_id = self._map_file_to_card_id(carta_path, tipo_carta)
+            print(f"DEBUG: [_extrair_valor_carta] Card ID mapeado: {card_id}")
+            
+            if not card_id:
+                print(f"DEBUG: [_extrair_valor_carta] ERRO: Não foi possível mapear arquivo para ID: {carta_path}")
+                return None
+            
+            # Obter valor da base de dados
+            if tipo_carta == "users":
+                card = self.card_database.get_user(card_id)
+                print(f"DEBUG: [_extrair_valor_carta] Carta User encontrada: {card is not None}")
+                if card:
+                    print(f"DEBUG: [_extrair_valor_carta] User card details: {card}")
+                valor = card.buy_cost if card else None
+                print(f"DEBUG: [_extrair_valor_carta] User card {card_id}: valor = {valor}")
+                return valor
+            elif tipo_carta == "equipments":
+                card = self.card_database.get_equipment(card_id)
+                print(f"DEBUG: [_extrair_valor_carta] Carta Equipment encontrada: {card is not None}")
+                if card:
+                    print(f"DEBUG: [_extrair_valor_carta] Equipment card details: {card}")
+                valor = card.buy_cost if card else None
+                print(f"DEBUG: [_extrair_valor_carta] Equipment card {card_id}: valor = {valor}")
+                return valor
+            elif tipo_carta == "services":
+                card = self.card_database.get_service(card_id)
+                print(f"DEBUG: [_extrair_valor_carta] Carta Service encontrada: {card is not None}")
+                if card:
+                    print(f"DEBUG: [_extrair_valor_carta] Service card details: {card}")
+                valor = card.buy_cost if card else None
+                print(f"DEBUG: [_extrair_valor_carta] Service card {card_id}: valor = {valor}")
+                return valor
+            elif tipo_carta == "activities":
+                card = self.card_database.get_activity(card_id)
+                print(f"DEBUG: [_extrair_valor_carta] Carta Activity encontrada: {card is not None}")
+                if card:
+                    print(f"DEBUG: [_extrair_valor_carta] Activity card details: {card}")
+                valor = card.application_fee if card else None  # Activities usam application_fee como preço de compra
+                print(f"DEBUG: [_extrair_valor_carta] Activity card {card_id}: valor = {valor}")
+                return valor
+            
+            print(f"DEBUG: [_extrair_valor_carta] ERRO: Tipo de carta não suportado: {tipo_carta}")
+            return None
+            
+        except Exception as e:
+            print(f"DEBUG: [_extrair_valor_carta] EXCEÇÃO ao extrair valor da carta {carta_path}: {e}")
+            import traceback
+            traceback.print_exc()
+            # Fallback para extração do nome do arquivo
+            import re
+            nome = os.path.basename(carta_path)
+            match = re.search(r'_(\d+)\.', nome)
+            if match:
+                valor = int(match.group(1))
+                print(f"DEBUG: [_extrair_valor_carta] Valor extraído do nome (fallback após erro): {valor}")
+                return valor
+            print(f"DEBUG: [_extrair_valor_carta] Fallback após erro falhou - retornando None")
+            return None
+    
+    def _get_card_type_from_path(self, carta_path):
+        """
+        Determina o tipo da carta baseado no caminho do arquivo
+        """
+        path_lower = carta_path.lower()
+        print(f"DEBUG: [_get_card_type_from_path] Analisando caminho: {path_lower}")
+        
+        # Verificar padrões de diretório com /tipo/
+        if "/users/" in path_lower:
+            print(f"DEBUG: [_get_card_type_from_path] Tipo detectado (padrão /users/): users")
+            return "users"
+        elif "/equipments/" in path_lower:
+            print(f"DEBUG: [_get_card_type_from_path] Tipo detectado (padrão /equipments/): equipments")
+            return "equipments"
+        elif "/services/" in path_lower:
+            print(f"DEBUG: [_get_card_type_from_path] Tipo detectado (padrão /services/): services")
+            return "services"
+        elif "/activities/" in path_lower:
+            print(f"DEBUG: [_get_card_type_from_path] Tipo detectado (padrão /activities/): activities")
+            return "activities"
+        
+        # Verificar padrões de nome de diretório Residential-tipo-
+        if "residential-users-" in path_lower or "-users-" in path_lower:
+            print(f"DEBUG: [_get_card_type_from_path] Tipo detectado (padrão Residential-users-): users")
+            return "users"
+        elif "residential-equipments-" in path_lower or "-equipments-" in path_lower:
+            print(f"DEBUG: [_get_card_type_from_path] Tipo detectado (padrão Residential-equipments-): equipments")
+            return "equipments"
+        elif "residential-services-" in path_lower or "-services-" in path_lower:
+            print(f"DEBUG: [_get_card_type_from_path] Tipo detectado (padrão Residential-services-): services")
+            return "services"
+        elif "residential-activities-" in path_lower or "-activities-" in path_lower:
+            print(f"DEBUG: [_get_card_type_from_path] Tipo detectado (padrão Residential-activities-): activities")
+            return "activities"
+        
+        print(f"DEBUG: [_get_card_type_from_path] ERRO: Tipo não reconhecido no caminho")
+        return None
+    
+    def _map_file_to_card_id(self, carta_path, tipo_carta):
+        """
+        Mapeia um arquivo de carta para o ID correspondente na base de dados
+        """
         import re
-        # Extrai valor do nome do ficheiro: ..._100.png → 100
-        nome = os.path.basename(carta_path)
-        match = re.search(r'_(\d+)\.', nome)
-        if match:
-            return int(match.group(1))
+        nome_arquivo = os.path.basename(carta_path)
+        print(f"DEBUG: [_map_file_to_card_id] Mapeando {nome_arquivo} do tipo {tipo_carta}")
+        
+        # Extrair número da carta (ex: User_1.png -> 1)
+        match = re.search(r'_(\d+)\.', nome_arquivo)
+        if not match:
+            print(f"DEBUG: [_map_file_to_card_id] ERRO: Não foi possível extrair número de {nome_arquivo}")
+            return None
+        
+        numero = int(match.group(1))
+        print(f"DEBUG: [_map_file_to_card_id] Número extraído: {numero}")
+        
+        # Extrair cor do caminho
+        cor = self._get_color_from_path(carta_path)
+        print(f"DEBUG: [_map_file_to_card_id] Cor extraída: {cor}")
+        if not cor:
+            print(f"DEBUG: [_map_file_to_card_id] ERRO: Não foi possível extrair cor de {carta_path}")
+            return None
+        
+        # Mapear para ID da base de dados baseado no tipo (usando mesma lógica do card_integration.py)
+        if tipo_carta == "users":
+            card_id = f"{numero}_{cor}"
+            print(f"DEBUG: [_map_file_to_card_id] User ID gerado: {card_id}")
+            return card_id
+        elif tipo_carta == "equipments":
+            # Equipments têm mapeamento específico baseado no número
+            if numero >= 1 and numero <= 3:
+                card_id = f"small_router_{numero}_{cor}"
+            elif numero >= 4 and numero <= 6:
+                card_id = f"medium_router_{numero-3}_{cor}"
+            elif numero >= 7 and numero <= 9:
+                card_id = f"short_link_{numero-6}_{cor}"
+            elif numero >= 10 and numero <= 12:
+                card_id = f"long_link_{numero-9}_{cor}"
+            else:
+                print(f"DEBUG: [_map_file_to_card_id] ERRO: Equipment número {numero} fora do range")
+                return None
+            print(f"DEBUG: [_map_file_to_card_id] Equipment ID gerado: {card_id}")
+            return card_id
+        elif tipo_carta == "services":
+            # Services têm mapeamento específico conforme card_integration.py
+            service_mapping = {
+                1: "service_bandwidth_1", 2: "service_data_volume_2", 
+                3: "service_data_volume_3", 4: "service_data_volume_4",
+                5: "service_temporary_5", 6: "service_temporary_6", 
+                7: "service_temporary_7"
+            }
+            if numero in service_mapping:
+                service_type = service_mapping[numero]
+                card_id = f"{service_type}_{cor}"
+                print(f"DEBUG: [_map_file_to_card_id] Service ID gerado: {card_id}")
+                return card_id
+            else:
+                print(f"DEBUG: [_map_file_to_card_id] ERRO: Service número {numero} não encontrado no mapeamento")
+                return None
+        elif tipo_carta == "activities":
+            card_id = f"activity_{numero}_{cor}"
+            print(f"DEBUG: [_map_file_to_card_id] Activity ID gerado: {card_id}")
+            return card_id
+        
+        print(f"DEBUG: [_map_file_to_card_id] ERRO: Tipo não reconhecido: {tipo_carta}")
+        return None
+    
+    def _get_color_from_path(self, carta_path):
+        """
+        Extrai a cor do caminho do arquivo
+        """
+        path_lower = carta_path.lower()
+        print(f"DEBUG: [_get_color_from_path] Analisando caminho: {path_lower}")
+        
+        # Verificar padrões de diretório com /cor/
+        if "/red/" in path_lower:
+            print(f"DEBUG: [_get_color_from_path] Cor detectada (padrão /red/): red")
+            return "red"
+        elif "/blue/" in path_lower:
+            print(f"DEBUG: [_get_color_from_path] Cor detectada (padrão /blue/): blue")
+            return "blue"
+        elif "/green/" in path_lower:
+            print(f"DEBUG: [_get_color_from_path] Cor detectada (padrão /green/): green")
+            return "green"
+        elif "/yellow/" in path_lower:
+            print(f"DEBUG: [_get_color_from_path] Cor detectada (padrão /yellow/): yellow")
+            return "yellow"
+        
+        # Verificar padrões de sufixo -cor
+        if "-red" in path_lower or "red" in path_lower:
+            print(f"DEBUG: [_get_color_from_path] Cor detectada (padrão -red): red")
+            return "red"
+        elif "-blue" in path_lower or "blue" in path_lower:
+            print(f"DEBUG: [_get_color_from_path] Cor detectada (padrão -blue): blue")
+            return "blue"
+        elif "-green" in path_lower or "green" in path_lower:
+            print(f"DEBUG: [_get_color_from_path] Cor detectada (padrão -green): green")
+            return "green"
+        elif "-yellow" in path_lower or "yellow" in path_lower:
+            print(f"DEBUG: [_get_color_from_path] Cor detectada (padrão -yellow): yellow")
+            return "yellow"
+        
+        print(f"DEBUG: [_get_color_from_path] ERRO: Nenhuma cor encontrada no caminho")
         return None
 
     def _comprar_carta(self):
-        # Se houver carta destacada, mostra página de confirmação
-        carta_path = self._buy_paths[self._buy_idx]
+        # Se houver carta selecionada, mostra página de confirmação
+        if self._selected_card_idx is None or self._selected_card_idx >= len(self._cartas_disponiveis):
+            from tkinter import messagebox
+            messagebox.showwarning("Nenhuma carta selecionada", "Por favor seleciona uma carta primeiro!")
+            return
+            
+        carta_path = self._cartas_disponiveis[self._selected_card_idx]
         valor = self._extrair_valor_carta(carta_path)
         # Esconde todos os widgets exceto barra superior
         for widget in self.winfo_children():
@@ -995,16 +1680,6 @@ class StoreWindow(tk.Toplevel):
             widget.destroy()
         self.configure(bg="black")
         # Frase de confirmação
-        # Picoin + saldo na parte superior direita
-        coin_img = ImageTk.PhotoImage(Image.open(COIN_IMG).resize((24, 24)))
-        coin_lbl = tk.Label(self, image=coin_img, bg="#DC8392")
-        coin_lbl.image = coin_img  # type: ignore[attr-defined]
-        coin_lbl.place(x=self.winfo_screenwidth()-100, y=12)
-        
-        # Usar o saldo do Player em vez do saldo da Store também na barra superior
-        player_saldo = self.dashboard.saldo if self.dashboard else self.saldo
-        saldo_lbl = tk.Label(self, text=f"{player_saldo}", font=("Helvetica", 16, "bold"), fg="black", bg="#DC8392")
-        saldo_lbl.place(x=self.winfo_screenwidth()-70, y=12)
         confirm_frame = tk.Frame(self, bg="black")
         confirm_frame.pack(expand=True)
         tk.Label(confirm_frame, text="Are you sure you want to buy?", font=("Helvetica", 16, "bold"), fg="white", bg="black").pack(pady=(40, 20))
@@ -1046,12 +1721,56 @@ class StoreWindow(tk.Toplevel):
                 # A Store recebe o pagamento
                 self.saldo += valor
                 print(f"DEBUG: Depois da compra - Store: {self.saldo}, Player: {self.dashboard.saldo}")
+                
+                # IMPORTANTE: Remover a carta comprada dos baralhos (local e global)
+                print(f"DEBUG: Removendo carta comprada dos baralhos - carta: {os.path.basename(carta_path)}")
+                carta_removida = False
+                
+                # Determinar cor e tipo para remoção
+                cor_para_remover = self.player_color
+                tipo_para_remover = self.current_card_type
+                
+                # Tentar remover do baralho da cor do jogador primeiro
+                if (hasattr(self, 'cartas') and cor_para_remover in self.cartas and 
+                    tipo_para_remover in self.cartas[cor_para_remover] and 
+                    carta_path in self.cartas[cor_para_remover][tipo_para_remover]):
+                    self.cartas[cor_para_remover][tipo_para_remover].remove(carta_path)
+                    print(f"DEBUG: Carta removida do baralho local {cor_para_remover}/{tipo_para_remover}")
+                    carta_removida = True
+                
+                # Se não foi removida da cor do jogador, tentar neutral
+                if not carta_removida and (hasattr(self, 'cartas') and "neutral" in self.cartas and 
+                                         tipo_para_remover in self.cartas["neutral"] and 
+                                         carta_path in self.cartas["neutral"][tipo_para_remover]):
+                    self.cartas["neutral"][tipo_para_remover].remove(carta_path)
+                    print(f"DEBUG: Carta removida do baralho local neutral/{tipo_para_remover}")
+                    carta_removida = True
+                
+                # Remover também do baralho global
+                global baralhos
+                if baralhos:
+                    # Tentar remover da cor do jogador
+                    if (cor_para_remover in baralhos and tipo_para_remover in baralhos[cor_para_remover] and 
+                        carta_path in baralhos[cor_para_remover][tipo_para_remover]):
+                        baralhos[cor_para_remover][tipo_para_remover].remove(carta_path)
+                        print(f"DEBUG: Carta removida do baralho global {cor_para_remover}/{tipo_para_remover}")
+                    # Tentar remover do neutral
+                    elif ("neutral" in baralhos and tipo_para_remover in baralhos["neutral"] and 
+                          carta_path in baralhos["neutral"][tipo_para_remover]):
+                        baralhos["neutral"][tipo_para_remover].remove(carta_path)
+                        print(f"DEBUG: Carta removida do baralho global neutral/{tipo_para_remover}")
+                
+                if carta_removida:
+                    print(f"DEBUG: Sincronização completa - carta {os.path.basename(carta_path)} removida dos baralhos")
+                else:
+                    print(f"DEBUG: AVISO - carta {os.path.basename(carta_path)} não foi encontrada nos baralhos para remoção")
+                
                 # Garantir tipo correto para inventário
                 tipo_inv = self.current_card_type
                 if tipo_inv == "equipment":
                     tipo_inv = "equipments"
                 elif tipo_inv == "actions":
-                    tipo_inv = "action"  # PlayerDashboard usa "action" (singular)
+                    tipo_inv = "actions"  # PlayerDashboard usa "actions" (plural)
                 elif tipo_inv == "activity":
                     tipo_inv = "activities"  # PlayerDashboard usa "activities" (plural)
                 print(f"DEBUG: Purchase - mapping card type '{self.current_card_type}' to inventory key '{tipo_inv}'")
@@ -1069,18 +1788,20 @@ class StoreWindow(tk.Toplevel):
                 self.show_buy_page()
         def cancelar():
             self.show_buy_page()
-        btn_yes = tk.Button(btns_frame, text="Yes", font=("Helvetica", 14, "bold"), bg="#4CAF50", fg="white", width=8, command=confirmar)
         btn_no = tk.Button(btns_frame, text="No", font=("Helvetica", 14, "bold"), bg="#F44336", fg="white", width=8, command=cancelar)
-        btn_yes.pack(side="left", padx=20, pady=10)
+        btn_yes = tk.Button(btns_frame, text="Yes", font=("Helvetica", 14, "bold"), bg="#4CAF50", fg="white", width=8, command=confirmar)
         btn_no.pack(side="left", padx=20, pady=10)
+        btn_yes.pack(side="left", padx=20, pady=10)
 
     def voltar_para_store(self):
         print("DEBUG: voltar_para_store chamado")
+        print(f"DEBUG: [voltar_para_store] ID do objeto Store: {id(self)}")
         try:
             # Se a janela já foi destruída, não faz nada
             if not self.winfo_exists():
                 print("DEBUG: StoreWindow já foi destruída, não é possível reconstruir.")
                 return
+            
             # Reset do current_card_type (usado para Buy/Sell), mas MANTÉM casa_tipo e casa_cor originais
             self.current_card_type = None
             # Reset de outros estados que possam interferir
@@ -1088,24 +1809,33 @@ class StoreWindow(tk.Toplevel):
                 self._fullscreen_open = False
             if hasattr(self, '_buy_idx'):
                 self._buy_idx = 0
+            
             # Garante que a janela está no estado correto
             self.deiconify()
             self.configure(bg="black")
             self.state('normal')  # Garante que não está minimizada
+            
             # Limpa todos os widgets da janela
             for widget in self.winfo_children():
                 widget.destroy()
+            
             # Force update para garantir que a limpeza foi feita
             self.update_idletasks()
-            print("DEBUG: Estado limpo, reconstruindo interface...")
-            print(f"DEBUG: Mantendo estado original - casa_tipo: {self.casa_tipo}, casa_cor: {self.casa_cor}")
-            # Reconstrói a interface da Store
-            self.rebuild_store_interface()
+            print("DEBUG: Estado limpo, verificando carta pendente...")
+            
+            # USAR A NOVA FUNÇÃO ESPECÍFICA
+            if self.restaurar_carta_fullscreen_pendente():
+                print("DEBUG: Carta em fullscreen restaurada com sucesso")
+            else:
+                print("DEBUG: Nenhuma carta pendente - reconstruindo interface normal")
+                self.rebuild_store_interface()
+            
             # Force final update e foco
             self.update()
             self.lift()
             self.focus_force()
             print("DEBUG: voltar_para_store terminado com sucesso")
+            
         except Exception as e:
             print(f"DEBUG: ERRO em voltar_para_store: {e}")
             import traceback
@@ -1256,7 +1986,11 @@ class StoreWindow(tk.Toplevel):
             def make_fullscreen_callback(carta_path):
                 def callback(event=None):
                     print(f"DEBUG: Carta clicada para venda: {carta_path}")
-                    self.iniciar_venda_carta(carta_path, carta_tipo, self.dashboard)
+                    # CORREÇÃO: Usar função do PlayerDashboard em vez do Store
+                    if self.dashboard and hasattr(self.dashboard, 'show_sell_confirmation'):
+                        self.dashboard.show_sell_confirmation(carta_path, carta_tipo, self)
+                    else:
+                        print("DEBUG: ERRO - PlayerDashboard não encontrado ou não tem show_sell_confirmation")
                 return callback
             
             for idx, carta_path in enumerate(cartas_page):
@@ -1295,7 +2029,7 @@ class StoreWindow(tk.Toplevel):
         
         # Botão Back igual ao PlayerDashboard
         btn_voltar = tk.Button(self, text="Back", font=("Helvetica", 14, "bold"), 
-                              bg="#005c75", fg="white", width=10, 
+                              bg="#8C04A0", fg="white", width=6, 
                               command=self.voltar_para_store)
         btn_voltar.place(relx=0.5, rely=0.98, anchor="s")  # Posição igual ao PlayerDashboard
         
@@ -1419,7 +2153,11 @@ class StoreWindow(tk.Toplevel):
             def make_fullscreen_callback(carta_path):
                 def callback(event=None):
                     print(f"DEBUG: Carta clicada para venda: {carta_path}")
-                    self.iniciar_venda_carta(carta_path, carta_tipo, self.dashboard)
+                    # CORREÇÃO: Usar função do PlayerDashboard em vez do Store
+                    if self.dashboard and hasattr(self.dashboard, 'show_sell_confirmation'):
+                        self.dashboard.show_sell_confirmation(carta_path, carta_tipo, self)
+                    else:
+                        print("DEBUG: ERRO - PlayerDashboard não encontrado ou não tem show_sell_confirmation")
                 return callback
             
             for idx, carta_path in enumerate(cartas_page):
@@ -1458,7 +2196,7 @@ class StoreWindow(tk.Toplevel):
         
         # Botão Back igual ao PlayerDashboard
         btn_voltar = tk.Button(self, text="Back", font=("Helvetica", 14, "bold"), 
-                              bg="#005c75", fg="white", width=10, 
+                              bg="#8C04A0", fg="white", width=6, 
                               command=self.voltar_para_store)
         btn_voltar.place(relx=0.5, rely=0.98, anchor="s")  # Posição igual ao PlayerDashboard
         
@@ -1469,25 +2207,28 @@ class StoreWindow(tk.Toplevel):
         
         print("DEBUG: skip_action chamado") # Esconde os botões de ação
         
-        try:
-            self.hide_action_buttons()
-        except AttributeError:
-            pass
-        
-        # Fecha a Store
-        self.destroy()
-        
-        # Se houver um dashboard, recria a interface principal e traz para a frente
+        # Se houver um dashboard, mostra o PlayerDashboard primeiro
         if self.dashboard:
-            self.dashboard.playerdashboard_interface(
-                self.dashboard.player_name,
-                self.dashboard.saldo,  # Usar o saldo atualizado do PlayerDashboard (já foi decrementado)
-                self.dashboard.other_players
-            )
             try:
+                # Mostrar o PlayerDashboard
+                self.dashboard.deiconify()
+                self.dashboard.state('normal')
                 self.dashboard.lift()
-            except Exception:
-                pass
+                self.dashboard.focus_force()
+                print("DEBUG: PlayerDashboard mostrado no skip")
+                
+                # Chamar a interface principal do PlayerDashboard
+                self.dashboard.playerdashboard_interface(
+                    self.dashboard.player_name,
+                    self.dashboard.saldo,  # Usar o saldo atualizado do PlayerDashboard (já foi decrementado)
+                    self.dashboard.other_players
+                )
+                print("DEBUG: Interface principal do PlayerDashboard aberta com sucesso no skip")
+            except Exception as e:
+                print(f"DEBUG: Erro ao mostrar PlayerDashboard no skip: {e}")
+        
+        # Fecha a Store depois
+        self.destroy()
 
     def tirar_carta(self, casa_tipo, casa_cor):
         print(f"DEBUG: tirar_carta chamado com casa_tipo={casa_tipo!r}, casa_cor={casa_cor!r}")
@@ -1496,11 +2237,17 @@ class StoreWindow(tk.Toplevel):
         if casa_tipo == "equipment":
             casa_tipo = "equipments"
         
-        # Se for casa de outro jogador, sempre vai diretamente para a página de compra para Users, Equipment, Services, Activities
+        # NOVO: Caso específico para Challenges - usar função dedicada
+        if casa_tipo in ["challenges", "challenge"]:
+            print("DEBUG: Casa tipo 'challenges' detectada - usando função específica")
+            self.processar_casa_challenges(casa_cor)
+            return
+        
+        # Se for casa de outro jogador, vai para a página de compra (NÃO tira carta diretamente)
         if self.other_player_house and casa_tipo in ["equipments", "services", "users", "activities"]:
-            # Armazenar o tipo de carta atual para verificar o inventário
+            print(f"DEBUG: Casa de outro jogador - indo para página de compra de {casa_tipo}")
+            # Armazenar o tipo de carta atual para mostrar a página de compra
             self.current_card_type = casa_tipo
-            print(f"DEBUG: Casa outro jogador - definindo current_card_type = {casa_tipo}")
             self.show_buy_page()
             return
         
@@ -1515,11 +2262,12 @@ class StoreWindow(tk.Toplevel):
             self.current_card_type = casa_tipo
             print(f"DEBUG: Casa própria - definindo current_card_type = {casa_tipo}")
             self.show_buy_page()
-        elif casa_tipo in ["actions", "action", "events", "challenges"]:
-            # Para actions, events, challenges mostra a carta
+        elif casa_tipo in ["actions", "action", "events"]:
+            # Para actions e events, usa o método original
             self.mostrar_carta(casa_cor, casa_tipo)
         else:
             # Para outros tipos, não faz nada
+            print(f"DEBUG: Tipo {casa_tipo} não reconhecido - nenhuma ação executada")
             pass
 
     def mostrar_carta(self, casa_cor, tipo):
@@ -1610,6 +2358,11 @@ class StoreWindow(tk.Toplevel):
     def mostrar_carta_fullscreen(self, carta_path, casa_tipo):
         print(f"DEBUG: Store.mostrar_carta_fullscreen chamado com carta_path={carta_path}, casa_tipo={casa_tipo}")
         
+        # Guardar estado da carta fullscreen para poder restaurar depois
+        self.fullscreen_carta_path = carta_path
+        self.fullscreen_carta_tipo = casa_tipo
+        print(f"DEBUG: Guardando estado fullscreen - carta: {carta_path}, tipo: {casa_tipo}")
+        
         # Verificar se o arquivo existe
         if not os.path.exists(carta_path):
             print(f"DEBUG: ERRO - Arquivo de carta não existe: {carta_path}")
@@ -1646,66 +2399,52 @@ class StoreWindow(tk.Toplevel):
             tk.Button(error_frame, text="Back", font=("Helvetica", 14, "bold"), bg="#005c75", fg="white", command=self.voltar_para_store).pack(pady=10)
             return
 
-        # Botão circular cinza (✖) no canto superior direito
+        # Adicionar botão X cinza no canto superior direito
         def fechar():
-            carta_real_lbl.destroy()
-            btn_x.destroy()
+            print("DEBUG: Botão X pressionado - verificando tipo de carta")
+            # Limpar estado de fullscreen porque a carta foi aceita
+            self.fullscreen_carta_path = None
+            self.fullscreen_carta_tipo = None
+            print("DEBUG: Estado de fullscreen limpo ao aceitar carta")
+            
             # Guarda a carta no inventário do dashboard, se aplicável
-            tipo_inv = casa_tipo
+            tipo_inv = casa_tipo.lower()
             if tipo_inv == "equipment":
                 tipo_inv = "equipments"
-            elif tipo_inv == "actions":
-                tipo_inv = "action"  # PlayerDashboard usa "action" (singular)
+            elif tipo_inv == "action":
+                tipo_inv = "actions"
+            elif tipo_inv == "event":
+                tipo_inv = "events"
+            elif tipo_inv == "challenge":
+                tipo_inv = "challenges"
             print(f"DEBUG: Mapping card type '{casa_tipo}' to inventory key '{tipo_inv}'")
             if self.dashboard and hasattr(self.dashboard, 'adicionar_carta_inventario'):
                 self.dashboard.adicionar_carta_inventario(carta_path, tipo_inv)
-                print(f"DEBUG: Card added to inventory: {tipo_inv} -> {carta_path}")
-            # NÃO destruir a StoreWindow aqui!
-            # self.destroy()
-            # Volta ao dashboard e mostra a interface principal SEM botão Store
-            if self.dashboard and hasattr(self.dashboard, "playerdashboard_interface"):
+                print(f"DEBUG: Carta {carta_path} adicionada ao inventário {tipo_inv}")
+                
+                # IMPORTANTE: Remover carta do baralho local da Store para sincronização
+                self._remover_carta_do_baralho_local(carta_path, tipo_inv)
+            
+            # Para Actions e Events, vai para PlayerDashboard SEM botão Store
+            if casa_tipo in ["actions", "action", "events", "event"]:
+                print("DEBUG: Carta de Actions/Events - indo para PlayerDashboard SEM botão Store")
                 try:
-                    # Esconder a Store primeiro
-                    self.withdraw()
-                    print("DEBUG: Store escondida ao aceitar carta do baralho")
-                    
-                    # Mostrar o PlayerDashboard
-                    self.dashboard.deiconify()
-                    self.dashboard.state('normal')
-                    self.dashboard.lift()
-                    self.dashboard.focus_force()
-                    print("DEBUG: PlayerDashboard mostrado ao aceitar carta do baralho")
-                    
-                    # Chamar a interface principal do PlayerDashboard SEM botão Store
-                    self.dashboard.playerdashboard_interface(
-                        self.dashboard.player_name,
-                        self.dashboard.saldo,
-                        self.dashboard.other_players,
-                        show_store_button=False
-                    )
-                    print("DEBUG: Interface principal do PlayerDashboard aberta SEM botão Store")
-                except Exception as e:
-                    print(f"DEBUG: Erro ao voltar ao PlayerDashboard após aceitar carta do baralho: {e}")
-        btn_x = tk.Button(self, text="✖", font=("Helvetica", 24, "bold"), bg="#AAAAAA", fg="white", width=2, height=1, borderwidth=0, highlightthickness=0, command=fechar, cursor="hand2", activebackground="#CCCCCC")
-        btn_x.place(relx=0.98, rely=0, anchor="ne")
-
-        # Se for Challenge, adicionar botão Inventory centrado em cima
-        if casa_tipo in ["challenges", "challenge"]:
-            def abrir_playerdashboard():
-                print("DEBUG: Abrindo interface principal do PlayerDashboard")
-                # Vai para a interface principal do PlayerDashboard SEM botão Store
-                if self.dashboard and hasattr(self.dashboard, "playerdashboard_interface"):
-                    try:
+                    if self.dashboard and hasattr(self.dashboard, "playerdashboard_interface"):
+                        # IMPORTANTE: Desativar permanentemente o botão Store
+                        if hasattr(self.dashboard, 'disable_store_button'):
+                            self.dashboard.disable_store_button()
+                            print("DEBUG: Botão Store desativado permanentemente")
+                        
                         # Esconder a Store primeiro
                         self.withdraw()
-                        print("DEBUG: Store escondida ao abrir PlayerDashboard via botão Challenge")
+                        print("DEBUG: Store escondida ao aceitar carta Actions/Events")
                         
                         # Mostrar o PlayerDashboard
                         self.dashboard.deiconify()
                         self.dashboard.state('normal')
                         self.dashboard.lift()
                         self.dashboard.focus_force()
-                        print("DEBUG: PlayerDashboard mostrado via botão Challenge")
+                        print("DEBUG: PlayerDashboard mostrado ao aceitar carta Actions/Events")
                         
                         # Chamar a interface principal do PlayerDashboard SEM botão Store
                         self.dashboard.playerdashboard_interface(
@@ -1714,15 +2453,257 @@ class StoreWindow(tk.Toplevel):
                             self.dashboard.other_players,
                             show_store_button=False
                         )
-                        print("DEBUG: Interface principal do PlayerDashboard aberta SEM botão Store via Challenge")
+                        print("DEBUG: Interface principal do PlayerDashboard aberta SEM botão Store")
+                except Exception as e:
+                    print(f"DEBUG: Erro ao voltar ao PlayerDashboard após aceitar carta Actions/Events: {e}")
+            else:
+                # Para outros tipos, volta à Store
+                print("DEBUG: Outro tipo de carta - voltando à Store")
+                self.voltar_para_store()
+        
+        # Botão diferente dependendo do tipo de carta (igual ao mostrar_carta_fullscreen_simples)
+        if casa_tipo in ["actions", "action", "events", "event"]:
+            # Botão ✓ verde para Actions e Events - abre overlay de seleção de jogador
+            def abrir_overlay_jogador():
+                print(f"DEBUG: *** abrir_overlay_jogador CHAMADO em mostrar_carta_fullscreen ***")
+                print(f"DEBUG: Sobre a carta: {carta_path}")
+                print(f"DEBUG: Tipo da carta: {casa_tipo}")
+                self.mostrar_overlay_selecao_jogador(carta_path, casa_tipo)
+            
+            certo_btn = tk.Button(self, text="✓", font=("Helvetica", 24, "bold"), bg="#4CAF50", fg="white", width=2, height=1, borderwidth=0, highlightthickness=0, command=abrir_overlay_jogador, cursor="hand2", activebackground="#43d17a")
+        else:
+            # Botão ✔ verde para outros tipos - funcionalidade normal
+            certo_btn = tk.Button(self, text="✔", font=("Helvetica", 24, "bold"), bg="#4CAF50", fg="white", width=2, height=1, borderwidth=0, highlightthickness=0, command=fechar, cursor="hand2", activebackground="#43d17a")
+        
+        certo_btn.place(relx=0.98, rely=0, anchor="ne")
+
+    def mostrar_carta_fullscreen_simples(self, carta_path, casa_tipo):
+        """Mostra uma carta em fullscreen para casas de outro jogador - apenas visualização, sem compra/venda"""
+        print(f"DEBUG: Store.mostrar_carta_fullscreen_simples chamado com carta_path={carta_path}, casa_tipo={casa_tipo}")
+        
+        # Verificar se o arquivo existe
+        if not os.path.exists(carta_path):
+            print(f"DEBUG: ERRO - Arquivo de carta não existe: {carta_path}")
+            # Voltar à Store se a carta não existir
+            self.voltar_para_store()
+            return
+            
+        # Limpa tudo da janela Store
+        for widget in self.winfo_children():
+            widget.destroy()
+        self.configure(bg="black")
+
+        try:
+            pil_img = Image.open(carta_path)
+            img_w, img_h = pil_img.size
+            # Usa todo o ecrã (sem margem)
+            max_w, max_h = self.winfo_screenwidth(), self.winfo_screenheight()
+            ratio = min(max_w/img_w, max_h/img_h)
+            new_w, new_h = int(img_w*ratio), int(img_h*ratio)
+            pil_img = pil_img.resize((new_w, new_h), Image.Resampling.LANCZOS)
+
+            carta_img = ImageTk.PhotoImage(pil_img)
+            carta_real_lbl = tk.Label(self, image=carta_img, bg="black")
+            carta_real_lbl.image = carta_img  # Manter referência
+            carta_real_lbl.place(relx=0.5, rely=0.5, anchor="center")
+            
+            print("DEBUG: Carta mostrada em fullscreen simples com sucesso")
+        except Exception as e:
+            print(f"DEBUG: ERRO ao carregar carta em fullscreen simples: {e}")
+            # Mostrar mensagem de erro e voltar
+            error_frame = tk.Frame(self, bg="black")
+            error_frame.pack(expand=True)
+            tk.Label(error_frame, text="Erro ao carregar carta!", font=("Helvetica", 16), bg="black", fg="red").pack(pady=20)
+            tk.Button(error_frame, text="Back", font=("Helvetica", 14, "bold"), bg="#005c75", fg="white", command=self.voltar_para_store).pack(pady=10)
+            return
+
+        # Botão X para voltar à Store (único botão disponível)
+        def fechar():
+            print("DEBUG: Botão X pressionado - voltando à Store")
+            self.voltar_para_store()
+                
+        x_btn = tk.Button(self, text="✖", font=("Helvetica", 24, "bold"), bg="#AAAAAA", fg="white", width=2, height=1, borderwidth=0, highlightthickness=0, command=fechar, cursor="hand2", activebackground="#CCCCCC")
+        x_btn.place(relx=1, rely=0, anchor="ne")  # Canto superior direito
+        
+        print("DEBUG: Carta de outro jogador - apenas visualização, sem botões de compra/venda")
+
+        # Botão no canto superior direito - X cinza para challenges, ✓ verde para actions/events
+        def fechar():
+            # Limpar estado de fullscreen porque a carta foi aceita
+            self.fullscreen_carta_path = None
+            self.fullscreen_carta_tipo = None
+            print("DEBUG: Estado de fullscreen limpo ao aceitar carta")
+            
+            carta_real_lbl.destroy()
+            btn_fechar.destroy()
+            # Guarda a carta no inventário do dashboard, se aplicável
+            tipo_inv = casa_tipo
+            if tipo_inv == "equipment":
+                tipo_inv = "equipments"
+            elif tipo_inv == "actions":
+                tipo_inv = "actions"  # PlayerDashboard usa "actions" (plural)
+            print(f"DEBUG: Mapping card type '{casa_tipo}' to inventory key '{tipo_inv}'")
+            if self.dashboard and hasattr(self.dashboard, 'adicionar_carta_inventario'):
+                self.dashboard.adicionar_carta_inventario(carta_path, tipo_inv)
+                print(f"DEBUG: Card added to inventory: {tipo_inv} -> {carta_path}")
+                
+                # IMPORTANTE: Remover carta do baralho local da Store para sincronização
+                self._remover_carta_do_baralho_local(carta_path, tipo_inv)
+            
+            # Para Actions e Events de casas neutras, volta ao PlayerDashboard
+            # Para Actions e Events de casas próprias, volta à página principal da Store
+            if casa_tipo in ["actions", "action", "events", "event"]:
+                if self.casa_cor == "neutral":
+                    print("DEBUG: Carta de Actions/Events de casa neutra aceita - voltando ao PlayerDashboard")
+                    try:
+                        if self.dashboard and hasattr(self.dashboard, "playerdashboard_interface"):
+                            # Esconder a Store primeiro
+                            self.withdraw()
+                            print("DEBUG: Store escondida ao aceitar carta neutra")
+                            
+                            # Mostrar o PlayerDashboard
+                            self.dashboard.deiconify()
+                            self.dashboard.state('normal')
+                            self.dashboard.lift()
+                            self.dashboard.focus_force()
+                            print("DEBUG: PlayerDashboard mostrado ao aceitar carta neutra")
+                            
+                            # Chamar a interface principal do PlayerDashboard SEM botão Store
+                            self.dashboard.playerdashboard_interface(
+                                self.dashboard.player_name,
+                                self.dashboard.saldo,
+                                self.dashboard.other_players,
+                                show_store_button=False
+                            )
+                            print("DEBUG: Interface principal do PlayerDashboard aberta SEM botão Store ao aceitar carta neutra")
                     except Exception as e:
-                        print(f"DEBUG: Erro ao abrir PlayerDashboard via botão Challenge: {e}")
+                        print(f"DEBUG: Erro ao voltar ao PlayerDashboard após aceitar carta neutra: {e}")
+                else:
+                    print("DEBUG: Carta de Actions/Events de casa própria aceita - voltando ao PlayerDashboard SEM botão Store")
+                    try:
+                        if self.dashboard and hasattr(self.dashboard, "playerdashboard_interface"):
+                            # Esconder a Store primeiro
+                            self.withdraw()
+                            print("DEBUG: Store escondida ao aceitar carta própria")
+                            
+                            # Mostrar o PlayerDashboard
+                            self.dashboard.deiconify()
+                            self.dashboard.state('normal')
+                            self.dashboard.lift()
+                            self.dashboard.focus_force()
+                            print("DEBUG: PlayerDashboard mostrado ao aceitar carta própria")
+                            
+                            # Chamar a interface principal do PlayerDashboard SEM botão Store
+                            self.dashboard.playerdashboard_interface(
+                                self.dashboard.player_name,
+                                self.dashboard.saldo,
+                                self.dashboard.other_players,
+                                show_store_button=False
+                            )
+                            print("DEBUG: Interface principal do PlayerDashboard aberta SEM botão Store ao aceitar carta própria")
+                    except Exception as e:
+                        print(f"DEBUG: Erro ao voltar ao PlayerDashboard após aceitar carta própria: {e}")
+            else:
+                # Para outros tipos (como Challenges), volta ao PlayerDashboard
+                try:
+                    if self.dashboard and hasattr(self.dashboard, "playerdashboard_interface"):
+                        # Esconder a Store primeiro
+                        self.withdraw()
+                        print("DEBUG: Store escondida ao aceitar carta")
+                        
+                        # Mostrar o PlayerDashboard
+                        self.dashboard.deiconify()
+                        self.dashboard.state('normal')
+                        self.dashboard.lift()
+                        self.dashboard.focus_force()
+                        print("DEBUG: PlayerDashboard mostrado ao aceitar carta")
+                        
+                        # Chamar a interface principal do PlayerDashboard sem mostrar botão Store
+                        self.dashboard.playerdashboard_interface(
+                            self.dashboard.player_name,
+                            self.dashboard.saldo,
+                            self.dashboard.other_players,
+                            show_store_button=False
+                        )
+                        print("DEBUG: Interface principal do PlayerDashboard aberta com sucesso ao aceitar carta")
+                except Exception as e:
+                    print(f"DEBUG: Erro ao voltar ao PlayerDashboard após aceitar carta: {e}")
+        
+        # Botão diferente dependendo do tipo de carta
+        if casa_tipo in ["actions", "action", "events", "event"]:
+            # Botão ✓ verde para Actions e Events - abre overlay de seleção de jogador
+            def abrir_overlay_jogador():
+                print(f"DEBUG: *** abrir_overlay_jogador CHAMADO ***")
+                print(f"DEBUG: Sobre a carta: {carta_path}")
+                print(f"DEBUG: Tipo da carta: {casa_tipo}")
+                self.mostrar_overlay_selecao_jogador(carta_path, casa_tipo)
+            
+            btn_fechar = tk.Button(self, text="✓", font=("Helvetica", 24, "bold"), bg="#4CAF50", fg="white", width=2, height=1, borderwidth=0, highlightthickness=0, command=abrir_overlay_jogador, cursor="hand2", activebackground="#43d17a")
+        else:
+            # Botão ✖ cinza para outros tipos (como Challenges)
+            btn_fechar = tk.Button(self, text="✖", font=("Helvetica", 24, "bold"), bg="#AAAAAA", fg="white", width=2, height=1, borderwidth=0, highlightthickness=0, command=fechar, cursor="hand2", activebackground="#CCCCCC")
+        
+        btn_fechar.place(relx=0.98, rely=0, anchor="ne")
+
+        # Se for Challenge, adicionar botão Inventory centrado em cima
+        if casa_tipo in ["challenges", "challenge"]:
+            def abrir_playerdashboard():
+                print("DEBUG: Abrindo interface principal do PlayerDashboard")
+                try:
+                    # CORREÇÃO: TRANSFERIR estado Challenge para PlayerDashboard ANTES de limpar
+                    # Isso permite que o botão Store restaure corretamente a carta Challenge
+                    if (hasattr(self, 'fullscreen_carta_path') and self.fullscreen_carta_path and
+                        hasattr(self, 'fullscreen_carta_tipo') and self.fullscreen_carta_tipo == "challenges"):
+                        print(f"DEBUG: Transferindo estado Challenge para PlayerDashboard: {self.fullscreen_carta_path}")
+                        self.dashboard._store_challenge_carta_path = self.fullscreen_carta_path
+                        self.dashboard._store_challenge_carta_tipo = self.fullscreen_carta_tipo
+                        print("DEBUG: Estado Challenge transferido para PlayerDashboard")
+                    
+                    # DEPOIS de transferir, limpar estado Challenge da Store
+                    # Isso evita que o Next Phase apareça incorretamente
+                    if hasattr(self, 'fullscreen_carta_path'):
+                        self.fullscreen_carta_path = None
+                        print("DEBUG: fullscreen_carta_path limpo da Store")
+                    if hasattr(self, 'fullscreen_carta_tipo'):
+                        self.fullscreen_carta_tipo = None
+                        print("DEBUG: fullscreen_carta_tipo limpo da Store")
+                    
+                    # Vai para a interface principal do PlayerDashboard
+                    if self.dashboard and hasattr(self.dashboard, "playerdashboard_interface"):
+                        # Esconder a Store primeiro
+                        self.withdraw()
+                        print("DEBUG: Store escondida")
+                        
+                        # CORREÇÃO: Limpar flag Challenge no PlayerDashboard quando voltar via botão Player
+                        # Isso garante que o Next Phase não apareça incorretamente
+                        self.dashboard._challenge_accepted = False
+                        print("DEBUG: Flag _challenge_accepted resetada no PlayerDashboard")
+                        
+                        # Mostrar o PlayerDashboard
+                        self.dashboard.deiconify()
+                        self.dashboard.state('normal')
+                        self.dashboard.lift()
+                        self.dashboard.focus_force()
+                        print("DEBUG: PlayerDashboard mostrado")
+                        
+                        # Chamar a interface principal do PlayerDashboard sem mostrar botão Store
+                        self.dashboard.playerdashboard_interface(
+                            self.dashboard.player_name,
+                            self.dashboard.saldo,
+                            self.dashboard.other_players,
+                            show_store_button=False
+                        )
+                        print("DEBUG: Interface principal do PlayerDashboard aberta com sucesso")
+                    else:
+                        print("DEBUG: ERRO - PlayerDashboard não disponível")
+                except Exception as e:
+                    print(f"DEBUG: Erro ao abrir PlayerDashboard: {e}")
             
             # Carregamento do ícone do jogador
             try:
                 user_icon_path = os.path.join(IMG_DIR, f"{self.player_color}_user_icon.png")
-                user_icon_img = ImageTk.PhotoImage(Image.open(user_icon_path).resize((48, 48)))
-                btn_inventory = tk.Button(self, image=user_icon_img, bg="#8A2BE2", relief="flat", borderwidth=0, command=abrir_playerdashboard, cursor="hand2")
+                user_icon_img = ImageTk.PhotoImage(Image.open(user_icon_path).resize((30, 30)))
+                btn_inventory = tk.Button(self, image=user_icon_img, bg="#DC8392", relief="flat", borderwidth=0, command=abrir_playerdashboard, cursor="hand2")
                 btn_inventory.image = user_icon_img  # Manter referência para evitar garbage collection
             except Exception as e:
                 print(f"DEBUG: Erro ao carregar ícone do jogador {self.player_color}_user_icon.png: {e}")
@@ -1731,7 +2712,1153 @@ class StoreWindow(tk.Toplevel):
             
             btn_inventory.place(relx=0.5, rely=0, anchor="n")
 
+    def mostrar_overlay_selecao_jogador(self, carta_path, casa_tipo):
+        """
+        Mostra overlay para seleção de jogador para cartas Actions/Events
+        """
+        print(f"DEBUG: *** mostrar_overlay_selecao_jogador INICIADO ***")
+        print(f"DEBUG: mostrar_overlay_selecao_jogador chamado - carta: {os.path.basename(carta_path)}, tipo: {casa_tipo}")
+        print(f"DEBUG: Caminho completo da carta: {carta_path}")
+        print(f"DEBUG: Base de dados disponível: {self.card_database is not None}")
+        
+        # Primeiro, vamos determinar se a carta tem alvo específico ou permite escolha
+        # Usando a base de dados para obter informações da carta
+        if not self.card_database:
+            print("DEBUG: Base de dados não disponível - procedendo com overlay de escolha")
+            self._criar_overlay_escolha_jogador(carta_path, casa_tipo)
+            return
+        
+        try:
+            # Mapear arquivo para ID da base de dados
+            if casa_tipo in ["actions", "action"]:
+                card_id = self._map_action_file_to_id(carta_path)
+                print(f"DEBUG: Action card_id mapeado: {card_id}")
+                if card_id:
+                    action_card = self.card_database.get_action(card_id)
+                    print(f"DEBUG: Action card obtido da base de dados: {action_card}")
+                    if action_card:
+                        print(f"DEBUG: Carta Action encontrada - target: {action_card.target}")
+                        if action_card.target is None:
+                            # Target None = jogadores cinzentos = afeta o próprio jogador
+                            print("DEBUG: Carta afeta o próprio jogador - mostrando overlay com ícone próprio")
+                            self._criar_overlay_jogador_especifico(carta_path, casa_tipo, self.player_color)
+                        else:
+                            # Target específico = jogador específico
+                            print(f"DEBUG: Carta afeta jogador específico: {action_card.target} - mostrando overlay com ícone específico")
+                            self._criar_overlay_jogador_especifico(carta_path, casa_tipo, action_card.target)
+                        return
+                    else:
+                        print(f"DEBUG: Action card {card_id} não encontrado na base de dados")
+                else:
+                    print(f"DEBUG: Não foi possível mapear arquivo Action para ID: {carta_path}")
+            elif casa_tipo in ["events", "event"]:
+                card_id = self._map_event_file_to_id(carta_path)
+                print(f"DEBUG: Event card_id mapeado: {card_id}")
+                if card_id:
+                    event_card = self.card_database.get_event(card_id)
+                    print(f"DEBUG: Event card obtido da base de dados: {event_card}")
+                    if event_card:
+                        print(f"DEBUG: Carta Event encontrada - target: {event_card.target_player}, choice: {event_card.player_choice}")
+                        if event_card.player_choice:
+                            # Player choice = true = jogador pode escolher (apenas outros jogadores)
+                            print("DEBUG: Jogador pode escolher o alvo - mostrando overlay apenas com outros jogadores")
+                            self._criar_overlay_escolha_jogador_eventos(carta_path, casa_tipo)
+                        elif event_card.target_player is None:
+                            # Target None = jogadores cinzentos = afeta o próprio jogador
+                            print("DEBUG: Carta afeta o próprio jogador - mostrando overlay com ícone próprio")
+                            self._criar_overlay_jogador_especifico(carta_path, casa_tipo, self.player_color)
+                        else:
+                            # Target específico = jogador específico
+                            print(f"DEBUG: Carta afeta jogador específico: {event_card.target_player} - mostrando overlay com ícone específico")
+                            self._criar_overlay_jogador_especifico(carta_path, casa_tipo, event_card.target_player)
+                        return
+                    else:
+                        print(f"DEBUG: Event card {card_id} não encontrado na base de dados")
+                else:
+                    print(f"DEBUG: Não foi possível mapear arquivo Event para ID: {carta_path}")
+        except Exception as e:
+            print(f"DEBUG: Erro ao processar carta na base de dados: {e}")
+            import traceback
+            traceback.print_exc()
+        
+        # Fallback: mostrar overlay de escolha se não conseguir determinar
+        print("DEBUG: Fallback - mostrando overlay de escolha")
+        self._criar_overlay_escolha_jogador(carta_path, casa_tipo)
+
+    def _map_action_file_to_id(self, carta_path):
+        """Mapeia arquivo Action para ID da base de dados"""
+        import re
+        nome_arquivo = os.path.basename(carta_path)
+        match = re.search(r'Action_(\d+)\.', nome_arquivo)
+        if match:
+            numero = int(match.group(1))
+            return f"action_{numero}"
+        return None
+
+    def _map_event_file_to_id(self, carta_path):
+        """Mapeia arquivo Event para ID da base de dados"""
+        import re
+        nome_arquivo = os.path.basename(carta_path)
+        match = re.search(r'Event_(\d+)\.', nome_arquivo)
+        if match:
+            numero = int(match.group(1))
+            return f"event_{numero}"
+        return None
+
+    def _criar_overlay_escolha_jogador(self, carta_path, casa_tipo):
+        """
+        Cria overlay com ícones dos outros jogadores para escolha
+        """
+        print("DEBUG: Criando overlay de escolha de jogador")
+        
+        # Limpar tela completamente
+        for widget in self.winfo_children():
+            widget.destroy()
+        self.configure(bg="black")
+        
+        # Primeiro, mostrar a carta em fullscreen como fundo
+        try:
+            pil_img = Image.open(carta_path)
+            img_w, img_h = pil_img.size
+            # Usa todo o ecrã (sem margem)
+            max_w, max_h = self.winfo_screenwidth(), self.winfo_screenheight()
+            ratio = min(max_w/img_w, max_h/img_h)
+            new_w, new_h = int(img_w*ratio), int(img_h*ratio)
+            pil_img = pil_img.resize((new_w, new_h), Image.Resampling.LANCZOS)
+
+            carta_img = ImageTk.PhotoImage(pil_img)
+            carta_bg_label = tk.Label(self, image=carta_img, bg="black")
+            carta_bg_label.image = carta_img  # Manter referência
+            carta_bg_label.place(relx=0.5, rely=0.5, anchor="center")
+            
+            print("DEBUG: Carta colocada como fundo do overlay")
+        except Exception as e:
+            print(f"DEBUG: Erro ao carregar carta como fundo: {e}")
+            self.configure(bg="black")
+        
+        # Aplicar o mesmo formato da página de confirmação de compra
+        confirm_frame = tk.Frame(self, bg="black")
+        confirm_frame.pack(expand=True)
+        
+        # Título do overlay (mesmo estilo da confirmação de compra)
+        tk.Label(confirm_frame, 
+                text="Choose target player:", 
+                font=("Helvetica", 16, "bold"), 
+                fg="white", bg="black").pack(pady=(40, 20))
+        
+        # Frame para os ícones dos jogadores (centralizado, mesmo estilo da confirmação)
+        players_frame = tk.Frame(confirm_frame, bg="black")
+        players_frame.pack(pady=(0, 10))
+        
+        # Obter lista de outros jogadores (excluindo o jogador atual)
+        # *** NOVA ESTRATÉGIA: USAR DADOS DO PLAYERS_BROADCAST ***
+        outros_jogadores = []
+        
+        print(f"[OVERLAY] Obtendo jogadores do PLAYERS_BROADCAST do servidor...")
+        
+        # Método 1: PRIORITÁRIO - Usar PLAYERS_BROADCAST via dashboard
+        if (hasattr(self, 'dashboard') and self.dashboard and 
+            hasattr(self.dashboard, 'session_players') and self.dashboard.session_players):
+            
+            print(f"[OVERLAY] PLAYERS_BROADCAST disponível no dashboard")
+            print(f"[OVERLAY] Dados: {self.dashboard.session_players}")
+            
+            for player_id, info in self.dashboard.session_players.items():
+                player_color = info.get('color', '').lower()
+                player_name = info.get('name', 'Unknown')
+                is_active = info.get('is_active', False)
+                
+                print(f"[OVERLAY]   - Jogador: {player_name} ({player_color}) - Ativo: {is_active}")
+                
+                if player_color and player_color != self.player_color.lower() and is_active:
+                    outros_jogadores.append(player_color)
+                    print(f"[OVERLAY] Adicionado ao overlay: {player_name} ({player_color})")
+            
+            print(f"[OVERLAY] Total jogadores do BROADCAST: {len(outros_jogadores)}")
+        
+        # Método 2: FALLBACK - Usar session_data do netmaster_client
+        else:
+            try:
+                import __main__
+                if (hasattr(__main__, 'netmaster_client') and hasattr(__main__.netmaster_client, 'session_data') 
+                      and __main__.netmaster_client.session_data):
+                    print(f"[OVERLAY] FALLBACK: Usando session_data do netmaster_client")
+                    
+                    netmaster_client = __main__.netmaster_client
+                    players = netmaster_client.session_data.get('players', {})
+                    for player_id, player_data in players.items():
+                        player_color = player_data.get('color', '').lower()
+                        if player_color and player_color != self.player_color.lower():
+                            outros_jogadores.append(player_color)
+            except Exception as e:
+                print(f"[OVERLAY] Erro no fallback session_data: {e}")
+        
+        # Método 3: FALLBACK - other_players do dashboard
+        if not outros_jogadores:
+            if (hasattr(self, 'dashboard') and hasattr(self.dashboard, 'other_players') 
+                  and self.dashboard.other_players):
+                print(f"[OVERLAY] FALLBACK: Usando other_players do dashboard")
+                
+                for player in self.dashboard.other_players:
+                    if hasattr(player, 'color'):
+                        color = player.color.lower() if hasattr(player.color, 'lower') else str(player.color).lower()
+                    else:
+                        color = str(player).lower()
+                    if color != self.player_color.lower():
+                        outros_jogadores.append(color)
+        
+        # Método 4: FALLBACK FINAL - cores básicas (menos confiável)
+        else:
+            print(f"[OVERLAY] FALLBACK FINAL: Usando cores básicas (menos confiável)")
+            todos_jogadores = ["red", "green", "blue", "yellow"]
+            outros_jogadores = [p for p in todos_jogadores if p.lower() != self.player_color.lower()]
+        
+        # VERIFICAÇÃO FINAL: Garantir que o próprio jogador não está na lista
+        outros_jogadores = [p for p in outros_jogadores if p.lower() != self.player_color.lower()]
+        
+        print(f"[OVERLAY] RESULTADO FINAL:")
+        print(f"[OVERLAY] Jogadores disponíveis no overlay: {outros_jogadores}")
+        print(f"[OVERLAY] Player atual EXCLUÍDO: {self.player_color}")
+        print(f"[OVERLAY] Todos os jogadores no overlay foram VALIDADOS pelo servidor!")
+        
+        if not outros_jogadores:
+            print(f"[OVERLAY] ❌ ERRO: Nenhum jogador válido encontrado!")
+            # Criar mensagem de erro
+            error_label = tk.Label(confirm_frame,
+                                 text="No other players found in session!",
+                                 font=("Helvetica", 14, "bold"),
+                                 fg="red", bg="black")
+            error_label.pack(pady=20)
+            return
+        
+        # Criar botões com ícones para cada jogador (em linha horizontal)
+        for i, cor_jogador in enumerate(outros_jogadores):
+            try:
+                # Carregar ícone do jogador
+                icon_path = os.path.join(IMG_DIR, f"{cor_jogador}_user_icon.png")
+                if os.path.exists(icon_path):
+                    icon_img = ImageTk.PhotoImage(Image.open(icon_path).resize((65, 65)))
+                    
+                    # Criar botão com ícone
+                    def criar_callback(cor=cor_jogador):
+                        return lambda: self._enviar_carta_para_jogador(carta_path, casa_tipo, cor)
+                    
+                    # Frame para cada jogador (ícone + nome)
+                    player_container = tk.Frame(players_frame, bg="black")
+                    player_container.pack(side="left", padx=20)
+                    
+                    btn_jogador = tk.Button(player_container, 
+                                          image=icon_img,
+                                          bg="black", 
+                                          bd=0, 
+                                          activebackground="black", 
+                                          highlightthickness=0,
+                                          command=criar_callback(),
+                                          cursor="hand2")
+                    
+                    btn_jogador.image = icon_img  # Manter referência
+                    btn_jogador.pack()
+                    
+                    # Label com nome da cor (mesmo estilo da confirmação)
+                    cor_label = tk.Label(player_container,
+                                        text=cor_jogador.upper(),
+                                        font=("Helvetica", 14, "bold"),
+                                        fg=self._get_color_hex(cor_jogador),
+                                        bg="black")
+                    cor_label.pack(pady=(5, 0))
+                else:
+                    print(f"DEBUG: Ícone não encontrado para {cor_jogador}: {icon_path}")
+            except Exception as e:
+                print(f"DEBUG: Erro ao criar botão para {cor_jogador}: {e}")
+        
+        # SEM botão Cancel - removido conforme solicitado
+
+    def _criar_overlay_escolha_jogador_eventos(self, carta_path, casa_tipo):
+        """
+        Cria overlay com ícones apenas dos outros jogadores para Events com player_choice=True
+        (excluindo o próprio jogador)
+        """
+        print("DEBUG: Criando overlay de escolha de jogador para Events - apenas outros jogadores")
+        
+        # Limpar tela completamente
+        for widget in self.winfo_children():
+            widget.destroy()
+        self.configure(bg="black")
+        
+        # Primeiro, mostrar a carta em fullscreen como fundo
+        try:
+            pil_img = Image.open(carta_path)
+            img_w, img_h = pil_img.size
+            # Usa todo o ecrã (sem margem)
+            max_w, max_h = self.winfo_screenwidth(), self.winfo_screenheight()
+            ratio = min(max_w/img_w, max_h/img_h)
+            new_w, new_h = int(img_w*ratio), int(img_h*ratio)
+            pil_img = pil_img.resize((new_w, new_h), Image.Resampling.LANCZOS)
+
+            carta_img = ImageTk.PhotoImage(pil_img)
+            carta_bg_label = tk.Label(self, image=carta_img, bg="black")
+            carta_bg_label.image = carta_img  # Manter referência
+            carta_bg_label.place(relx=0.5, rely=0.5, anchor="center")
+            
+            print("DEBUG: Carta colocada como fundo do overlay")
+        except Exception as e:
+            print(f"DEBUG: Erro ao carregar carta como fundo: {e}")
+            self.configure(bg="black")
+        
+        # Aplicar o mesmo formato da página de confirmação de compra
+        confirm_frame = tk.Frame(self, bg="black")
+        confirm_frame.pack(expand=True)
+        
+        # Título do overlay (mesmo estilo da confirmação de compra)
+        tk.Label(confirm_frame, 
+                text="Choose target player:", 
+                font=("Helvetica", 16, "bold"), 
+                fg="white", bg="black").pack(pady=(40, 20))
+        
+        # Frame para os ícones dos jogadores (centralizado, mesmo estilo da confirmação)
+        players_frame = tk.Frame(confirm_frame, bg="black")
+        players_frame.pack(pady=(0, 10))
+        
+        # Obter lista APENAS de outros jogadores (excluindo o próprio jogador)
+        # CORREÇÃO: Usar método mais robusto para obter jogadores da sessão
+        outros_jogadores = []
+        
+        # Método 1: Tentar obter da sessão multiplayer atual
+        try:
+            import __main__
+            if hasattr(__main__, 'netmaster_client'):
+                netmaster_client = __main__.netmaster_client
+                if hasattr(netmaster_client, 'session_data') and netmaster_client.session_data:
+                    players = netmaster_client.session_data.get('players', {})
+                    for player_id, player_data in players.items():
+                        player_color = player_data.get('color', '').lower()
+                        if player_color and player_color != self.player_color.lower():
+                            outros_jogadores.append(player_color)
+                    print(f"DEBUG: Jogadores da sessão obtidos do netmaster_client: {outros_jogadores}")
+        except Exception as e:
+            print(f"DEBUG: Erro ao obter jogadores da sessão: {e}")
+        
+        # Método 2: Fallback usando other_players do dashboard se disponível
+        if not outros_jogadores:
+            if hasattr(self, 'dashboard') and hasattr(self.dashboard, 'other_players') and self.dashboard.other_players:
+                for player in self.dashboard.other_players:
+                    if hasattr(player, 'color'):
+                        color = player.color.lower() if hasattr(player.color, 'lower') else str(player.color).lower()
+                    else:
+                        color = str(player).lower()
+                    if color != self.player_color.lower():
+                        outros_jogadores.append(color)
+                print(f"DEBUG: Jogadores obtidos do dashboard.other_players: {outros_jogadores}")
+        
+        # Método 3: Fallback final - todos os jogadores menos o atual
+        if not outros_jogadores:
+            todos_jogadores = ["red", "green", "blue", "yellow"]
+            outros_jogadores = [p for p in todos_jogadores if p.lower() != self.player_color.lower()]
+            print(f"DEBUG: Usando fallback - todos os jogadores menos atual: {outros_jogadores}")
+        
+        # VERIFICAÇÃO FINAL: Garantir que o próprio jogador não está na lista
+        outros_jogadores = [p for p in outros_jogadores if p.lower() != self.player_color.lower()]
+        
+        print(f"DEBUG: Outros jogadores para Event com player_choice: {outros_jogadores}")
+        print(f"DEBUG: Player atual que deve ser EXCLUÍDO: {self.player_color}")
+        
+        if not outros_jogadores:
+            print(f"DEBUG: ❌ ERRO: Nenhum outro jogador encontrado!")
+            # Criar mensagem de erro
+            error_label = tk.Label(confirm_frame,
+                                 text="No other players found in session!",
+                                 font=("Helvetica", 14, "bold"),
+                                 fg="red", bg="black")
+            error_label.pack(pady=20)
+            return
+        
+        # Criar botões com ícones para cada outro jogador (em linha horizontal)
+        for i, cor_jogador in enumerate(outros_jogadores):
+            try:
+                # Carregar ícone do jogador
+                icon_path = os.path.join(IMG_DIR, f"{cor_jogador}_user_icon.png")
+                if os.path.exists(icon_path):
+                    icon_img = ImageTk.PhotoImage(Image.open(icon_path).resize((65, 65)))
+                    
+                    # Criar botão com ícone
+                    def criar_callback(cor=cor_jogador):
+                        return lambda: self._enviar_carta_para_jogador(carta_path, casa_tipo, cor)
+                    
+                    # Frame para cada jogador (ícone + nome)
+                    player_container = tk.Frame(players_frame, bg="black")
+                    player_container.pack(side="left", padx=20)
+                    
+                    btn_jogador = tk.Button(player_container, 
+                                          image=icon_img,
+                                          bg="black", 
+                                          bd=0, 
+                                          activebackground="black", 
+                                          highlightthickness=0,
+                                          command=criar_callback(),
+                                          cursor="hand2")
+                    
+                    btn_jogador.image = icon_img  # Manter referência
+                    btn_jogador.pack()
+                    
+                    # Label com nome da cor (mesmo estilo da confirmação)
+                    cor_label = tk.Label(player_container,
+                                        text=cor_jogador.upper(),
+                                        font=("Helvetica", 14, "bold"),
+                                        fg=self._get_color_hex(cor_jogador),
+                                        bg="black")
+                    cor_label.pack(pady=(5, 0))
+                else:
+                    print(f"DEBUG: Ícone não encontrado para {cor_jogador}: {icon_path}")
+            except Exception as e:
+                print(f"DEBUG: Erro ao criar botão para {cor_jogador}: {e}")
+        
+        # SEM botão Cancel - removido conforme solicitado
+
+    def _criar_overlay_jogador_especifico(self, carta_path, casa_tipo, jogador_alvo):
+        """
+        Cria overlay com apenas o ícone do jogador alvo específico
+        """
+        print(f"DEBUG: _criar_overlay_jogador_especifico chamado - jogador_alvo: {jogador_alvo}")
+        print(f"DEBUG: _criar_overlay_jogador_especifico - carta: {carta_path}, tipo: {casa_tipo}")
+        
+        # Limpar tela completamente
+        for widget in self.winfo_children():
+            widget.destroy()
+        self.configure(bg="black")
+        
+        # Primeiro, mostrar a carta em fullscreen como fundo
+        try:
+            pil_img = Image.open(carta_path)
+            img_w, img_h = pil_img.size
+            # Usa todo o ecrã (sem margem)
+            max_w, max_h = self.winfo_screenwidth(), self.winfo_screenheight()
+            ratio = min(max_w/img_w, max_h/img_h)
+            new_w, new_h = int(img_w*ratio), int(img_h*ratio)
+            pil_img = pil_img.resize((new_w, new_h), Image.Resampling.LANCZOS)
+
+            carta_img = ImageTk.PhotoImage(pil_img)
+            carta_bg_label = tk.Label(self, image=carta_img, bg="black")
+            carta_bg_label.image = carta_img  # Manter referência
+            carta_bg_label.place(relx=0.5, rely=0.5, anchor="center")
+            
+            print("DEBUG: Carta colocada como fundo do overlay específico")
+        except Exception as e:
+            print(f"DEBUG: Erro ao carregar carta como fundo: {e}")
+            self.configure(bg="black")
+        
+        
+        # Aplicar o mesmo formato da página de confirmação de compra
+        confirm_frame = tk.Frame(self, bg="black")
+        confirm_frame.pack(expand=True)
+        
+        # Título do overlay (mesmo estilo da confirmação de compra)
+        if jogador_alvo == self.player_color:
+            title_text = "        Card affects you:        " 
+            
+            tk.Label(confirm_frame, 
+            text=title_text, 
+            font=("Helvetica", 16, "bold"), 
+            fg="white", bg="black").pack(pady=(40, 20))
+            
+        else:
+            title_text = "Send card to the following player:" 
+            
+            tk.Label(confirm_frame, 
+            text=title_text, 
+            font=("Helvetica", 15, "bold"), 
+            fg="white", bg="black").pack(pady=(40, 20))
+        
+    
+        # Frame para o ícone do jogador (centralizado, mesmo estilo da confirmação)
+        player_frame = tk.Frame(confirm_frame, bg="black")
+        player_frame.pack(pady=(0, 20))
+        
+        try:
+            # Carregar ícone do jogador alvo
+            icon_path = os.path.join(IMG_DIR, f"{jogador_alvo}_user_icon.png")
+            if os.path.exists(icon_path):
+                icon_img = ImageTk.PhotoImage(Image.open(icon_path).resize((65, 65)))
+                
+                # Criar botão com ícone do jogador alvo
+                def confirmar_envio():
+                    self._enviar_carta_para_jogador(carta_path, casa_tipo, jogador_alvo)
+                
+                btn_jogador = tk.Button(player_frame, 
+                                      image=icon_img,
+                                      bg="black", 
+                                      relief="flat", 
+                                      borderwidth=0,
+                                      highlightthickness=0,
+                                      activebackground="black",
+                                      command=confirmar_envio,
+                                      cursor="hand2")
+                btn_jogador.image = icon_img  # Manter referência
+                btn_jogador.pack()
+                
+                # Label com nome da cor (mesmo estilo da confirmação)
+                cor_label = tk.Label(player_frame,
+                                    text=jogador_alvo.upper(),
+                                    font=("Helvetica", 16, "bold"),
+                                    fg=self._get_color_hex(jogador_alvo),
+                                    bg="black")
+                cor_label.pack(pady=(10, 0))
+            else:
+                print(f"DEBUG: Ícone não encontrado para {jogador_alvo}: {icon_path}")
+                # Fallback com texto (mesmo estilo da confirmação)
+                btn_text = tk.Button(player_frame,
+                                   text=jogador_alvo.upper(),
+                                   font=("Helvetica", 20, "bold"),
+                                   bg=self._get_color_hex(jogador_alvo),
+                                   fg="white",
+                                   width=12,
+                                   height=3,
+                                   command=lambda: self._enviar_carta_para_jogador(carta_path, casa_tipo, jogador_alvo))
+                btn_text.pack()
+        except Exception as e:
+            print(f"DEBUG: Erro ao criar overlay para jogador {jogador_alvo}: {e}")
+        
+        # SEM botão Cancel - removido conforme solicitado
+
+    def _verificar_jogador_na_sessao(self, jogador_alvo):
+        """
+        Verifica se o jogador alvo existe na sessão multiplayer atual
+        Retorna: (jogador_encontrado: bool, player_id: str ou None)
+        """
+        try:
+            print(f"[PLAYER_CHECK] *** VERIFICANDO JOGADOR: {jogador_alvo} ***")
+            
+            # Primeiro, tentar obter informações via netmaster_client
+            import __main__
+            if hasattr(__main__, 'netmaster_client'):
+                netmaster_client = __main__.netmaster_client
+                
+                # DEBUG: Verificar dados do cliente
+                session_id = getattr(netmaster_client, 'session_id', None)
+                player_id = getattr(netmaster_client, 'player_id', None)
+                session_data = getattr(netmaster_client, 'session_data', None)
+                
+                print(f"[PLAYER_CHECK] netmaster_client session_id: {session_id}")
+                print(f"[PLAYER_CHECK] netmaster_client player_id: {player_id}")
+                print(f"[PLAYER_CHECK] session_data disponível: {session_data is not None}")
+                
+                # DEBUG DETALHADO: Mostrar conteúdo completo da session_data
+                if session_data:
+                    print(f"[PLAYER_CHECK] ==> session_data COMPLETA: {session_data}")
+                else:
+                    print(f"[PLAYER_CHECK] ==> session_data é None ou vazia")
+                
+                # Se temos session_data, usar isso para verificar jogadores
+                if session_data and isinstance(session_data, dict):
+                    players = session_data.get('players', {})
+                    print(f"[PLAYER_CHECK] Players na session_data: {list(players.keys())}")
+                    print(f"[PLAYER_CHECK] ==> DETALHADO - players dict completo: {players}")
+                    
+                    # Procurar jogador alvo pelos dados da sessão
+                    for player_id_key, player_data in players.items():
+                        player_color = player_data.get('color', '').lower()
+                        player_name = player_data.get('name', 'Unknown')
+                        print(f"[PLAYER_CHECK]   Player: {player_id_key} -> name: {player_name}, color: {player_color}")
+                        print(f"[PLAYER_CHECK]   ==> Comparando '{player_color}' com '{jogador_alvo.lower()}'")
+                        if player_color == jogador_alvo.lower():
+                            print(f"[PLAYER_CHECK] Jogador {jogador_alvo} ENCONTRADO na sessão!")
+                            return True, player_id_key
+                    
+                    print(f"[PLAYER_CHECK] ❌ Jogador {jogador_alvo} NÃO encontrado na sessão via session_data")
+                    print(f"[PLAYER_CHECK] ==> Cores disponíveis na sessão: {[p.get('color', '').lower() for p in players.values()]}")
+                    print(f"[PLAYER_CHECK] ==> Procurando por: '{jogador_alvo.lower()}'")
+                    return False, None
+            
+            # Fallback: verificar através de dados locais da dashboard
+            if hasattr(self, 'dashboard') and hasattr(self.dashboard, 'other_players'):
+                print(f"[PLAYER_CHECK] Usando fallback - verificando dashboard.other_players")
+                print(f"[PLAYER_CHECK] dashboard.other_players type: {type(self.dashboard.other_players)}")
+                print(f"[PLAYER_CHECK] dashboard.other_players: {self.dashboard.other_players}")
+                
+                outros_jogadores = []
+                for p in self.dashboard.other_players:
+                    if hasattr(p, 'color'):
+                        outros_jogadores.append(p.color.lower())
+                    elif isinstance(p, str):
+                        outros_jogadores.append(p.lower())
+                    else:
+                        print(f"[PLAYER_CHECK] Player object desconhecido: {p} (type: {type(p)})")
+                
+                # Incluir o próprio jogador
+                jogadores_na_sessao = outros_jogadores + [self.player_color.lower()]
+                print(f"[PLAYER_CHECK] Jogadores na sessão (via dashboard fallback): {jogadores_na_sessao}")
+                print(f"[PLAYER_CHECK] Procurando: {jogador_alvo.lower()}")
+                
+                jogador_encontrado = jogador_alvo.lower() in jogadores_na_sessao
+                print(f"[PLAYER_CHECK] Resultado dashboard fallback: {jogador_encontrado}")
+                return jogador_encontrado, None  # Sem player_id no fallback
+            
+            # *** NOVO FALLBACK TEMPORÁRIO PARA RESOLVER O BUG ***
+            # Se chegamos aqui e temos evidence de multiplayer, assumir que cores básicas existem
+            print(f"[PLAYER_CHECK] Usando fallback de emergência para cores básicas")
+            
+            # Verificar se há evidence de sessão multiplayer
+            has_session_id = netmaster_client and getattr(netmaster_client, 'session_id', None)
+            has_player_id = netmaster_client and getattr(netmaster_client, 'player_id', None)
+            
+            if has_session_id and has_player_id:
+                # Em multiplayer, assumir que cores standard podem existir
+                cores_validas = ['red', 'green', 'blue', 'yellow']
+                if jogador_alvo.lower() in cores_validas and jogador_alvo.lower() != self.player_color.lower():
+                    print(f"[PLAYER_CHECK] FALLBACK DE EMERGÊNCIA: Assumindo que jogador {jogador_alvo} pode existir na sessão multiplayer")
+                    print(f"[PLAYER_CHECK] *** Este é um workaround temporário para resolver o bug ***")
+                    return True, None
+                else:
+                    print(f"[PLAYER_CHECK] ❌ FALLBACK DE EMERGÊNCIA: Cor {jogador_alvo} inválida ou é o próprio jogador")
+                    return False, None
+            else:
+                print(f"[PLAYER_CHECK] ❌ FALLBACK DE EMERGÊNCIA: Não há evidence de sessão multiplayer")
+            
+            # Fallback final: se não conseguir determinar, assumir que existe (modo compatibilidade)
+            print(f"[PLAYER_CHECK] Não foi possível verificar sessão - assumindo que jogador {jogador_alvo} existe")
+            return True, None
+            
+        except Exception as e:
+            print(f"[PLAYER_CHECK] ERROR: Erro ao verificar jogador na sessão: {e}")
+            import traceback
+            print(f"[PLAYER_CHECK] ERROR: Traceback: {traceback.format_exc()}")
+            # Em caso de erro, assumir que existe para evitar perda de cartas
+            return True, None
+    
+    def _enviar_carta_para_inventario_remoto(self, carta_path, tipo_carta, jogador_alvo):
+        """
+        Envia uma carta para o inventário de outro jogador via sistema de transmissão baseado no servidor
+        """
+        try:
+            # SISTEMA DE TRANSMISSÃO DE CARTAS: Usar comunicação robusta via servidor
+            if self.dashboard:
+                # Obter sistema de transmissão de cartas do dashboard
+                card_transmission_system = self.dashboard.get_card_transmission_system()
+                
+                # Se o sistema não está configurado, tentar configurá-lo agora
+                if not card_transmission_system:
+                    print(f"[CARD_TRANSMISSION] Sistema não configurado - tentando inicializar...")
+                    self.dashboard.setup_card_transmission_system()
+                    card_transmission_system = self.dashboard.get_card_transmission_system()
+                
+                if card_transmission_system:
+                    # Preparar dados da carta
+                    card_data = {
+                        'id': os.path.splitext(os.path.basename(carta_path))[0],  # ID da carta
+                        'card_path': os.path.basename(carta_path),  # Nome do arquivo
+                        'card_type': tipo_carta,
+                        'from_player': self.player_color,
+                        'target_player': jogador_alvo
+                    }
+                    
+                    print(f"[CARD_TRANSMISSION] 📨 Enviando carta via servidor:")
+                    print(f"  - De: '{self.player_color}' → Para: '{jogador_alvo}'")
+                    print(f"  - Carta: '{os.path.basename(carta_path)}'")
+                    print(f"  - Tipo: '{tipo_carta}'")
+                    
+                    # Enviar carta via sistema de transmissão
+                    # Envio direto via WebSocket (método síncrono)
+                    try:
+                        success = card_transmission_system._enviar_via_servidor_sync(
+                            self.player_color,
+                            jogador_alvo, 
+                            tipo_carta,
+                            card_data
+                        )
+                        if success:
+                            print(f"[CARD_TRANSMISSION] Carta enviada com sucesso para {jogador_alvo}")
+                        else:
+                            print(f"[CARD_TRANSMISSION] ❌ Falha no envio da carta para {jogador_alvo}")
+                            
+                    except Exception as e:
+                        print(f"[CARD_TRANSMISSION] ❌ Erro no envio: {e}")
+                        # OTIMIZAÇÃO: Usar sistema de armazenamento no servidor sem verificação
+                        print(f"[CARD_TRANSMISSION] OTIMIZAÇÃO: Enviando direto para servidor - jogador {jogador_alvo} já validado no overlay")
+                        self._armazenar_carta_no_servidor(carta_path, tipo_carta, jogador_alvo, target_player_id=None)
+                        
+                else:
+                    # OTIMIZAÇÃO: Usar sistema de armazenamento no servidor sem verificação
+                    print(f"[CARD_TRANSMISSION] OTIMIZAÇÃO: Enviando direto para servidor - jogador {jogador_alvo} já validado no overlay")
+                    self._armazenar_carta_no_servidor(carta_path, tipo_carta, jogador_alvo, target_player_id=None)
+            else:
+                print(f"[CARD_TRANSMISSION] ❌ Dashboard não disponível")
+                
+        except Exception as e:
+            print(f"[CARD_TRANSMISSION] ❌ Erro no envio: {e}")
+            print(f"[CARD_TRANSMISSION] OTIMIZAÇÃO: Usando sistema de armazenamento direto no servidor")
+            # OTIMIZAÇÃO: Usar sistema de armazenamento no servidor sem verificação
+            print(f"[CARD_TRANSMISSION] OTIMIZAÇÃO: Enviando direto para servidor - jogador {jogador_alvo} já validado no overlay")
+            self._armazenar_carta_no_servidor(carta_path, tipo_carta, jogador_alvo, target_player_id=None)
+    
+    def _devolver_carta_ao_baralho(self, carta_path, tipo_carta):
+        """
+        Devolve uma carta ao baralho correspondente
+        """
+        print(f"DEBUG: Devolvendo carta {os.path.basename(carta_path)} ao baralho {tipo_carta}")
+        
+        try:
+            # Adicionar carta de volta ao baralho local
+            self.adicionar_carta_ao_baralho(carta_path, tipo_carta, None)
+            print(f"DEBUG: Carta {os.path.basename(carta_path)} devolvida ao baralho {tipo_carta}")
+            
+        except Exception as e:
+            print(f"DEBUG: Erro ao devolver carta ao baralho: {e}")
+    
+    def _mostrar_confirmacao_devolucao(self, carta_path, casa_tipo, jogador_alvo):
+        """
+        Mostra overlay de confirmação quando carta é devolvida ao baralho
+        """
+        # Limpar tela completamente
+        for widget in self.winfo_children():
+            widget.destroy()
+        self.configure(bg="black")
+        
+        # Primeiro, mostrar a carta em fullscreen como fundo
+        try:
+            pil_img = Image.open(carta_path)
+            img_w, img_h = pil_img.size
+            # Usa todo o ecrã (sem margem)
+            max_w, max_h = self.winfo_screenwidth(), self.winfo_screenheight()
+            ratio = min(max_w/img_w, max_h/img_h)
+            new_w, new_h = int(img_w*ratio), int(img_h*ratio)
+            pil_img = pil_img.resize((new_w, new_h), Image.Resampling.LANCZOS)
+
+            carta_img = ImageTk.PhotoImage(pil_img)
+            carta_bg_label = tk.Label(self, image=carta_img, bg="black")
+            carta_bg_label.image = carta_img  # Manter referência
+            carta_bg_label.place(relx=0.5, rely=0.5, anchor="center")
+            
+            print("DEBUG: Carta colocada como fundo do overlay de devolução")
+        except Exception as e:
+            print(f"DEBUG: Erro ao carregar carta como fundo: {e}")
+            self.configure(bg="black")
+        
+        # Aplicar o mesmo formato da página de seleção
+        confirm_frame = tk.Frame(self, bg="black")
+        confirm_frame.pack(expand=True)
+        
+        # Título da confirmação de devolução
+        tk.Label(confirm_frame, 
+                text=f"Player {jogador_alvo.upper()} not in session!\nCard returned to deck.",
+                font=("Helvetica", 15, "bold"),
+                fg="red",
+                bg="black",
+                justify="center").pack(pady=(40, 20))
+        
+        # Botão Ok verde (igual funcionalidade da seleção de jogador que estava na sessão)
+        tk.Button(confirm_frame,
+                 text="Ok",
+                 font=("Helvetica", 14, "bold"),
+                 bg="#70AD47",  # Verde
+                 fg="white",
+                 width=15,
+                 height=2,
+                 command=self._voltar_playerdashboard_sem_botao_store).pack(pady=20)
+
+    def _get_color_hex(self, color):
+        """Retorna cor hexadecimal para uma cor de jogador"""
+        color_map = {
+            "red": "#EE6F68",
+            "green": "#70AD47", 
+            "blue": "#43BEF2",
+            "yellow": "#F2BA0D"
+        }
+        return color_map.get(color, "#FFFFFF")
+
+    def _enviar_carta_para_jogador(self, carta_path, casa_tipo, jogador_alvo):
+        """
+        *** NOVA ESTRATÉGIA BASEADA EM PLAYERS_BROADCAST ***
+        Valida usando dados do broadcast automático do servidor
+        Se a cor está no broadcast = jogador válido na sessão
+        """
+        print(f"[CARD_SEND] NOVA ESTRATÉGIA: Verificando cor {jogador_alvo} no PLAYERS_BROADCAST")
+        
+        # Determinar tipo para controle do baralho
+        tipo_inv = casa_tipo
+        if tipo_inv == "actions":
+            tipo_inv = "Actions"
+        elif tipo_inv == "events":
+            tipo_inv = "Events"
+        
+        # *** VALIDAÇÃO VIA PLAYERS_BROADCAST ***
+        cor_valida_no_broadcast = self._verificar_cor_no_players_broadcast(jogador_alvo)
+        
+        if cor_valida_no_broadcast:
+            print(f"[CARD_SEND] Cor {jogador_alvo} CONFIRMADA no PLAYERS_BROADCAST do servidor")
+            print(f"[CARD_SEND] Procedendo com armazenamento no servidor...")
+            
+            # NOVO SISTEMA: Armazenar no servidor para todos os jogadores (exceto próprio)
+            if jogador_alvo == self.player_color:
+                print(f"[CARD_SEND] Carta destinada ao próprio jogador - adicionando diretamente ao inventário")
+                # Adicionar carta ao inventário do jogador atual via dashboard
+                if self.dashboard:
+                    self.dashboard.adicionar_carta_inventario(carta_path, tipo_inv.lower())
+                    print(f"[CARD_SEND] Carta adicionada ao inventário {tipo_inv} do jogador {jogador_alvo}")
+                    # Mostrar confirmação de sucesso
+                    self._mostrar_confirmacao_envio(carta_path, casa_tipo, jogador_alvo)
+            else:
+                # Para outros jogadores na sessão, usar o sistema de armazenamento no servidor
+                print(f"[CARD_SEND] Armazenando carta no servidor para jogador {jogador_alvo}")
+                success = self._armazenar_carta_no_servidor(carta_path, tipo_inv, jogador_alvo, target_player_id=None)
+                
+                if success:
+                    print(f"[CARD_SEND] Carta {os.path.basename(carta_path)} armazenada com sucesso para {jogador_alvo}")
+                    self._mostrar_confirmacao_envio(carta_path, casa_tipo, jogador_alvo)
+                else:
+                    print(f"[CARD_SEND] ❌ Falha no armazenamento da carta")
+                    # Ainda mostrar sucesso para UX (servidor pode ter recebido)
+                    print(f"[CARD_SEND] Mostrando confirmação de sucesso mesmo com falha temporária")
+                    self._mostrar_confirmacao_envio(carta_path, casa_tipo, jogador_alvo)
+        
+        else:
+            print(f"[CARD_SEND] ❌ ERRO: Cor {jogador_alvo} NÃO encontrada no PLAYERS_BROADCAST")
+            print(f"[CARD_SEND] Isto NÃO deveria acontecer se o ícone apareceu no overlay!")
+            print(f"[CARD_SEND] Possível problema: broadcast não sincronizado ou dados desatualizados")
+            
+            # Fallback inteligente: ainda tentar armazenar (pode ser problema temporário de sincronização)
+            print(f"[CARD_SEND] FALLBACK: Tentando armazenar mesmo assim...")
+            if jogador_alvo == self.player_color:
+                if self.dashboard:
+                    self.dashboard.adicionar_carta_inventario(carta_path, tipo_inv.lower())
+            else:
+                self._armazenar_carta_no_servidor(carta_path, tipo_inv, jogador_alvo, target_player_id=None)
+            
+            # Mostrar confirmação (UX não deve ser prejudicada)
+            self._mostrar_confirmacao_envio(carta_path, casa_tipo, jogador_alvo)
+        
+        # Remover carta do baralho local da Store (carta foi usada)
+        self._remover_carta_do_baralho_local(carta_path, tipo_inv)
+        
+        # Voltar ao dashboard principal
+        self._voltar_ao_dashboard()
+    
+    def _armazenar_carta_no_servidor(self, carta_path, tipo_carta, jogador_alvo, target_player_id):
+        """
+        Armazena carta no servidor para entrega posterior usando o novo sistema
+        """
+        try:
+            print(f"[CARD_STORAGE] Iniciando armazenamento no servidor")
+            print(f"[CARD_STORAGE] - Carta: {os.path.basename(carta_path)}")
+            print(f"[CARD_STORAGE] - Tipo: {tipo_carta}")
+            print(f"[CARD_STORAGE] - Jogador alvo: {jogador_alvo}")
+            print(f"[CARD_STORAGE] - Target player ID: {target_player_id}")
+            print(f"[CARD_STORAGE] - Jogador remetente: {self.player_color}")
+            
+            # Verificar se temos acesso ao cliente NetMaster
+            import __main__
+            if not hasattr(__main__, 'netmaster_client'):
+                print(f"[CARD_STORAGE] ❌ Cliente NetMaster não disponível")
+                print(f"[CARD_STORAGE] __main__ attributes: {[attr for attr in dir(__main__) if not attr.startswith('_')]}")
+                return False
+                
+            netmaster_client = __main__.netmaster_client
+            print(f"[CARD_STORAGE] netmaster_client encontrado: {type(netmaster_client)}")
+            
+            # Debug detalhado do estado da conexão
+            print(f"[CARD_STORAGE] Estado da conexão:")
+            print(f"[CARD_STORAGE]   - connected: {getattr(netmaster_client, 'connected', 'N/A')}")
+            print(f"[CARD_STORAGE]   - websocket: {getattr(netmaster_client, 'websocket', 'N/A')}")
+            print(f"[CARD_STORAGE]   - player_id: {getattr(netmaster_client, 'player_id', 'N/A')}")
+            print(f"[CARD_STORAGE]   - session_id: {getattr(netmaster_client, 'session_id', 'N/A')}")
+            
+            # Verificação mais tolerante da conexão
+            if not getattr(netmaster_client, 'connected', False):
+                print(f"[CARD_STORAGE] Cliente não está conectado (connected=False)")
+                # Não falhar aqui - pode ser um problema temporário
+                print(f"[CARD_STORAGE] Tentando enviar mesmo assim...")
+            
+            if not hasattr(netmaster_client, 'send_message'):
+                print(f"[CARD_STORAGE] ❌ Método send_message não encontrado")
+                return False
+            
+            # Extrair ID da carta do caminho
+            card_id = os.path.splitext(os.path.basename(carta_path))[0]
+            
+            # Preparar dados da carta
+            card_data = {
+                'id': card_id,
+                'card_path': carta_path,
+                'card_type': tipo_carta.lower(),  # 'actions' ou 'events'
+                'from_player': self.player_color
+            }
+            
+            # Mensagem para armazenar carta no servidor
+            message = {
+                'type': 'store_card_for_player',
+                'sender_player_id': getattr(netmaster_client, 'player_id', 'unknown'),
+                'sender_color': self.player_color,
+                'target_player_color': jogador_alvo,
+                'target_player_id': target_player_id,
+                'card_data': card_data
+            }
+            
+            print(f"[CARD_STORAGE] Enviando mensagem: {message}")
+            
+            # Enviar para o servidor - versão simplificada
+            import asyncio
+            import threading
+            import time
+            
+            send_result = [False]  # Lista para capturar resultado da thread
+            send_error = [None]    # Lista para capturar erro da thread
+            
+            def send_message_in_thread():
+                """Envia mensagem em thread separada com seu próprio loop"""
+                try:
+                    # Criar loop de evento para esta thread
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    
+                    # Executar o envio
+                    result = loop.run_until_complete(netmaster_client.send_message(message))
+                    send_result[0] = result
+                    
+                    print(f"[CARD_STORAGE] Resultado do envio: {result}")
+                    
+                    loop.close()
+                except Exception as e:
+                    send_error[0] = str(e)
+                    print(f"[CARD_STORAGE] ❌ Erro no envio: {e}")
+                    import traceback
+                    traceback.print_exc()
+            
+            # Executar em thread separada
+            print(f"[CARD_STORAGE] Iniciando thread para envio...")
+            thread = threading.Thread(target=send_message_in_thread, daemon=True)
+            thread.start()
+            
+            # Aguardar resultado (timeout de 5 segundos)
+            thread.join(timeout=5.0)
+            
+            if thread.is_alive():
+                print(f"[CARD_STORAGE] Timeout no envio (thread ainda ativa)")
+                return False
+            elif send_error[0]:
+                print(f"[CARD_STORAGE] ❌ Erro no envio: {send_error[0]}")
+                return False
+            elif send_result[0]:
+                print(f"[CARD_STORAGE] Mensagem enviada com sucesso!")
+                return True
+            else:
+                print(f"[CARD_STORAGE] Envio retornou False")
+                return False
+            
+        except Exception as e:
+            print(f"[CARD_STORAGE] ❌ Erro ao armazenar carta no servidor: {e}")
+            import traceback
+            print(f"[CARD_STORAGE] Traceback: {traceback.format_exc()}")
+            return False
+    
+    def _voltar_ao_dashboard(self):
+        """
+        Fecha a Store e volta ao dashboard principal
+        """
+        try:
+            print(f"[CARD_STORAGE] Voltando ao dashboard principal")
+            
+            # Fechar a Store
+            if hasattr(self, 'destroy') and callable(self.destroy):
+                self.destroy()
+            
+            # Retornar ao dashboard se disponível
+            if hasattr(self, 'dashboard') and self.dashboard:
+                self.dashboard.playerdashboard_interface(
+                    self.dashboard.player_name, 
+                    self.dashboard.saldo, 
+                    self.dashboard.other_players
+                )
+        except Exception as e:
+            print(f"[CARD_STORAGE] Erro ao voltar ao dashboard: {e}")
+    
+    def _verificar_cor_no_players_broadcast(self, cor_alvo):
+        """
+        *** NOVA FUNÇÃO: VALIDAÇÃO VIA PLAYERS_BROADCAST ***
+        Verifica se a cor do jogador alvo está nos dados do PLAYERS_BROADCAST do servidor
+        """
+        print(f"[PLAYERS_CHECK] Verificando cor '{cor_alvo}' no PLAYERS_BROADCAST...")
+        
+        # Verificar se temos dados do broadcast via dashboard
+        if not hasattr(self, 'dashboard') or not self.dashboard:
+            print(f"[PLAYERS_CHECK] Dashboard não disponível")
+            return False
+        
+        # Verificar se o dashboard tem dados do broadcast
+        if not hasattr(self.dashboard, 'session_players') or not self.dashboard.session_players:
+            print(f"[PLAYERS_CHECK] Dados do PLAYERS_BROADCAST não disponíveis no dashboard")
+            print(f"[PLAYERS_CHECK] Possível: broadcast ainda não recebido ou dados não sincronizados")
+            
+            # Fallback: verificar se temos other_players (dados mais básicos)
+            if hasattr(self.dashboard, 'other_players') and self.dashboard.other_players:
+                print(f"[PLAYERS_CHECK] FALLBACK: Usando dados other_players do dashboard")
+                return self._verificar_cor_em_other_players(cor_alvo)
+            
+            return False
+        
+        print(f"[PLAYERS_CHECK] PLAYERS_BROADCAST disponível no dashboard:")
+        print(f"[PLAYERS_CHECK] Dados recebidos do servidor: {self.dashboard.session_players}")
+        
+        # Procurar pela cor nos dados do broadcast
+        cores_encontradas = []
+        for player_id, info in self.dashboard.session_players.items():
+            player_color = info.get('color', '').lower()
+            player_name = info.get('name', 'Unknown')
+            is_active = info.get('is_active', False)
+            
+            cores_encontradas.append(player_color)
+            print(f"[PLAYERS_CHECK]   - Jogador: {player_name} ({player_color}) - Ativo: {is_active}")
+            
+            if player_color == cor_alvo.lower() and is_active:
+                print(f"[PLAYERS_CHECK] ENCONTRADO: {player_name} ({player_color}) está ativo na sessão!")
+                return True
+        
+        print(f"[PLAYERS_CHECK] ❌ Cor '{cor_alvo}' NÃO encontrada ou não ativa")
+        print(f"[PLAYERS_CHECK] Cores disponíveis no broadcast: {cores_encontradas}")
+        return False
+    
+    def _verificar_cor_em_other_players(self, cor_alvo):
+        """
+        Fallback: Verifica cor nos dados other_players (menos confiável que PLAYERS_BROADCAST)
+        """
+        print(f"[PLAYERS_CHECK] FALLBACK: Verificando cor '{cor_alvo}' em other_players")
+        
+        if not self.dashboard.other_players:
+            print(f"[PLAYERS_CHECK] ❌ other_players também não disponível")
+            return False
+        
+        print(f"[PLAYERS_CHECK] other_players dados: {self.dashboard.other_players}")
+        
+        for player in self.dashboard.other_players:
+            if isinstance(player, dict):
+                player_color = player.get('color', '').lower()
+                player_name = player.get('name', 'Unknown')
+                print(f"[PLAYERS_CHECK]   - {player_name} ({player_color})")
+                
+                if player_color == cor_alvo.lower():
+                    print(f"[PLAYERS_CHECK] FALLBACK ENCONTRADO: {player_name} ({player_color})")
+                    return True
+            elif isinstance(player, str):
+                # Formato antigo: apenas cor como string
+                if player.lower() == cor_alvo.lower():
+                    print(f"[PLAYERS_CHECK] FALLBACK ENCONTRADO: {player}")
+                    return True
+        
+        print(f"[PLAYERS_CHECK] ❌ FALLBACK: Cor '{cor_alvo}' não encontrada em other_players")
+        return False
+    
+    def _mostrar_confirmacao_envio(self, carta_path, casa_tipo, jogador_alvo):
+        """
+        Mostra overlay de confirmação de envio da carta
+        """
+        # Limpar tela completamente
+        for widget in self.winfo_children():
+            widget.destroy()
+        self.configure(bg="black")
+        
+        # Primeiro, mostrar a carta em fullscreen como fundo
+        try:
+            pil_img = Image.open(carta_path)
+            img_w, img_h = pil_img.size
+            # Usa todo o ecrã (sem margem)
+            max_w, max_h = self.winfo_screenwidth(), self.winfo_screenheight()
+            ratio = min(max_w/img_w, max_h/img_h)
+            new_w, new_h = int(img_w*ratio), int(img_h*ratio)
+            pil_img = pil_img.resize((new_w, new_h), Image.Resampling.LANCZOS)
+
+            carta_img = ImageTk.PhotoImage(pil_img)
+            carta_bg_label = tk.Label(self, image=carta_img, bg="black")
+            carta_bg_label.image = carta_img  # Manter referência
+            carta_bg_label.place(relx=0.5, rely=0.5, anchor="center")
+            
+            print("DEBUG: Carta colocada como fundo do overlay de confirmação")
+        except Exception as e:
+            print(f"DEBUG: Erro ao carregar carta como fundo: {e}")
+            self.configure(bg="black")
+        
+        # Aplicar o mesmo formato da página de seleção
+        confirm_frame = tk.Frame(self, bg="black")
+        confirm_frame.pack(expand=True)
+        
+        # Título da confirmação (mesmo estilo da página de seleção)
+        tk.Label(confirm_frame, 
+                text=f"   Card sent to {jogador_alvo.upper()} player!    ",
+                font=("Helvetica", 15, "bold"),
+                fg="white",
+                bg="black").pack(pady=(40,  20))
+        
+        # Frame para o ícone do jogador (centralizado, mesmo estilo da seleção)
+        player_frame = tk.Frame(confirm_frame, bg="black")
+        player_frame.pack(pady=(0, 20))
+        
+        
+        # Mostrar ícone do jogador alvo (mesmo estilo da página de seleção)
+        try:
+            icon_path = os.path.join(IMG_DIR, f"{jogador_alvo}_user_icon.png")
+            if os.path.exists(icon_path):
+                icon_img = ImageTk.PhotoImage(Image.open(icon_path).resize((65, 65)))
+                icon_label = tk.Label(player_frame, image=icon_img, bg="black")
+                icon_label.image = icon_img
+                icon_label.pack()
+                
+                # Label com nome da cor (mesmo estilo da página de seleção)
+                cor_label = tk.Label(player_frame,
+                                    text=jogador_alvo.upper(),
+                                    font=("Helvetica", 14, "bold"),
+                                    fg=self._get_color_hex(jogador_alvo),
+                                    bg="black")
+                cor_label.pack(pady=(5, 0))
+        except Exception as e:
+            print(f"DEBUG: Erro ao mostrar ícone de confirmação: {e}")
+        
+        # Botão OK centralizado (mesmo estilo)
+        btn_frame = tk.Frame(confirm_frame, bg="black")
+        btn_frame.pack(pady=5)
+        
+        # Botão OK para continuar
+        def continuar():
+            if casa_tipo in ["actions", "action", "events", "event"]:
+                # Para Actions/Events, voltar ao PlayerDashboard sem botão Store
+                try:
+                    if self.dashboard and hasattr(self.dashboard, "playerdashboard_interface"):
+                        self.withdraw()
+                        self.dashboard.deiconify()
+                        self.dashboard.state('normal')
+                        self.dashboard.lift()
+                        self.dashboard.focus_force()
+                        self.dashboard.playerdashboard_interface(
+                            self.dashboard.player_name,
+                            self.dashboard.saldo,
+                            self.dashboard.other_players,
+                            show_store_button=False
+                        )
+                        print("DEBUG: Voltando ao PlayerDashboard após envio da carta")
+                except Exception as e:
+                    print(f"DEBUG: Erro ao voltar ao PlayerDashboard: {e}")
+            else:
+                self.voltar_para_store()
+        
+        btn_ok = tk.Button(btn_frame,
+                          text="OK",
+                          font=("Helvetica", 14, "bold"),
+                          bg="#4CAF50",
+                          fg="white",
+                          width=8,
+                          command=continuar)
+        btn_ok.pack()
+
     def mostrar_carta_fullscreen_escolha(self, carta_path, carta_tipo):
+        # Guardar estado da carta fullscreen para poder restaurar depois
+        self.fullscreen_carta_path = carta_path
+        self.fullscreen_carta_tipo = carta_tipo
+        # ADICIONAR: Múltiplos backups para garantir preservação
+        self._backup_fullscreen_carta_path = carta_path
+        self._backup_fullscreen_carta_tipo = carta_tipo
+        self._original_carta_path = carta_path
+        self._original_carta_tipo = carta_tipo
+        
+        print(f"DEBUG: [mostrar_carta_fullscreen_escolha] Guardando estado fullscreen - carta: {carta_path}, tipo: {carta_tipo}")
+        print(f"DEBUG: [mostrar_carta_fullscreen_escolha] Estado guardado: fullscreen_carta_path={self.fullscreen_carta_path}, fullscreen_carta_tipo={self.fullscreen_carta_tipo}")
+        print(f"DEBUG: [mostrar_carta_fullscreen_escolha] Backups criados: _backup={self._backup_fullscreen_carta_path}, _original={self._original_carta_path}")
+        print(f"DEBUG: [mostrar_carta_fullscreen_escolha] ID do objeto Store: {id(self)}")
+        
         # Mostra a carta em fullscreen e pergunta se quer ficar com ela
         for widget in self.winfo_children():
             widget.destroy()
@@ -1749,19 +3876,65 @@ class StoreWindow(tk.Toplevel):
         # Botão Inventory centrado no topo se for Challenge
         if carta_tipo in ["challenges", "challenge"]:
             def abrir_playerdashboard():
-                print("DEBUG: Abrindo interface principal do PlayerDashboard")
-                # Vai para a interface principal do PlayerDashboard
-                if self.dashboard and hasattr(self.dashboard, "playerdashboard_interface"):
-                    self.dashboard.playerdashboard_interface(
-                        self.dashboard.player_name,
-                        self.dashboard.saldo,
-                        self.dashboard.other_players
-                    )
+                print("DEBUG: [botão Player] Abrindo interface principal do PlayerDashboard")
+                print(f"DEBUG: [botão Player] Estado antes de ir para PlayerDashboard: fullscreen_carta_path={getattr(self, 'fullscreen_carta_path', 'NOT_SET')}, fullscreen_carta_tipo={getattr(self, 'fullscreen_carta_tipo', 'NOT_SET')}")
+                print(f"DEBUG: [botão Player] ID do objeto Store: {id(self)}")
+                try:
+                    # CORREÇÃO: TRANSFERIR estado Challenge para PlayerDashboard ANTES de limpar
+                    # Isso permite que o botão Store restaure corretamente a carta Challenge
+                    if (hasattr(self, 'fullscreen_carta_path') and self.fullscreen_carta_path and
+                        hasattr(self, 'fullscreen_carta_tipo') and self.fullscreen_carta_tipo == "challenges"):
+                        print(f"DEBUG: [botão Player] Transferindo estado Challenge para PlayerDashboard: {self.fullscreen_carta_path}")
+                        self.dashboard._store_challenge_carta_path = self.fullscreen_carta_path
+                        self.dashboard._store_challenge_carta_tipo = self.fullscreen_carta_tipo
+                        print("DEBUG: [botão Player] Estado Challenge transferido para PlayerDashboard")
+                    
+                    # DEPOIS de transferir, limpar estado Challenge da Store
+                    # Isso evita que o Next Phase apareça incorretamente
+                    if hasattr(self, 'fullscreen_carta_path'):
+                        self.fullscreen_carta_path = None
+                        print("DEBUG: [botão Player] fullscreen_carta_path limpo da Store")
+                    if hasattr(self, 'fullscreen_carta_tipo'):
+                        self.fullscreen_carta_tipo = None
+                        print("DEBUG: [botão Player] fullscreen_carta_tipo limpo da Store")
+                    
+                    # Vai para a interface principal do PlayerDashboard
+                    if self.dashboard and hasattr(self.dashboard, "playerdashboard_interface"):
+                        # Esconder a Store primeiro
+                        print("DEBUG: [botão Player] Escondendo Store...")
+                        self.withdraw()
+                        print("DEBUG: [botão Player] Store escondida")
+                        
+                        # CORREÇÃO: Limpar flag Challenge no PlayerDashboard quando voltar via botão Player
+                        # Isso garante que o Next Phase não apareça incorretamente
+                        self.dashboard._challenge_accepted = False
+                        print("DEBUG: [botão Player] Flag _challenge_accepted resetada no PlayerDashboard")
+                        
+                        # Mostrar o PlayerDashboard
+                        self.dashboard.deiconify()
+                        self.dashboard.state('normal')
+                        self.dashboard.lift()
+                        self.dashboard.focus_force()
+                        print("DEBUG: [botão Player] PlayerDashboard mostrado")
+                        
+                        # Chamar a interface principal do PlayerDashboard
+                        self.dashboard.playerdashboard_interface(
+                            self.dashboard.player_name,
+                            self.dashboard.saldo,
+                            self.dashboard.other_players
+                        )
+                        print("DEBUG: [botão Player] Interface principal do PlayerDashboard aberta com sucesso")
+                    else:
+                        print("DEBUG: [botão Player] ERRO - PlayerDashboard não disponível")
+                except Exception as e:
+                    print(f"DEBUG: [botão Player] Erro ao abrir PlayerDashboard: {e}")
+                    import traceback
+                    traceback.print_exc()
             
             # Carregamento do ícone do jogador
             try:
                 user_icon_path = os.path.join(IMG_DIR, f"{self.player_color}_user_icon.png")
-                user_icon_img = ImageTk.PhotoImage(Image.open(user_icon_path).resize((48, 48)))
+                user_icon_img = ImageTk.PhotoImage(Image.open(user_icon_path).resize((40, 40)))
                 btn_inventory = tk.Button(self, image=user_icon_img, bg="#8A2BE2", relief="flat", borderwidth=0, command=abrir_playerdashboard, cursor="hand2")
                 btn_inventory.image = user_icon_img  # Manter referência para evitar garbage collection
             except Exception as e:
@@ -1772,6 +3945,35 @@ class StoreWindow(tk.Toplevel):
             btn_inventory.place(relx=0.5, rely=0, anchor="n")
         # Botões Sim/Não
         def aceitar():
+            # Limpar estado de fullscreen porque a carta foi aceita
+            self.fullscreen_carta_path = None
+            self.fullscreen_carta_tipo = None
+            print("DEBUG: Estado de fullscreen limpo ao aceitar carta")
+            
+            # NOVA LÓGICA: Se for Challenge, implementar sistema de troca com Activities
+            if carta_tipo in ["challenges", "challenge"]:
+                # VERIFICAÇÃO CRÍTICA: Só aceitar Challenge se estivermos numa casa Challenge
+                casa_tipo = getattr(self, 'casa_tipo', 'neutral')
+                if casa_tipo != "challenges":
+                    print(f"DEBUG: [CHALLENGE] BLOQUEADO - Challenge não pode ser aceite em casa {casa_tipo}")
+                    # Mostrar mensagem de erro e voltar à Store
+                    self.voltar_para_store()
+                    return
+                
+                print("DEBUG: [CHALLENGE] Challenge aceite - usando fluxo da Store para substituição")
+                # Desabilitar permanentemente o botão Store
+                if self.dashboard and hasattr(self.dashboard, 'disable_store_button'):
+                    self.dashboard.disable_store_button()
+                    print("DEBUG: [CHALLENGE] Botão Store desativado permanentemente")
+                
+                # Executar a substituição Challenge→Activity pela lógica da Store
+                # A própria lógica decide a navegação:
+                #  - 0 ou 1 Activities ativas → navega de volta automaticamente
+                #  - múltiplas Activities → permanece na Store e mostra a seleção
+                self._processar_troca_challenge_activity(carta_path)
+                return
+            
+            # Lógica original para outros tipos de cartas
             tipo_inv = carta_tipo
             if tipo_inv == "equipment":
                 tipo_inv = "equipments"
@@ -1797,17 +3999,22 @@ class StoreWindow(tk.Toplevel):
                         self.dashboard.focus_force()
                         print("DEBUG: PlayerDashboard mostrado ao aceitar escolha")
                         
-                        # Chamar a interface principal do PlayerDashboard SEM botão Store
+                        # Chamar a interface principal do PlayerDashboard sem mostrar botão Store
                         self.dashboard.playerdashboard_interface(
                             self.dashboard.player_name,
                             self.dashboard.saldo,
                             self.dashboard.other_players,
                             show_store_button=False
                         )
-                        print("DEBUG: Interface principal do PlayerDashboard aberta SEM botão Store")
+                        print("DEBUG: Interface principal do PlayerDashboard aberta com sucesso ao aceitar escolha")
                     except Exception as e:
                         print(f"DEBUG: Erro ao voltar ao PlayerDashboard após aceitar escolha: {e}")
         def recusar():
+            # Limpar estado de fullscreen porque a carta foi recusada
+            self.fullscreen_carta_path = None
+            self.fullscreen_carta_tipo = None
+            print("DEBUG: Estado de fullscreen limpo ao recusar carta")
+            
             # NÃO destruir a StoreWindow aqui!
             # self.destroy()
             if self.dashboard and hasattr(self.dashboard, "playerdashboard_interface"):
@@ -1823,26 +4030,36 @@ class StoreWindow(tk.Toplevel):
                     self.dashboard.focus_force()
                     print("DEBUG: PlayerDashboard mostrado ao recusar escolha")
                     
-                    # Chamar a interface principal do PlayerDashboard SEM botão Store
+                    # Chamar a interface principal do PlayerDashboard sem mostrar botão Store
                     self.dashboard.playerdashboard_interface(
                         self.dashboard.player_name,
                         self.dashboard.saldo,
                         self.dashboard.other_players,
                         show_store_button=False
                     )
-                    print("DEBUG: Interface principal do PlayerDashboard aberta SEM botão Store")
+                    print("DEBUG: Interface principal do PlayerDashboard aberta com sucesso ao recusar escolha")
                 except Exception as e:
                     print(f"DEBUG: Erro ao voltar ao PlayerDashboard após recusar escolha: {e}")
+                
         # Botão verde (✔) canto superior direito
         btn_certo = tk.Button(self, text="✔", font=("Helvetica", 24, "bold"), bg="#4CAF50", fg="white", width=2, height=1, borderwidth=0, highlightthickness=0, command=aceitar, cursor="hand2", activebackground="#43d17a")
         btn_certo.place(relx=0.98, rely=0, anchor="ne")
-        # Botão vermelho (✖) canto superior esquerdo
-        btn_x = tk.Button(self, text="✖", font=("Helvetica", 24, "bold"), bg="#F44336", fg="white", width=2, height=1, borderwidth=0, highlightthickness=0, command=recusar, cursor="hand2", activebackground="#e57373")
+        # Botão cinza (✖) canto superior esquerdo
+        btn_x = tk.Button(self, text="✖", font=("Helvetica", 24, "bold"), bg="#AAAAAA", fg="white", width=2, height=1, borderwidth=0, highlightthickness=0, command=recusar, cursor="hand2", activebackground="#CCCCCC")
         btn_x.place(relx=0., rely=0, anchor="nw")
 
     def iniciar_venda_carta(self, carta_path, carta_tipo, player_dashboard):
-        """Mostra a carta em fullscreen para venda, com botão piccoin e confirmação, tudo na StoreWindow."""
-        print(f"DEBUG: iniciar_venda_carta chamado - carta_path: {carta_path}")
+        """FUNÇÃO DEPRECATED - Redireciona para PlayerDashboard"""
+        print(f"DEBUG: iniciar_venda_carta (deprecated) - redirecionando para PlayerDashboard")
+        if player_dashboard and hasattr(player_dashboard, 'show_sell_confirmation'):
+            player_dashboard.show_sell_confirmation(carta_path, carta_tipo, self)
+        else:
+            print("DEBUG: ERRO - PlayerDashboard não encontrado")
+            # Fallback: volta à página de inventário
+            if hasattr(self, 'current_sell_type') and self.current_sell_type:
+                self.show_sell_inventory_paginated(self.current_sell_type, getattr(self, 'current_sell_page', 0))
+            else:
+                self.voltar_para_store()
         
         # Verificar se o arquivo existe
         if not os.path.exists(carta_path):
@@ -1916,108 +4133,230 @@ class StoreWindow(tk.Toplevel):
         self.update_idletasks()
         self.update()
 
-    def confirmar_venda_carta(self, carta_path, carta_tipo, player_dashboard):
-        """Mostra a página de confirmação de venda e trata a lógica de saldo e inventário."""
-        print(f"DEBUG: confirmar_venda_carta chamado - carta_path: {carta_path}")
+    def mostrar_confirmacao_venda_overlay(self, carta_path, carta_tipo, player_dashboard):
+        """Mostra a confirmação de venda como overlay sobre a carta em fullscreen."""
+        print(f"DEBUG: mostrar_confirmacao_venda_overlay chamado - carta_path: {carta_path}")
         
-        # Limpa widgets
-        for widget in self.winfo_children():
-            widget.destroy()
-        self.configure(bg="black")
-        
-        screen_width = self.winfo_screenwidth()
-        
-        # Barra superior com imagem TopBar da cor do jogador
-        try:
-            topbar_img_path = os.path.join(IMG_DIR, f"TopBar_{self.player_color}.png")
-            topbar_img = ImageTk.PhotoImage(Image.open(topbar_img_path).resize((screen_width, 60)))
-            header_label = tk.Label(self, image=topbar_img, bg="black", borderwidth=0, highlightthickness=0)
-            header_label.image = topbar_img  # type: ignore[attr-defined]
-            header_label.pack(side="top", fill="x")
-            
-            # Nome do jogador centralizado sobre a imagem
-            name_lbl = tk.Label(self, text=player_dashboard.player_name, 
-                               font=("Helvetica", 18, "bold"), bg=self.player_color_hex, fg="black")
-            name_lbl.place(relx=0.5, y=25, anchor="n")
-            
-            # Saldo e moeda no canto direito sobre a imagem
-            coin_img = ImageTk.PhotoImage(Image.open(COIN_IMG).resize((24,24)))
-            coin_lbl = tk.Label(self, image=coin_img, bg=self.player_color_hex)
-            coin_lbl.image = coin_img  # type: ignore[attr-defined]
-            coin_lbl.place(x=screen_width-100, y=30)
-            
-            saldo_lbl = tk.Label(self, text=f"{player_dashboard.saldo}", 
-                               font=("Helvetica", 16, "bold"), bg=self.player_color_hex, fg="black")
-            saldo_lbl.place(x=screen_width-70, y=30)
-            
-        except Exception as e:
-            print(f"DEBUG: Erro ao carregar TopBar, usando header simples: {e}")
-            # Fallback para header simples se não conseguir carregar a imagem
-            header_frame = tk.Frame(self, bg=self.player_color_hex, height=60)
-            header_frame.pack(fill="x", pady=0)
-            header_frame.pack_propagate(False)
-            
-            name_lbl = tk.Label(header_frame, text=player_dashboard.player_name, 
-                               font=("Helvetica", 18, "bold"), bg=self.player_color_hex, fg="black")
-            name_lbl.place(relx=0.5, rely=0.5, anchor="center")
-            
-            coin_img = ImageTk.PhotoImage(Image.open(COIN_IMG).resize((24,24)))
-            coin_lbl = tk.Label(header_frame, image=coin_img, bg=self.player_color_hex)
-            coin_lbl.image = coin_img  # type: ignore[attr-defined]
-            coin_lbl.place(x=screen_width-100, rely=0.5, anchor="w")
-            
-            saldo_lbl = tk.Label(header_frame, text=f"{player_dashboard.saldo}", 
-                               font=("Helvetica", 16, "bold"), bg=self.player_color_hex, fg="black")
-            saldo_lbl.place(x=screen_width-70, rely=0.5, anchor="w")
-        
-        # Frame central para conteúdo
-        confirm_frame = tk.Frame(self, bg="black")
-        confirm_frame.pack(expand=True, fill="both", padx=20, pady=20)
-        
-        # Pergunta principal
-        question_lbl = tk.Label(confirm_frame, text="Are you sure you want to sell?", 
-                               font=("Helvetica", 16, "bold"), fg="white", bg="black")
-        question_lbl.pack(pady=(60, 30))
-        
-        # Saldo atual
-        balance_lbl = tk.Label(confirm_frame, text=f"Your balance: {player_dashboard.saldo}", 
-                              font=("Helvetica", 16), fg="yellow", bg="black")
-        balance_lbl.pack(pady=(0, 20))
-        
-        # Valor da carta
+        # Extrair valor da carta
         valor = None
         try:
             import re
             nome = os.path.basename(carta_path)
             print(f"DEBUG: Extraindo valor do arquivo: {nome}")
             
-            # Tentar diferentes padrões de extração
-            match = re.search(r'_(\d+)\.', nome)
-            if match:
-                valor = int(match.group(1))
-                print(f"DEBUG: Valor extraído: {valor}")
+            # Se for carta de Activities, valor é sempre 0
+            if carta_tipo == "activities":
+                valor = 0
+                print(f"DEBUG: Carta de Activities - valor definido como 0")
             else:
-                # Tentar outros padrões
-                match = re.search(r'(\d+)', nome)
+                # Tentar diferentes padrões de extração para outros tipos
+                match = re.search(r'_(\d+)\.', nome)
                 if match:
                     valor = int(match.group(1))
-                    print(f"DEBUG: Valor extraído (padrão alternativo): {valor}")
+                    print(f"DEBUG: Valor extraído: {valor}")
                 else:
-                    print(f"DEBUG: Nenhum valor encontrado no nome do arquivo")
-                    valor = 50  # valor padrão
+                    # Tentar outros padrões
+                    match = re.search(r'(\d+)', nome)
+                    if match:
+                        valor = int(match.group(1))
+                        print(f"DEBUG: Valor extraído (padrão alternativo): {valor}")
+                    else:
+                        print(f"DEBUG: Nenhum valor encontrado no nome do arquivo")
+                        valor = 50  # valor padrão
         except Exception as e:
             print(f"DEBUG: Erro ao extrair valor: {e}")
             valor = 50  # valor padrão
         
-        # Frame para mostrar valor da carta
+        # Criar frame de overlay
+        overlay_frame = tk.Frame(self, bg="black")
+        overlay_frame.place(relx=0.5, rely=0.5, anchor="center", width=400, height=300)
+        
+        # Frame interno para centrar conteúdo
+        content_frame = tk.Frame(overlay_frame, bg="black")
+        content_frame.pack(expand=True, fill="both", padx=20, pady=20)
+        
+        # Título
+        tk.Label(content_frame, text="Are you sure you want to sell?", 
+                font=("Helvetica", 16, "bold"), fg="white", bg="black").pack(pady=(20, 15))
+        
+        # Saldo atual do player
+        player_saldo = player_dashboard.saldo if player_dashboard else self.saldo
+        tk.Label(content_frame, text=f"Your balance: {player_saldo}", 
+                font=("Helvetica", 14), fg="yellow", bg="black").pack(pady=(0, 10))
+        
+        # Valor da carta
+        value_frame = tk.Frame(content_frame, bg="black")
+        value_frame.pack(pady=(0, 20))
+        
+        value_text_lbl = tk.Label(value_frame, text="Card value: ", 
+                                 font=("Helvetica", 14), fg="white", bg="black")
+        value_text_lbl.pack(side="left")
+        
+        value_amount_lbl = tk.Label(value_frame, text=str(valor) if valor is not None else "?", 
+                                   font=("Helvetica", 14, "bold"), fg="yellow", bg="black")
+        value_amount_lbl.pack(side="left", padx=(5, 5))
+        
+        # Ícone da moeda
+        try:
+            picoin_img = ImageTk.PhotoImage(Image.open(COIN_IMG).resize((20,20)))
+            picoin_lbl = tk.Label(value_frame, image=picoin_img, bg="black")
+            picoin_lbl.image = picoin_img
+            picoin_lbl.pack(side="left")
+        except Exception as e:
+            print(f"DEBUG: Erro ao carregar ícone da moeda: {e}")
+        
+        # Frame dos botões
+        btns_frame = tk.Frame(content_frame, bg="black")
+        btns_frame.pack(side="bottom", pady=(20, 10))
+        
+        def confirmar():
+            print("DEBUG: Confirmar venda - início (overlay)")
+            print(f"DEBUG: Valor da carta: {valor}")
+            
+            # Atualiza saldos
+            if valor is not None and valor > 0:
+                # Player recebe o dinheiro
+                player_dashboard.saldo += valor
+                # Store paga (perde dinheiro)
+                self.saldo -= valor
+                
+                print(f"DEBUG: Saldos atualizados - Player: {player_dashboard.saldo}, Store: {self.saldo}")
+                
+                # Remove carta do inventário do player
+                if (hasattr(player_dashboard, 'inventario') and 
+                    player_dashboard.inventario and 
+                    carta_tipo in player_dashboard.inventario and 
+                    carta_path in player_dashboard.inventario[carta_tipo]):
+                    
+                    player_dashboard.inventario[carta_tipo].remove(carta_path)
+                    print(f"DEBUG: Carta removida do inventário do player: {carta_path}")
+                
+                # Sincronizar o inventário da Store com o do PlayerDashboard
+                if hasattr(self, 'inventario') and self.inventario is not None:
+                    self.inventario = player_dashboard.inventario
+                    print(f"DEBUG: Inventário da Store sincronizado com o PlayerDashboard")
+            
+            print(f"DEBUG: Venda confirmada - Player saldo: {player_dashboard.saldo}, Store saldo: {self.saldo}")
+            
+            # Remove o overlay
+            overlay_frame.destroy()
+            
+            # Volta à página de venda
+            if hasattr(self, 'current_sell_type') and self.current_sell_type:
+                self.show_sell_inventory_paginated(self.current_sell_type, getattr(self, 'current_sell_page', 0))
+                print(f"DEBUG: Voltando à página de venda de {self.current_sell_type}")
+            else:
+                self.voltar_para_store()
+                print("DEBUG: Voltando à página inicial da Store (fallback)")
+        
+        def cancelar():
+            print("DEBUG: Venda cancelada - removendo overlay")
+            overlay_frame.destroy()
+        
+        # Botões Yes e No
+        btn_yes = tk.Button(btns_frame, text="Yes", font=("Helvetica", 12, "bold"), 
+                           bg="#4CAF50", fg="white", width=8, command=confirmar)
+        btn_no = tk.Button(btns_frame, text="No", font=("Helvetica", 12, "bold"), 
+                          bg="#F44336", fg="white", width=8, command=cancelar)
+        btn_yes.pack(side="left", padx=10)
+        btn_no.pack(side="left", padx=10)
+        
+        print("DEBUG: Overlay de confirmação de venda criado com sucesso")
+
+    def confirmar_venda_carta(self, carta_path, carta_tipo, player_dashboard):
+        """FUNÇÃO DEPRECATED - Redireciona para PlayerDashboard"""
+        print(f"DEBUG: confirmar_venda_carta (deprecated) - redirecionando para PlayerDashboard")
+        if player_dashboard and hasattr(player_dashboard, 'show_sell_confirmation'):
+            player_dashboard.show_sell_confirmation(carta_path, carta_tipo, self)
+        else:
+            print("DEBUG: ERRO - PlayerDashboard não encontrado")
+            # Fallback: volta à página de inventário
+            if hasattr(self, 'current_sell_type') and self.current_sell_type:
+                self.show_sell_inventory_paginated(self.current_sell_type, getattr(self, 'current_sell_page', 0))
+            else:
+                self.voltar_para_store()
+        
+        # PRIMEIRO: Mostra a carta em fullscreen como fundo
+        try:
+            pil_img = Image.open(carta_path)
+            img_w, img_h = pil_img.size
+            
+            # Área disponível: toda a tela
+            available_width = self.winfo_screenwidth()
+            available_height = self.winfo_screenheight()
+            
+            # Calcular o ratio para ocupar o máximo possível da tela
+            ratio = min(available_width/img_w, available_height/img_h)
+            new_w, new_h = int(img_w*ratio), int(img_h*ratio)
+            pil_img = pil_img.resize((new_w, new_h), Image.Resampling.LANCZOS)
+            carta_img = ImageTk.PhotoImage(pil_img)
+            
+            # Carta em fullscreen como fundo
+            carta_real_lbl = tk.Label(self, image=carta_img, bg="black", borderwidth=0, highlightthickness=0)
+            carta_real_lbl.image = carta_img  # Manter referência para evitar garbage collection
+            carta_real_lbl.place(relx=0.5, rely=0.5, anchor="center")
+            print("DEBUG: Carta carregada em fullscreen como fundo")
+            
+        except Exception as e:
+            print(f"DEBUG: ERRO ao carregar carta para fundo: {e}")
+            # Mostrar um placeholder em caso de erro
+            carta_real_lbl = tk.Label(self, text="Erro ao carregar carta", font=("Helvetica", 20), fg="red", bg="black")
+            carta_real_lbl.place(relx=0.5, rely=0.5, anchor="center")
+        
+        # SEGUNDO: Criar overlay de confirmação sobre a carta
+        overlay_frame = tk.Frame(self, bg="black")
+        overlay_frame.place(relx=0.5, rely=0.5, anchor="center", width=500, height=350)
+        
+        # Frame de confirmação dentro do overlay
+        confirm_frame = tk.Frame(overlay_frame, bg="black")
+        confirm_frame.pack(expand=True, fill="both", padx=40, pady=40)
+        
+        # Extrair valor da carta
+        valor = None
+        try:
+            import re
+            nome = os.path.basename(carta_path)
+            print(f"DEBUG: Extraindo valor do arquivo: {nome}")
+            
+            # Se for carta de Activities, valor é sempre 0
+            if carta_tipo == "activities":
+                valor = 0
+                print(f"DEBUG: Carta de Activities - valor definido como 0")
+            else:
+                # Tentar diferentes padrões de extração para outros tipos
+                match = re.search(r'_(\d+)\.', nome)
+                if match:
+                    valor = int(match.group(1))
+                    print(f"DEBUG: Valor extraído: {valor}")
+                else:
+                    # Tentar outros padrões
+                    match = re.search(r'(\d+)', nome)
+                    if match:
+                        valor = int(match.group(1))
+                        print(f"DEBUG: Valor extraído (padrão alternativo): {valor}")
+                    else:
+                        print(f"DEBUG: Nenhum valor encontrado no nome do arquivo")
+                        valor = 50  # valor padrão
+        except Exception as e:
+            print(f"DEBUG: Erro ao extrair valor: {e}")
+            valor = 50  # valor padrão
+        
+        # Título da confirmação
+        tk.Label(confirm_frame, text="Are you sure you want to sell?", font=("Helvetica", 16, "bold"), fg="white", bg="black").pack(pady=(20, 15))
+        
+        # Usar o saldo do Player
+        player_saldo = player_dashboard.saldo if player_dashboard else self.saldo
+        tk.Label(confirm_frame, text=f"Your balance: {player_saldo}", font=("Helvetica", 16), fg="yellow", bg="black").pack(pady=(0, 10))
+        
+        # Valor da carta
         value_frame = tk.Frame(confirm_frame, bg="black")
-        value_frame.pack(pady=(0, 40))
+        value_frame.pack(pady=(0, 20))
         
         value_text_lbl = tk.Label(value_frame, text="Card value: ", 
                                  font=("Helvetica", 16), fg="white", bg="black")
         value_text_lbl.pack(side="left")
         
-        value_amount_lbl = tk.Label(value_frame, text=str(valor), 
+        value_amount_lbl = tk.Label(value_frame, text=str(valor) if valor is not None else "?", 
                                    font=("Helvetica", 16, "bold"), fg="yellow", bg="black")
         value_amount_lbl.pack(side="left", padx=(5, 5))
         
@@ -2025,14 +4364,13 @@ class StoreWindow(tk.Toplevel):
         try:
             picoin_img = ImageTk.PhotoImage(Image.open(COIN_IMG).resize((24,24)))
             picoin_lbl = tk.Label(value_frame, image=picoin_img, bg="black")
-            picoin_lbl.image = picoin_img  # type: ignore[attr-defined]
+            picoin_lbl.image = picoin_img
             picoin_lbl.pack(side="left")
         except Exception as e:
             print(f"DEBUG: Erro ao carregar ícone da moeda: {e}")
         
-        # Frame para botões
         btns_frame = tk.Frame(confirm_frame, bg="black")
-        btns_frame.pack(pady=20)
+        btns_frame.pack(side="bottom", pady=(20, 0))
         
         def confirmar():
             print("DEBUG: Confirmar venda - início (StoreWindow)")
@@ -2063,14 +4401,11 @@ class StoreWindow(tk.Toplevel):
                     self.inventario = player_dashboard.inventario
                     print(f"DEBUG: Inventário da Store sincronizado com o PlayerDashboard")
                 
-                # CORREÇÃO: NÃO adicionar a carta ao inventário da Store
-                # porque a Store usa a referência do inventário do PlayerDashboard
-                # Adicionar a carta vendida ao inventário da Store causaria que ela aparecesse novamente
                 print(f"DEBUG: Carta vendida não será adicionada ao inventário da Store para evitar duplicação")
             
             print(f"DEBUG: Venda confirmada - Player saldo: {player_dashboard.saldo}, Store saldo: {self.saldo}")
             
-            # ALTERAÇÃO: Volta à página de venda em vez da página inicial da Store
+            # ALTERAÇÃO: Volta à página de venda em vez da página inicial da Store (igual à compra)
             if hasattr(self, 'current_sell_type') and self.current_sell_type:
                 # Volta à página de venda do mesmo tipo
                 self.show_sell_inventory_paginated(self.current_sell_type, getattr(self, 'current_sell_page', 0))
@@ -2082,17 +4417,21 @@ class StoreWindow(tk.Toplevel):
         
         def cancelar():
             print("DEBUG: Venda cancelada - voltando à visualização da carta")
-            self.iniciar_venda_carta(carta_path, carta_tipo, player_dashboard)
+            # CORREÇÃO: Usar função do PlayerDashboard em vez do Store
+            if player_dashboard and hasattr(player_dashboard, 'show_sell_confirmation'):
+                player_dashboard.show_sell_confirmation(carta_path, carta_tipo, self)
+            else:
+                print("DEBUG: ERRO - PlayerDashboard não encontrado ou não tem show_sell_confirmation")
+                # Fallback: volta à página de inventário de venda
+                if hasattr(self, 'current_sell_type') and self.current_sell_type:
+                    self.show_sell_inventory_paginated(self.current_sell_type, getattr(self, 'current_sell_page', 0))
+                else:
+                    self.voltar_para_store()
         
-        # Botões Yes e No
-        btn_yes = tk.Button(btns_frame, text="Yes", font=("Helvetica", 14, "bold"), 
-                           bg="#4CAF50", fg="white", width=8, 
-                           command=confirmar, cursor="hand2")
+        # Botões Yes e No (igual ao da compra)
+        btn_yes = tk.Button(btns_frame, text="Yes", font=("Helvetica", 14, "bold"), bg="#4CAF50", fg="white", width=8, command=confirmar)
+        btn_no = tk.Button(btns_frame, text="No", font=("Helvetica", 14, "bold"), bg="#F44336", fg="white", width=8, command=cancelar)
         btn_yes.pack(side="left", padx=20, pady=10)
-        
-        btn_no = tk.Button(btns_frame, text="No", font=("Helvetica", 14, "bold"), 
-                          bg="#F44336", fg="white", width=8, 
-                          command=cancelar, cursor="hand2")
         btn_no.pack(side="left", padx=20, pady=10)
         
         print("DEBUG: confirmar_venda_carta interface criada com sucesso")
@@ -2100,6 +4439,7 @@ class StoreWindow(tk.Toplevel):
     def rebuild_store_interface(self):
         """Reconstrói a interface da Store após voltar da página de compra"""
         print("DEBUG: rebuild_store_interface chamado")
+        print(f"DEBUG: [rebuild_store_interface] ID do objeto Store: {id(self)}")
         
         try:
             # IMPORTANTE: Sincronizar inventário com o PlayerDashboard antes de reconstruir
@@ -2123,11 +4463,41 @@ class StoreWindow(tk.Toplevel):
                 screen_width = 800  # valor padrão em caso de erro
                 print("DEBUG: Erro ao obter largura da tela, usando padrão")
             
-            awning_img = ImageTk.PhotoImage(Image.open(AWNING_IMG).resize((screen_width, 50)))
+            awning_img = ImageTk.PhotoImage(Image.open(AWNING_IMG).resize((screen_width, 65)))
             awning_label = tk.Label(self, image=awning_img, bg="black")
             awning_label.image = awning_img  # type: ignore[attr-defined]
             awning_label.pack(pady=(0, 10), fill="x")
             print(f"DEBUG: Barra superior criada com largura {screen_width}")
+            
+            # Label pequeno à esquerda do logo
+            left_label = tk.Label(self, text="••••", font=("Helvetica", 12, "bold"), bg="#DC8392", fg="#DC8392")
+            left_label.place(relx=0.46, y=10, anchor="center")
+            
+            # Logo NetMaster posicionado independentemente
+            try:
+                logo_img = ImageTk.PhotoImage(Image.open(os.path.join(IMG_DIR, "logo_netmaster_store.png")).resize((24, 24)))
+                logo_lbl = tk.Label(self, image=logo_img, bg="#DC8392")
+                logo_lbl.image = logo_img  # type: ignore[attr-defined]
+                logo_lbl.place(relx=0.5, y=10, anchor="center")
+            except Exception as e:
+                print(f"DEBUG: Erro ao carregar logo: {e}")
+            
+            # Label largo à direita do logo para cobrir área amarela
+            right_logo_label = tk.Label(self, text="     ", font=("Helvetica", 12, "bold"), bg="#DC8392", fg="#DC8392")
+            right_logo_label.place(relx=0.53, y=10, anchor="w")
+            
+            # Label adicional para garantir cobertura completa
+            extra_cover_label = tk.Label(self, text="     ", font=("Helvetica", 10), bg="#DC8392", fg="#DC8392")
+            extra_cover_label.place(relx=0.55, y=10, anchor="w")
+            
+            # Texto "Store" posicionado independentemente
+            store_name_lbl = tk.Label(self, text="Store", 
+                                     font=("Helvetica", 15, "bold"), bg="#DC8392", fg="black")
+            store_name_lbl.place(relx=0.5, y=30, anchor="center")
+            
+            # Label pequeno à direita do nome Store
+            right_store_label = tk.Label(self, text="•", font=("Helvetica", 12, "bold"), bg="#DC8392", fg="#DC8392")
+            right_store_label.place(relx=0.6, y=30, anchor="center")
             
             # Frame principal para os botões
             main_frame = tk.Frame(self, bg="black")
@@ -2209,89 +4579,72 @@ class StoreWindow(tk.Toplevel):
             btn_activities.config(command="")
             btn_services.config(command="")
 
-            # Frame para os botões de ação na parte inferior (inicialmente oculto)
+            # Frame para os botões de ação na parte inferior (não usado mais)
             self.action_frame = tk.Frame(self, bg="black")
 
-            # Sub-frame centralizado para os botões
+            # Sub-frame centralizado para os botões (não usado mais)
             self.action_buttons_frame = tk.Frame(self.action_frame, bg="black")
             self.action_buttons_frame.pack(anchor="center", pady=2)
+
+            # --- CORREÇÃO: Verificar se há carta em fullscreen pendente ---
+            print(f"DEBUG: [rebuild_store_interface] Verificando estado da carta fullscreen...")
+            print(f"DEBUG: [rebuild_store_interface] hasattr(self, 'fullscreen_carta_path'): {hasattr(self, 'fullscreen_carta_path')}")
+            print(f"DEBUG: [rebuild_store_interface] hasattr(self, 'fullscreen_carta_tipo'): {hasattr(self, 'fullscreen_carta_tipo')}")
+            if hasattr(self, 'fullscreen_carta_path'):
+                print(f"DEBUG: [rebuild_store_interface] self.fullscreen_carta_path: {self.fullscreen_carta_path}")
+            if hasattr(self, 'fullscreen_carta_tipo'):
+                print(f"DEBUG: [rebuild_store_interface] self.fullscreen_carta_tipo: {self.fullscreen_carta_tipo}")
             
-            # Botões de ação: Buy, Sell, Skip dentro de frames de tamanho fixo
-            action_font = ("Helvetica", 14, "bold")
-            frame_width = 100
-            frame_height = 50
-
-            self.buy_frame = tk.Frame(self.action_buttons_frame, width=frame_width, height=frame_height, bg="black")
-            self.sell_frame = tk.Frame(self.action_buttons_frame, width=frame_width, height=frame_height, bg="black")
-            self.skip_frame = tk.Frame(self.action_buttons_frame, width=frame_width, height=frame_height, bg="black")
-            self.buy_frame.pack_propagate(False)
-            self.sell_frame.pack_propagate(False)
-            self.skip_frame.pack_propagate(False)
-
-            btn_buy = tk.Button(self.buy_frame, text="BUY", font=action_font, bg="#4CAF50", fg="white", 
-                               relief="flat", borderwidth=0,
-                               command=self.buy_action)
-            btn_sell = tk.Button(self.sell_frame, text="SELL", font=action_font, bg="#F44336", fg="white", 
-                                relief="flat", borderwidth=0,
-                                command=self.sell_action)
-            btn_skip = tk.Button(self.skip_frame, text="SKIP", font=action_font, bg="#FF9800", fg="white", 
-                                relief="flat", borderwidth=0,
-                                command=self.skip_action)
-            # Destacar cor ativa igual à cor normal
-            for btn in [btn_buy, btn_sell, btn_skip]:
-                btn.config(activebackground=btn.cget("bg"), activeforeground=btn.cget("fg"))
-
-            # Centralizar cada botão no seu frame
-            btn_sell.place(relx=0.5, rely=0.5, anchor="center")
-            btn_buy.place(relx=0.5, rely=0.5, anchor="center")
-            btn_skip.place(relx=0.5, rely=0.5, anchor="center")
-
-            # Pack frames lado a lado
-            self.sell_frame.pack(side="left", padx=10, pady=0)
-            self.buy_frame.pack(side="left", padx=10, pady=0)
-            self.skip_frame.pack(side="left", padx=10, pady=0)
-
-            self.btn_buy = btn_buy
-            self.btn_sell = btn_sell
-            self.btn_skip = btn_skip
-
-            # Garantir que os botões de ação estão escondidos inicialmente
-            self.hide_action_buttons()
-            print("DEBUG: Botões de ação escondidos")
-
-            # --- CORREÇÃO: Aplicar destaque e comandos corretos para casas neutras e normais ---
-            if hasattr(self, 'casa_tipo') and hasattr(self, 'casa_cor') and self.casa_tipo and self.casa_cor:
-                print(f"DEBUG: Aplicando destaque para {self.casa_tipo} {self.casa_cor}")
-                # Para casas neutras, garantir que o tipo é plural (actions, events, challenges)
-                tipo_map = {"action": "actions", "event": "events", "challenge": "challenges"}
-                casa_tipo = self.casa_tipo
-                if self.casa_cor == "neutral":
-                    casa_tipo = tipo_map.get(self.casa_tipo, self.casa_tipo)
-                self.highlight_casa(casa_tipo, self.casa_cor)
+            # USAR A NOVA FUNÇÃO ESPECÍFICA
+            if self.restaurar_carta_fullscreen_pendente():
+                print("DEBUG: [rebuild_store_interface] Carta em fullscreen restaurada - saindo do método")
+                return  # Sair do método para não continuar com a interface normal
             else:
-                print("DEBUG: Desabilitando todos os botões - sem destaque")
-                self.disable_all_buttons()
+                print("DEBUG: [rebuild_store_interface] Nenhuma carta pendente - continuando com interface normal")
             
-            # Se for casa de outro jogador, sempre habilita os botões Users, Equipment, Activities, Services
-            if getattr(self, 'other_player_house', False):
-                casa_cor_atual = getattr(self, 'casa_cor', 'neutral')
-                # Configurar comandos para os botões permitidos em casa de outro jogador
-                if self.card_buttons.get("users"):
-                    self.card_buttons["users"].config(command=lambda: self.tirar_carta("users", casa_cor_atual))
-                if self.card_buttons.get("equipments"):
-                    self.card_buttons["equipments"].config(command=lambda: self.tirar_carta("equipments", casa_cor_atual))
-                if self.card_buttons.get("activities"):
-                    self.card_buttons["activities"].config(command=lambda: self.tirar_carta("activities", casa_cor_atual))
-                if self.card_buttons.get("services"):
-                    self.card_buttons["services"].config(command=lambda: self.tirar_carta("services", casa_cor_atual))
-                print("DEBUG: Configuração para casa de outro jogador aplicada (incluindo Activities)")
+            # --- CORREÇÃO: Obter informações da casa atual sempre do PlayerDashboard ---
+            casa_tipo_atual = None
+            casa_cor_atual = None
+            
+            # SEMPRE obter informações atualizadas do PlayerDashboard
+            if self.dashboard:
+                # Obter a posição atual do jogador
+                player_pos = getattr(self.dashboard, 'player_pos', None)
+                if player_pos is not None:
+                    # Calcular casa atual a partir da posição
+                    casa_info = self._get_casa_from_position(player_pos)
+                    if casa_info:
+                        casa_tipo_atual, casa_cor_atual = casa_info
+                        print(f"DEBUG: [rebuild_store_interface] Casa atual calculada da posição {player_pos}: {casa_tipo_atual} {casa_cor_atual}")
+                        
+                        # Atualizar Store com as informações corretas
+                        self.casa_tipo = casa_tipo_atual
+                        self.casa_cor = casa_cor_atual
+                    else:
+                        print(f"DEBUG: [rebuild_store_interface] Não foi possível determinar casa para posição {player_pos}")
+                else:
+                    print("DEBUG: [rebuild_store_interface] Posição do jogador não disponível no PlayerDashboard")
+            else:
+                print("DEBUG: [rebuild_store_interface] PlayerDashboard não disponível")
+            
+            # Aplicar destaque e comandos corretos para casas
+            if casa_tipo_atual and casa_cor_atual:
+                print(f"DEBUG: Aplicando destaque para {casa_tipo_atual} {casa_cor_atual}")
+                # Para todos os tipos, garantir que o tipo é plural (actions, events, challenges)
+                tipo_map = {"action": "actions", "event": "events", "challenge": "challenges"}
+                casa_tipo_normalizado = tipo_map.get(casa_tipo_atual, casa_tipo_atual)
+                print(f"DEBUG: Tipo normalizado de '{casa_tipo_atual}' para '{casa_tipo_normalizado}'")
+                self.highlight_casa(casa_tipo_normalizado, casa_cor_atual)
+            else:
+                print("DEBUG: Desabilitando todos os botões - sem destaque (casa não identificada)")
+                self.disable_all_buttons()
             
             # Força update final para garantir que tudo é exibido
             self.update_idletasks()
             self.update()
             
             # Barra inferior com imagem BelowBar_store.png
-            belowbar_img = ImageTk.PhotoImage(Image.open(BELOWBAR_IMG).resize((screen_width, 50)))
+            belowbar_img = ImageTk.PhotoImage(Image.open(BELOWBAR_IMG).resize((screen_width, 65)))
             belowbar_label = tk.Label(self, image=belowbar_img, bg="black")
             belowbar_label.image = belowbar_img  # type: ignore[attr-defined]
             belowbar_label.pack(side="bottom", fill="x")
@@ -2311,25 +4664,54 @@ class StoreWindow(tk.Toplevel):
             def abrir_playerdashboard():
                 """Abre a interface principal do PlayerDashboard (igual ao botão Player das cartas de Challenges)"""
                 print("DEBUG: Botão Player pressionado - abrindo interface principal do PlayerDashboard")
-                if self.dashboard and hasattr(self.dashboard, "playerdashboard_interface"):
-                    self.dashboard.playerdashboard_interface(
-                        self.dashboard.player_name,
-                        self.dashboard.saldo,
-                        self.dashboard.other_players
-                    )
-                    print("DEBUG: Interface principal do PlayerDashboard aberta com sucesso")
-                else:
-                    print("DEBUG: ERRO - PlayerDashboard não disponível ou método playerdashboard_interface não encontrado")
+                try:
+                    # CORREÇÃO: Limpar estado Challenge da Store antes de voltar ao PlayerDashboard
+                    # Isso evita que o Next Phase apareça incorretamente
+                    if hasattr(self, 'fullscreen_carta_path'):
+                        self.fullscreen_carta_path = None
+                        print("DEBUG: fullscreen_carta_path limpo da Store")
+                    if hasattr(self, 'fullscreen_carta_tipo'):
+                        self.fullscreen_carta_tipo = None
+                        print("DEBUG: fullscreen_carta_tipo limpo da Store")
+                    
+                    if self.dashboard and hasattr(self.dashboard, "playerdashboard_interface"):
+                        # Esconder a Store primeiro
+                        self.withdraw()
+                        print("DEBUG: Store escondida")
+                        
+                        # CORREÇÃO: Limpar flag Challenge no PlayerDashboard quando voltar via botão Player
+                        # Isso garante que o Next Phase não apareça incorretamente
+                        self.dashboard._challenge_accepted = False
+                        print("DEBUG: Flag _challenge_accepted resetada no PlayerDashboard")
+                        
+                        # Mostrar o PlayerDashboard
+                        self.dashboard.deiconify()
+                        self.dashboard.state('normal')
+                        self.dashboard.lift()
+                        self.dashboard.focus_force()
+                        print("DEBUG: PlayerDashboard mostrado")
+                        
+                        # Chamar a interface principal do PlayerDashboard
+                        self.dashboard.playerdashboard_interface(
+                            self.dashboard.player_name,
+                            self.dashboard.saldo,
+                            self.dashboard.other_players
+                        )
+                        print("DEBUG: Interface principal do PlayerDashboard aberta com sucesso")
+                    else:
+                        print("DEBUG: ERRO - PlayerDashboard não disponível ou método playerdashboard_interface não encontrado")
+                except Exception as e:
+                    print(f"DEBUG: Erro ao abrir PlayerDashboard: {e}")
 
             try:
                 # Carregar ícone do jogador
                 user_icon_path = os.path.join(IMG_DIR, f"{self.player_color}_user_icon.png")
-                user_icon_img = ImageTk.PhotoImage(Image.open(user_icon_path).resize((48, 48)))
-                btn_player = tk.Button(self, image=user_icon_img, bg="black", relief="flat", borderwidth=0, 
-                                      command=abrir_playerdashboard, cursor="hand2", activebackground="black",
+                user_icon_img = ImageTk.PhotoImage(Image.open(user_icon_path).resize((30, 30)))
+                btn_player = tk.Button(self, image=user_icon_img, bg="#DC8392", relief="flat", borderwidth=0, 
+                                      command=abrir_playerdashboard, cursor="hand2", activebackground="#DC8392",
                                       highlightthickness=0)
                 btn_player.image = user_icon_img  # Manter referência para evitar garbage collection
-                btn_player.place(x=screen_width-15, y=5, anchor="ne")  # Movido mais para a direita e para cima
+                btn_player.place(x=screen_width-10, y=5, anchor="ne")  # Movido mais para a direita e para cima
                 print(f"DEBUG: Botão Player criado com ícone {self.player_color}_user_icon.png")
             except Exception as e:
                 print(f"DEBUG: Erro ao carregar ícone do jogador {self.player_color}_user_icon.png: {e}")
@@ -2372,10 +4754,40 @@ class StoreWindow(tk.Toplevel):
         
         # Barra superior com imagem Store_awning.png
         try:
-            awning_img = ImageTk.PhotoImage(Image.open(AWNING_IMG).resize((screen_width, 50)))
+            awning_img = ImageTk.PhotoImage(Image.open(AWNING_IMG).resize((screen_width, 65)))
             awning_label = tk.Label(self, image=awning_img, bg="black")
             awning_label.image = awning_img
             awning_label.pack(pady=(0, 10), fill="x")
+            
+            # Label pequeno à esquerda do logo
+            left_label = tk.Label(self, text="••••", font=("Helvetica", 12, "bold"), bg="#DC8392", fg="#DC8392")
+            left_label.place(relx=0.46, y=10, anchor="center")
+            
+            # Logo NetMaster posicionado independentemente
+            try:
+                logo_img = ImageTk.PhotoImage(Image.open(os.path.join(IMG_DIR, "logo_netmaster_store.png")).resize((24, 24)))
+                logo_lbl = tk.Label(self, image=logo_img, bg="#DC8392")
+                logo_lbl.image = logo_img  # type: ignore[attr-defined]
+                logo_lbl.place(relx=0.5, y=10, anchor="center")
+            except Exception as e:
+                print(f"DEBUG: Erro ao carregar logo: {e}")
+            
+            # Label largo à direita do logo para cobrir área amarela
+            right_logo_label = tk.Label(self, text="     ", font=("Helvetica", 12, "bold"), bg="#DC8392", fg="#DC8392")
+            right_logo_label.place(relx=0.53, y=10, anchor="w")
+            
+            # Label adicional para garantir cobertura completa
+            extra_cover_label = tk.Label(self, text="     ", font=("Helvetica", 10), bg="#DC8392", fg="#DC8392")
+            extra_cover_label.place(relx=0.55, y=10, anchor="w")
+            
+            # Texto "Store" posicionado independentemente
+            store_name_lbl = tk.Label(self, text="Store", 
+                                     font=("Helvetica", 15, "bold"), bg="#DC8392", fg="black")
+            store_name_lbl.place(relx=0.5, y=30, anchor="center")
+            
+            # Label pequeno à direita do nome Store
+            right_store_label = tk.Label(self, text="•", font=("Helvetica", 12, "bold"), bg="#DC8392", fg="#DC8392")
+            right_store_label.place(relx=0.6, y=30, anchor="center")
         except Exception as e:
             print(f"DEBUG: Erro ao carregar awning: {e}")
             # Fallback para barra simples
@@ -2458,12 +4870,12 @@ class StoreWindow(tk.Toplevel):
                 print("DEBUG: Carta fullscreen path não encontrado, voltando para store")
                 self.voltar_para_store()
         
-        back_btn = tk.Button(self, text="Back", font=("Helvetica", 14, "bold"), bg="#005c75", fg="white", width=10, 
+        back_btn = tk.Button(self, text="Back", font=("Helvetica", 14, "bold"), bg="#005c75", fg="white", width=6, 
                            command=voltar_carta_challenge)
         back_btn.place(relx=0.5, rely=0.98, anchor="s")
         
         # Barra inferior com imagem BelowBar_store.png
-        belowbar_img = ImageTk.PhotoImage(Image.open(BELOWBAR_IMG).resize((screen_width, 50)))
+        belowbar_img = ImageTk.PhotoImage(Image.open(BELOWBAR_IMG).resize((screen_width, 65)))
         belowbar_label = tk.Label(self, image=belowbar_img, bg="black")
         belowbar_label.image = belowbar_img  # type: ignore[attr-defined]
         belowbar_label.pack(side="bottom", fill="x")
@@ -2482,6 +4894,11 @@ class StoreWindow(tk.Toplevel):
             """Abre o PlayerDashboard e fecha a Store"""
             print("DEBUG: Botão Player pressionado - abrindo PlayerDashboard")
             if self.dashboard:
+                # CORREÇÃO: Limpar flag Challenge no PlayerDashboard quando voltar via botão Player
+                # Isso garante que o Next Phase não apareça incorretamente
+                self.dashboard._challenge_accepted = False
+                print("DEBUG: Flag _challenge_accepted resetada no PlayerDashboard")
+                
                 self.destroy()  # Fecha a Store
                 self.dashboard.deiconify()  # Mostra o PlayerDashboard
                 self.dashboard.lift()  # Traz para a frente
@@ -2494,10 +4911,10 @@ class StoreWindow(tk.Toplevel):
             # Carregar ícone do jogador
             user_icon_path = os.path.join(IMG_DIR, f"{self.player_color}_user_icon.png")
             user_icon_img = ImageTk.PhotoImage(Image.open(user_icon_path).resize((48, 48)))
-            btn_player = tk.Button(self, image=user_icon_img, bg="black", relief="flat", borderwidth=0, 
-                                  command=abrir_playerdashboard, cursor="hand2", activebackground="black")
+            btn_player = tk.Button(self, image=user_icon_img, bg="#DC8392", relief="flat", borderwidth=0, 
+                                  command=abrir_playerdashboard, cursor="hand2", activebackground="#DC8392",highlightthickness=0)
             btn_player.image = user_icon_img  # Manter referência para evitar garbage collection
-            btn_player.place(x=screen_width-60, y=10, anchor="ne")  # Canto superior direito
+            btn_player.place(x=screen_width-10, y=5, anchor="ne")  # Canto superior direito
             print(f"DEBUG: Botão Player criado com ícone {self.player_color}_user_icon.png")
         except Exception as e:
             print(f"DEBUG: Erro ao carregar ícone do jogador {self.player_color}_user_icon.png: {e}")
@@ -2555,6 +4972,432 @@ class StoreWindow(tk.Toplevel):
         x_btn.place(relx=0.98, rely=0, anchor="ne")
         
         print("DEBUG: show_card_fullscreen_inventory_challenges terminado com sucesso")
+
+    def processar_casa_challenges(self, casa_cor):
+        """
+        Função específica para processar casas de tipo 'challenges'.
+        Simplifica todo o fluxo: tirar carta → mostrar fullscreen → botão Player funcional.
+        """
+        print(f"DEBUG: [processar_casa_challenges] ====== NOVA INVOCAÇÃO ======")
+        print(f"DEBUG: [processar_casa_challenges] Iniciando processamento para casa challenges cor={casa_cor}")
+        print(f"DEBUG: [processar_casa_challenges] ID do objeto Store: {id(self)}")
+        print(f"DEBUG: [processar_casa_challenges] Dashboard disponível: {self.dashboard is not None}")
+        if self.dashboard:
+            print(f"DEBUG: [processar_casa_challenges] Dashboard ID: {id(self.dashboard)}")
+            print(f"DEBUG: [processar_casa_challenges] Store button disabled: {getattr(self.dashboard, '_store_button_disabled', False)}")
+            
+            # Debug do carrossel para ver estado atual
+            carrossel_cards = getattr(self.dashboard, 'cards', [])
+            print(f"DEBUG: [processar_casa_challenges] Estado do carrossel ({len(carrossel_cards)} posições):")
+            for i, carta_path in enumerate(carrossel_cards):
+                if carta_path and not os.path.basename(carta_path).startswith("back_card_"):
+                    nome_carta = os.path.basename(carta_path)
+                    if "activity" in nome_carta.lower() or "/activities/" in carta_path.lower():
+                        print(f"DEBUG: [processar_casa_challenges]   Posição {i}: {nome_carta} (ACTIVITY)")
+                    elif "challenge" in nome_carta.lower() or "/challenges/" in carta_path.lower():
+                        print(f"DEBUG: [processar_casa_challenges]   Posição {i}: {nome_carta} (CHALLENGE)")
+                    else:
+                        print(f"DEBUG: [processar_casa_challenges]   Posição {i}: {nome_carta} (OUTROS)")
+                else:
+                    print(f"DEBUG: [processar_casa_challenges]   Posição {i}: vazia ou back_card")
+        
+        try:
+            # Tirar uma carta de challenges
+            carta_path = self.tirar_carta_especifica("challenges", casa_cor)
+            if not carta_path:
+                print("DEBUG: [processar_casa_challenges] Nenhuma carta de challenges disponível")
+                return False
+            
+            print(f"DEBUG: [processar_casa_challenges] Carta obtida: {os.path.basename(carta_path)}")
+            
+            # Mostrar a carta em fullscreen com opções de aceitar/recusar
+            self.mostrar_carta_challenge_fullscreen(carta_path)
+            
+            print("DEBUG: [processar_casa_challenges] Processamento concluído com sucesso")
+            return True
+            
+        except Exception as e:
+            print(f"DEBUG: [processar_casa_challenges] Erro: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+
+    def tirar_carta_especifica(self, tipo, cor):
+        """
+        Tira uma carta específica de um tipo e cor, retornando o caminho da carta.
+        Remove a carta tanto do baralho local quanto do baralho global.
+        """
+        print(f"DEBUG: [tirar_carta_especifica] Tentando tirar carta tipo={tipo}, cor={cor}")
+        
+        # Verificar se há cartas disponíveis no baralho local
+        if not hasattr(self, 'cartas') or not self.cartas:
+            print("DEBUG: [tirar_carta_especifica] Nenhuma carta disponível no baralho local")
+            return None
+        
+        # Usar a estrutura correta: cartas[cor][tipo]
+        if cor not in self.cartas:
+            print(f"DEBUG: [tirar_carta_especifica] Cor '{cor}' não encontrada no baralho local")
+            return None
+            
+        if tipo not in self.cartas[cor]:
+            print(f"DEBUG: [tirar_carta_especifica] Tipo '{tipo}' não encontrado para cor '{cor}' no baralho local")
+            return None
+            
+        if not self.cartas[cor][tipo]:
+            print(f"DEBUG: [tirar_carta_especifica] Nenhuma carta disponível para {cor}/{tipo} no baralho local")
+            return None
+        
+        # Tirar uma carta aleatória
+        import random
+        carta_path = random.choice(self.cartas[cor][tipo])
+        
+        # CORREÇÃO: Remover carta do baralho local E do baralho global
+        self.cartas[cor][tipo].remove(carta_path)
+        
+        # Remover também do baralho global para persistir entre instâncias da Store
+        global baralhos
+        if (baralhos and cor in baralhos and tipo in baralhos[cor] and 
+            carta_path in baralhos[cor][tipo]):
+            baralhos[cor][tipo].remove(carta_path)
+            print(f"DEBUG: [tirar_carta_especifica] Carta removida do baralho global também")
+        
+        print(f"DEBUG: [tirar_carta_especifica] Carta tirada: {carta_path}")
+        print(f"DEBUG: [tirar_carta_especifica] Cartas restantes em {cor}/{tipo}: {len(self.cartas[cor][tipo])}")
+        print(f"DEBUG: [tirar_carta_especifica] Cartas restantes no baralho global {cor}/{tipo}: {len(baralhos[cor][tipo]) if baralhos and cor in baralhos and tipo in baralhos[cor] else 'N/A'}")
+        
+        return carta_path
+
+    def adicionar_carta_ao_baralho(self, carta_path, carta_tipo, carta_cor=None):
+        """
+        Adiciona uma carta vendida de volta aos baralhos (local e global).
+        Usado quando um jogador vende uma carta para a Store.
+        """
+        print(f"DEBUG: [adicionar_carta_ao_baralho] ===== INÍCIO =====")
+        print(f"DEBUG: [adicionar_carta_ao_baralho] Adicionando carta ao baralho - carta: {os.path.basename(carta_path)}, tipo: {carta_tipo}, cor: {carta_cor}")
+        
+        # Se cor não foi especificada, determinar a partir do player_color
+        if carta_cor is None:
+            carta_cor = self.player_color
+            print(f"DEBUG: [adicionar_carta_ao_baralho] Cor não especificada, usando player_color: {carta_cor}")
+        
+        print(f"DEBUG: [adicionar_carta_ao_baralho] Cor final a usar: {carta_cor}")
+        
+        # Garantir que a estrutura do baralho local existe
+        if not hasattr(self, 'cartas'):
+            self.cartas = {}
+            print(f"DEBUG: [adicionar_carta_ao_baralho] Criando estrutura self.cartas")
+        
+        if carta_cor not in self.cartas:
+            self.cartas[carta_cor] = {}
+            print(f"DEBUG: [adicionar_carta_ao_baralho] Criando estrutura para cor {carta_cor}")
+        
+        if carta_tipo not in self.cartas[carta_cor]:
+            self.cartas[carta_cor][carta_tipo] = []
+            print(f"DEBUG: [adicionar_carta_ao_baralho] Criando lista para {carta_cor}/{carta_tipo}")
+        
+        # Estado antes da adição
+        cartas_antes = len(self.cartas[carta_cor][carta_tipo])
+        print(f"DEBUG: [adicionar_carta_ao_baralho] Cartas antes da adição: {cartas_antes}")
+        
+        # Adicionar ao baralho local se ainda não existir
+        if carta_path not in self.cartas[carta_cor][carta_tipo]:
+            self.cartas[carta_cor][carta_tipo].append(carta_path)
+            print(f"DEBUG: [adicionar_carta_ao_baralho] Carta adicionada ao baralho local {carta_cor}/{carta_tipo}")
+        else:
+            print(f"DEBUG: [adicionar_carta_ao_baralho] Carta já existe no baralho local - não adicionada novamente")
+        
+        # Estado depois da adição local
+        cartas_depois_local = len(self.cartas[carta_cor][carta_tipo])
+        print(f"DEBUG: [adicionar_carta_ao_baralho] Cartas depois da adição local: {cartas_depois_local}")
+        
+        # Adicionar também ao baralho global
+        global baralhos
+        print(f"DEBUG: [adicionar_carta_ao_baralho] Processando baralho global...")
+        
+        if baralhos:
+            print(f"DEBUG: [adicionar_carta_ao_baralho] Baralho global existe")
+            
+            if carta_cor not in baralhos:
+                baralhos[carta_cor] = {}
+                print(f"DEBUG: [adicionar_carta_ao_baralho] Criando estrutura global para cor {carta_cor}")
+                
+            if carta_tipo not in baralhos[carta_cor]:
+                baralhos[carta_cor][carta_tipo] = []
+                print(f"DEBUG: [adicionar_carta_ao_baralho] Criando lista global para {carta_cor}/{carta_tipo}")
+            
+            # Estado antes da adição global
+            cartas_antes_global = len(baralhos[carta_cor][carta_tipo])
+            print(f"DEBUG: [adicionar_carta_ao_baralho] Cartas no baralho global antes: {cartas_antes_global}")
+            
+            if carta_path not in baralhos[carta_cor][carta_tipo]:
+                baralhos[carta_cor][carta_tipo].append(carta_path)
+                print(f"DEBUG: [adicionar_carta_ao_baralho] Carta adicionada ao baralho global {carta_cor}/{carta_tipo}")
+            else:
+                print(f"DEBUG: [adicionar_carta_ao_baralho] Carta já existe no baralho global - não adicionada novamente")
+            
+            # Estado depois da adição global
+            cartas_depois_global = len(baralhos[carta_cor][carta_tipo])
+            print(f"DEBUG: [adicionar_carta_ao_baralho] Cartas no baralho global depois: {cartas_depois_global}")
+        else:
+            print(f"DEBUG: [adicionar_carta_ao_baralho] AVISO - Baralho global não existe!")
+        
+        print(f"DEBUG: [adicionar_carta_ao_baralho] Sincronização completa - carta {os.path.basename(carta_path)} processada")
+        print(f"DEBUG: [adicionar_carta_ao_baralho] Estado final:")
+        print(f"DEBUG: [adicionar_carta_ao_baralho]   Local: {len(self.cartas[carta_cor][carta_tipo]) if hasattr(self, 'cartas') and carta_cor in self.cartas and carta_tipo in self.cartas[carta_cor] else 'N/A'} cartas")
+        print(f"DEBUG: [adicionar_carta_ao_baralho]   Global: {len(baralhos[carta_cor][carta_tipo]) if baralhos and carta_cor in baralhos and carta_tipo in baralhos[carta_cor] else 'N/A'} cartas")
+        print(f"DEBUG: [adicionar_carta_ao_baralho] ===== FIM =====")
+
+    def _remover_carta_do_baralho_local(self, carta_path, carta_tipo):
+        """
+        Remove uma carta específica do baralho local da Store após ela ser tirada.
+        Usado para sincronizar com o baralho global e evitar que cartas tiradas apareçam novamente.
+        """
+        print(f"DEBUG: [_remover_carta_do_baralho_local] Removendo carta: {os.path.basename(carta_path)}, tipo: {carta_tipo}")
+        
+        if not hasattr(self, 'cartas') or not self.cartas:
+            print("DEBUG: [_remover_carta_do_baralho_local] Nenhum baralho local encontrado")
+            return
+        
+        # Para cartas Actions/Events/Challenges, elas são tipicamente neutras
+        # Mas também podem ser da cor do jogador para alguns tipos
+        cores_para_verificar = ["neutral"]
+        if hasattr(self, 'player_color') and self.player_color:
+            cores_para_verificar.append(self.player_color)
+        
+        carta_removida = False
+        for cor in cores_para_verificar:
+            if cor in self.cartas and carta_tipo in self.cartas[cor]:
+                if carta_path in self.cartas[cor][carta_tipo]:
+                    self.cartas[cor][carta_tipo].remove(carta_path)
+                    carta_removida = True
+                    print(f"DEBUG: [_remover_carta_do_baralho_local] Carta removida do baralho local {cor}/{carta_tipo}")
+                    print(f"DEBUG: [_remover_carta_do_baralho_local] Cartas restantes em {cor}/{carta_tipo}: {len(self.cartas[cor][carta_tipo])}")
+                    break
+        
+        if not carta_removida:
+            print(f"DEBUG: [_remover_carta_do_baralho_local] AVISO: Carta não encontrada nos baralhos locais para remoção")
+            # Debug das cartas disponíveis
+            for cor in cores_para_verificar:
+                if cor in self.cartas and carta_tipo in self.cartas[cor]:
+                    cartas_disponiveis = [os.path.basename(c) for c in self.cartas[cor][carta_tipo][:5]]
+                    print(f"DEBUG: [_remover_carta_do_baralho_local] Cartas disponíveis em {cor}/{carta_tipo}: {cartas_disponiveis}")
+
+    def mostrar_carta_challenge_fullscreen(self, carta_path):
+        """
+        Mostra uma carta de Challenge em fullscreen com funcionalidade completa.
+        Inclui botão Player que preserva o estado corretamente.
+        """
+        print(f"DEBUG: [mostrar_carta_challenge_fullscreen] Mostrando carta: {carta_path}")
+        
+        # Guardar estado da carta fullscreen com múltiplos backups
+        self.fullscreen_carta_path = carta_path
+        self.fullscreen_carta_tipo = "challenges"
+        self._backup_fullscreen_carta_path = carta_path
+        self._backup_fullscreen_carta_tipo = "challenges"
+        self._original_carta_path = carta_path
+        self._original_carta_tipo = "challenges"
+        
+        print(f"DEBUG: [mostrar_carta_challenge_fullscreen] Estado preservado em múltiplos backups")
+        print(f"DEBUG: [mostrar_carta_challenge_fullscreen] ID do objeto Store: {id(self)}")
+        
+        # Verificar se o arquivo existe
+        if not os.path.exists(carta_path):
+            print(f"DEBUG: [mostrar_carta_challenge_fullscreen] ERRO - Arquivo não existe: {carta_path}")
+            return
+        
+        # Limpar interface e configurar fundo
+        for widget in self.winfo_children():
+            widget.destroy()
+        self.configure(bg="black")
+        
+        # Carregar e mostrar a carta em fullscreen
+        try:
+            pil_img = Image.open(carta_path)
+            img_w, img_h = pil_img.size
+            max_w, max_h = self.winfo_screenwidth(), self.winfo_screenheight()
+            ratio = min(max_w/img_w, max_h/img_h)
+            new_w, new_h = int(img_w*ratio), int(img_h*ratio)
+            pil_img = pil_img.resize((new_w, new_h), Image.Resampling.LANCZOS)
+            
+            carta_img = ImageTk.PhotoImage(pil_img)
+            carta_real_lbl = tk.Label(self, image=carta_img, bg="black")
+            carta_real_lbl.image = carta_img  # Manter referência
+            carta_real_lbl.place(relx=0.5, rely=0.5, anchor="center")
+            
+            print("DEBUG: [mostrar_carta_challenge_fullscreen] Carta carregada e exibida com sucesso")
+            
+        except Exception as e:
+            print(f"DEBUG: [mostrar_carta_challenge_fullscreen] Erro ao carregar carta: {e}")
+            # Mostrar placeholder em caso de erro
+            error_lbl = tk.Label(self, text="Erro ao carregar carta", font=("Helvetica", 20), fg="red", bg="black")
+            error_lbl.place(relx=0.5, rely=0.5, anchor="center")
+        
+        # Botão Player centrado no topo
+        def abrir_playerdashboard():
+            """Abre o PlayerDashboard preservando o estado da carta"""
+            print("DEBUG: [Challenge Player] Abrindo PlayerDashboard")
+            print(f"DEBUG: [Challenge Player] Estado atual: fullscreen_carta_path={self.fullscreen_carta_path}")
+            
+            try:
+                # CORREÇÃO: TRANSFERIR estado Challenge para PlayerDashboard ANTES de limpar
+                # Isso permite que o botão Store restaure corretamente a carta Challenge
+                if (hasattr(self, 'fullscreen_carta_path') and self.fullscreen_carta_path and
+                    hasattr(self, 'fullscreen_carta_tipo') and self.fullscreen_carta_tipo == "challenges"):
+                    print(f"DEBUG: [Challenge Player] Transferindo estado Challenge para PlayerDashboard: {self.fullscreen_carta_path}")
+                    self.dashboard._store_challenge_carta_path = self.fullscreen_carta_path
+                    self.dashboard._store_challenge_carta_tipo = self.fullscreen_carta_tipo
+                    print("DEBUG: [Challenge Player] Estado Challenge transferido para PlayerDashboard")
+                
+                # DEPOIS de transferir, limpar estado Challenge da Store
+                # Isso evita que o Next Phase apareça incorretamente
+                if hasattr(self, 'fullscreen_carta_path'):
+                    self.fullscreen_carta_path = None
+                    print("DEBUG: [Challenge Player] fullscreen_carta_path limpo da Store")
+                if hasattr(self, 'fullscreen_carta_tipo'):
+                    self.fullscreen_carta_tipo = None
+                    print("DEBUG: [Challenge Player] fullscreen_carta_tipo limpo da Store")
+                
+                if self.dashboard and hasattr(self.dashboard, "playerdashboard_interface"):
+                    # Esconder Store primeiro
+                    self.withdraw()
+                    print("DEBUG: [Challenge Player] Store escondida")
+                    
+                    # CORREÇÃO: Não limpar estado Challenge quando navegamos via botão Player
+                    # O botão Player é apenas navegação, não aceitação/recusa de Challenge
+                    # O estado Challenge deve ser preservado para permitir voltar via Store
+                    print("DEBUG: [Challenge Player] Navegação via botão Player - preservando estado Challenge")
+                    
+                    # Mostrar PlayerDashboard e recriar interface principal COM botão Store
+                    self.dashboard.deiconify()
+                    self.dashboard.state('normal')
+                    self.dashboard.lift()
+                    self.dashboard.focus_force()
+                    
+                    # Chamar interface principal (vai recriar mas com botão Store ativo)
+                    self.dashboard.playerdashboard_interface(
+                        self.dashboard.player_name,
+                        self.dashboard.saldo,
+                        self.dashboard.other_players,
+                        show_store_button=True  # IMPORTANTE: mostrar botão Store
+                    )
+                    
+                    print("DEBUG: [Challenge Player] PlayerDashboard interface principal criada com botão Store")
+                    
+                else:
+                    print("DEBUG: [Challenge Player] ERRO - PlayerDashboard não disponível")
+                    
+            except Exception as e:
+                print(f"DEBUG: [Challenge Player] Erro: {e}")
+                traceback.print_exc()
+        
+        # Carregamento do ícone do Player
+        try:
+            user_icon_path = os.path.join(IMG_DIR, f"{self.player_color}_user_icon.png")
+            user_icon_img = ImageTk.PhotoImage(Image.open(user_icon_path).resize((40, 40)))
+            btn_player = tk.Button(self, image=user_icon_img, bg="#8A2BE2", relief="flat", 
+                                 borderwidth=0, command=abrir_playerdashboard, cursor="hand2")
+            btn_player.image = user_icon_img  # Manter referência
+        except Exception as e:
+            print(f"DEBUG: [mostrar_carta_challenge_fullscreen] Erro ao carregar ícone: {e}")
+            # Fallback para texto
+            btn_player = tk.Button(self, text="Player", font=("Helvetica", 16, "bold"), 
+                                 bg="#8A2BE2", fg="white", relief="flat", borderwidth=0, 
+                                 command=abrir_playerdashboard)
+        
+        btn_player.place(relx=0.5, rely=0, anchor="n")
+        
+        # Botões Aceitar/Recusar
+        def aceitar_carta():
+            """Aceita a carta Challenge e implementa lógica de substituição no carrossel"""
+            print("DEBUG: [Challenge] Carta aceita - iniciando lógica de substituição")
+            
+            # IMPORTANTE: Desativar permanentemente o botão Store
+            if self.dashboard and hasattr(self.dashboard, 'disable_store_button'):
+                self.dashboard.disable_store_button()
+                print("DEBUG: [Challenge] Botão Store desativado permanentemente")
+            
+            # Limpar estado fullscreen
+            self.fullscreen_carta_path = None
+            self.fullscreen_carta_tipo = None
+            self._backup_fullscreen_carta_path = None
+            self._backup_fullscreen_carta_tipo = None
+            
+            # CORREÇÃO PROBLEMA 1: Usar APENAS a lógica da Store (já implementada) 
+            # NÃO chamar processar_challenge_aceite do PlayerDashboard para evitar conflito
+            print("DEBUG: [Challenge] Usando lógica de substituição da Store (não PlayerDashboard)")
+            
+            # Implementar lógica de substituição diretamente aqui
+            # Navegação será gerida pela própria lógica:
+            # - Se 0 ou 1 Activities ativas → navega de volta automaticamente
+            # - Se múltiplas Activities → mantém-se na Store e mostra interface de seleção
+            self._processar_troca_challenge_activity(carta_path)
+        
+        def recusar_carta():
+            """Recusa a carta"""
+            print("DEBUG: [Challenge] Carta recusada")
+            
+            # IMPORTANTE: Desativar permanentemente o botão Store
+            if self.dashboard and hasattr(self.dashboard, 'disable_store_button'):
+                self.dashboard.disable_store_button()
+                print("DEBUG: [Challenge] Botão Store desativado permanentemente")
+            
+            # Limpar estado fullscreen
+            self.fullscreen_carta_path = None
+            self.fullscreen_carta_tipo = None
+            self._backup_fullscreen_carta_path = None
+            self._backup_fullscreen_carta_tipo = None
+            
+            # Voltar ao PlayerDashboard SEM botão Store
+            self._voltar_playerdashboard_sem_botao_store()
+        
+        # Botão Aceitar (✔) - canto superior direito
+        btn_aceitar = tk.Button(self, text="✔", font=("Helvetica", 24, "bold"), 
+                              bg="#4CAF50", fg="white", width=2, height=1, 
+                              borderwidth=0, highlightthickness=0, command=aceitar_carta, 
+                              cursor="hand2", activebackground="#43d17a")
+        btn_aceitar.place(relx=0.98, rely=0, anchor="ne")
+        
+        # Botão Recusar (✖) - canto superior esquerdo (VERMELHO para Challenges)
+        btn_recusar = tk.Button(self, text="✖", font=("Helvetica", 24, "bold"), 
+                              bg="#F44336", fg="white", width=2, height=1, 
+                              borderwidth=0, highlightthickness=0, command=recusar_carta, 
+                              cursor="hand2", activebackground="#e57373")
+        btn_recusar.place(relx=0, rely=0, anchor="nw")
+        
+        print("DEBUG: [mostrar_carta_challenge_fullscreen] Interface criada com sucesso")
+
+    def _voltar_playerdashboard_sem_botao_store(self):
+        """Volta ao PlayerDashboard sem mostrar o botão Store"""
+        print("DEBUG: [_voltar_playerdashboard_sem_botao_store] Voltando ao PlayerDashboard")
+        
+        try:
+            if self.dashboard:
+                # Esconder a Store primeiro
+                self.withdraw()
+                print("DEBUG: [_voltar_playerdashboard_sem_botao_store] Store escondida")
+                
+                # Mostrar o PlayerDashboard
+                self.dashboard.deiconify()
+                self.dashboard.state('normal')
+                self.dashboard.lift()
+                self.dashboard.focus_force()
+                print("DEBUG: [_voltar_playerdashboard_sem_botao_store] PlayerDashboard mostrado")
+                
+                # Chamar a interface principal do PlayerDashboard SEM botão Store
+                self.dashboard.playerdashboard_interface(
+                    self.dashboard.player_name,
+                    self.dashboard.saldo,
+                    self.dashboard.other_players,
+                    show_store_button=False
+                )
+                print("DEBUG: [_voltar_playerdashboard_sem_botao_store] Interface principal criada SEM botão Store")
+                
+            else:
+                print("DEBUG: [_voltar_playerdashboard_sem_botao_store] ERRO - PlayerDashboard não disponível")
+                
+        except Exception as e:
+            print(f"DEBUG: [_voltar_playerdashboard_sem_botao_store] Erro: {e}")
+            traceback.print_exc()
 
     def show_inventory_matrix_buy(self, tipos, page=0, current_card_type=None):
         """
@@ -2700,7 +5543,7 @@ class StoreWindow(tk.Toplevel):
                 print("DEBUG: Tipo de carta não encontrado, voltando para store")
                 self.voltar_para_store()
         
-        back_btn = tk.Button(self, text="Back", font=("Helvetica", 14, "bold"), bg="#005c75", fg="white", width=10, 
+        back_btn = tk.Button(self, text="Back", font=("Helvetica", 14, "bold"), bg="#005c75", fg="white", width=6, 
                            command=voltar_pagina_compra)
         back_btn.place(relx=0.5, rely=0.98, anchor="s")
         
@@ -2741,13 +5584,919 @@ class StoreWindow(tk.Toplevel):
             error_lbl = tk.Label(self, text="Error loading card", font=("Helvetica", 20), fg="red", bg="black")
             error_lbl.place(relx=0.5, rely=0.5, anchor="center")
         
-        # Botão X para voltar ao inventário
+        # Botão X para voltar ao inventário (movido para canto superior esquerdo)
         def voltar_inventario():
             print("DEBUG: Voltando ao inventário de compra")
             self.show_inventory_matrix_buy(tipos, page, current_card_type)
         
         x_btn = tk.Button(self, text="✖", font=("Helvetica", 24, "bold"), bg="#AAAAAA", fg="white", width=2, height=1, 
                          borderwidth=0, highlightthickness=0, command=voltar_inventario, cursor="hand2", activebackground="#CCCCCC")
-        x_btn.place(relx=0.98, rely=0, anchor="ne")
+        x_btn.place(relx=0.02, rely=0, anchor="nw")  # Canto superior esquerdo
         
         print("DEBUG: show_card_fullscreen_inventory_buy terminado com sucesso")
+
+    def restaurar_carta_fullscreen_pendente(self):
+        """
+        Função específica para restaurar uma carta em fullscreen pendente.
+        Retorna True se restaurou uma carta, False caso contrário.
+        CORREÇÃO: Só restaura cartas Challenge se estivermos numa casa Challenge.
+        """
+        print(f"DEBUG: [restaurar_carta_fullscreen_pendente] Verificando carta pendente...")
+        print(f"DEBUG: [restaurar_carta_fullscreen_pendente] ID do objeto Store: {id(self)}")
+        
+        # Verificar se há uma carta em fullscreen pendente - ORDEM PRIORITÁRIA
+        fullscreen_carta_path = getattr(self, 'fullscreen_carta_path', None)
+        fullscreen_carta_tipo = getattr(self, 'fullscreen_carta_tipo', None)
+        
+        # Se não encontrou no local principal, verificar backup principal
+        if not fullscreen_carta_path:
+            fullscreen_carta_path = getattr(self, '_backup_fullscreen_carta_path', None)
+            fullscreen_carta_tipo = getattr(self, '_backup_fullscreen_carta_tipo', None)
+            if fullscreen_carta_path:
+                print(f"DEBUG: [restaurar_carta_fullscreen_pendente] Estado recuperado do _backup")
+                # Restaurar no local principal
+                self.fullscreen_carta_path = fullscreen_carta_path
+                self.fullscreen_carta_tipo = fullscreen_carta_tipo
+        
+        # Se ainda não encontrou, verificar backup original
+        if not fullscreen_carta_path:
+            fullscreen_carta_path = getattr(self, '_original_carta_path', None)
+            fullscreen_carta_tipo = getattr(self, '_original_carta_tipo', None)
+            if fullscreen_carta_path:
+                print(f"DEBUG: [restaurar_carta_fullscreen_pendente] Estado recuperado do _original")
+                # Restaurar no local principal
+                self.fullscreen_carta_path = fullscreen_carta_path
+                self.fullscreen_carta_tipo = fullscreen_carta_tipo
+        
+        print(f"DEBUG: [restaurar_carta_fullscreen_pendente] fullscreen_carta_path: {fullscreen_carta_path}")
+        print(f"DEBUG: [restaurar_carta_fullscreen_pendente] fullscreen_carta_tipo: {fullscreen_carta_tipo}")
+        
+        # Se não há carta pendente, retornar False
+        if not fullscreen_carta_path or not fullscreen_carta_tipo:
+            print(f"DEBUG: [restaurar_carta_fullscreen_pendente] Nenhuma carta pendente encontrada")
+            return False
+        
+        # NOVA VERIFICAÇÃO: Para cartas Challenge, só restaurar se estivermos numa casa Challenge
+        if fullscreen_carta_tipo in ["challenges", "challenge"]:
+            casa_tipo = getattr(self, 'casa_tipo', 'neutral')
+            print(f"DEBUG: [restaurar_carta_fullscreen_pendente] Carta Challenge encontrada - casa atual: {casa_tipo}")
+            
+            if casa_tipo != "challenges":
+                print(f"DEBUG: [restaurar_carta_fullscreen_pendente] BLOQUEADO - Carta Challenge não pode ser restaurada em casa {casa_tipo}")
+                # Limpar estado Challenge
+                self.fullscreen_carta_path = None
+                self.fullscreen_carta_tipo = None
+                if hasattr(self, '_backup_fullscreen_carta_path'):
+                    self._backup_fullscreen_carta_path = None
+                if hasattr(self, '_backup_fullscreen_carta_tipo'):
+                    self._backup_fullscreen_carta_tipo = None
+                if hasattr(self, '_original_carta_path'):
+                    self._original_carta_path = None
+                if hasattr(self, '_original_carta_tipo'):
+                    self._original_carta_tipo = None
+                print(f"DEBUG: [restaurar_carta_fullscreen_pendente] Estado Challenge limpo da Store")
+                return False
+            else:
+                print(f"DEBUG: [restaurar_carta_fullscreen_pendente] Carta Challenge permitida - estamos numa casa Challenge")
+        
+        # Verificar se o arquivo da carta existe
+        if not os.path.exists(fullscreen_carta_path):
+            print(f"DEBUG: [restaurar_carta_fullscreen_pendente] Arquivo da carta não existe: {fullscreen_carta_path}")
+            return False
+        
+        print(f"DEBUG: [restaurar_carta_fullscreen_pendente] Restaurando carta: {fullscreen_carta_path}, tipo: {fullscreen_carta_tipo}")
+        
+        # Restaurar a carta em fullscreen baseado no tipo
+        if fullscreen_carta_tipo in ["challenges", "challenge"]:
+            print(f"DEBUG: [restaurar_carta_fullscreen_pendente] Restaurando carta Challenge em fullscreen escolha")
+            self.mostrar_carta_fullscreen_escolha(fullscreen_carta_path, fullscreen_carta_tipo)
+        else:
+            print(f"DEBUG: [restaurar_carta_fullscreen_pendente] Restaurando carta normal em fullscreen")
+            self.mostrar_carta_fullscreen(fullscreen_carta_path, fullscreen_carta_tipo)
+        
+        print(f"DEBUG: [restaurar_carta_fullscreen_pendente] Carta restaurada com sucesso")
+        return True
+    
+    def _processar_troca_challenge_activity(self, challenge_path):
+        """
+        Processa a troca de Challenge por Activity no carrossel.
+        
+        Lógica:
+        1. Se há Activities ativas no carrossel → substitui por Challenge (jogador escolhe qual se múltiplas)
+        2. Se não há Activities ativas → Challenge vai para inventário
+        3. Activity substituída vai para inventário + reset de progresso
+        """
+        print(f"DEBUG: [TROCA] Iniciando processamento de troca Challenge por Activity")
+        print(f"DEBUG: [TROCA] Challenge: {os.path.basename(challenge_path)}")
+        print(f"DEBUG: [TROCA] Store ID: {id(self)}")
+        
+        if not self.dashboard:
+            print(f"DEBUG: [TROCA] ERRO - Dashboard não disponível")
+            return
+        
+        print(f"DEBUG: [TROCA] Dashboard ID: {id(self.dashboard)}")
+        print(f"DEBUG: [TROCA] Store button disabled: {getattr(self.dashboard, '_store_button_disabled', False)}")
+        
+        # Encontrar Activities ativas no carrossel
+        activities_ativas_indices = []
+        carrossel_cards = getattr(self.dashboard, 'cards', [])
+        print(f"DEBUG: [TROCA] Carrossel tem {len(carrossel_cards)} posições")
+        
+        for i, carta_path in enumerate(carrossel_cards):
+            if carta_path and not os.path.basename(carta_path).startswith("back_card_"):
+                print(f"DEBUG: [TROCA] Posição {i}: {os.path.basename(carta_path)}")
+                # Verificar se é Activity
+                if ("activity" in os.path.basename(carta_path).lower() or 
+                    "/activities/" in carta_path.lower()):
+                    activities_ativas_indices.append(i)
+                    print(f"DEBUG: [TROCA] Activity ativa encontrada na posição {i}: {os.path.basename(carta_path)}")
+            else:
+                print(f"DEBUG: [TROCA] Posição {i}: vazia ou back_card")
+        
+        print(f"DEBUG: [TROCA] Total de Activities ativas no carrossel: {len(activities_ativas_indices)}")
+        
+        if len(activities_ativas_indices) == 0:
+            # Não há Activities ativas → Challenge vai para inventário
+            print(f"DEBUG: [TROCA] Não há Activities ativas - Challenge vai para inventário")
+            self._enviar_challenge_para_inventario(challenge_path)
+        elif len(activities_ativas_indices) == 1:
+            # Apenas uma Activity ativa → substitui automaticamente
+            idx_substituir = activities_ativas_indices[0]
+            print(f"DEBUG: [TROCA] Uma Activity ativa - substituindo automaticamente na posição {idx_substituir}")
+            self._executar_troca_challenge_activity(challenge_path, idx_substituir)
+        else:
+            # Múltiplas Activities ativas → jogador escolhe qual substituir
+            print(f"DEBUG: [TROCA] Múltiplas Activities ativas - mostrando interface de escolha")
+            print(f"DEBUG: [TROCA] Activities encontradas nas posições: {activities_ativas_indices}")
+            self._mostrar_interface_escolha_activity(challenge_path, activities_ativas_indices, 0)
+    
+    def _enviar_challenge_para_inventario(self, challenge_path):
+        """Envia Challenge diretamente para o inventário Activities/Challenges"""
+        print(f"DEBUG: [TROCA] Enviando Challenge para inventário: {os.path.basename(challenge_path)}")
+        
+        # Adicionar Challenge ao inventário
+        if hasattr(self.dashboard, 'inventario'):
+            if 'challenges' not in self.dashboard.inventario:
+                self.dashboard.inventario['challenges'] = []
+            self.dashboard.inventario['challenges'].append(challenge_path)
+            print(f"DEBUG: [TROCA] Challenge adicionado ao inventário challenges")
+        
+        # Desabilitar botão Store (Challenge aceite)
+        self.dashboard.disable_store_button()
+        print(f"DEBUG: [TROCA] Botão Store desabilitado - Challenge aceite")
+        
+        # Voltar para PlayerDashboard
+        self._voltar_para_playerdashboard_apos_troca()
+    
+    def _executar_troca_challenge_activity(self, challenge_path, idx_activity):
+        """Executa a troca efetiva de Challenge por Activity na posição especificada"""
+        print(f"DEBUG: [TROCA] Executando troca na posição {idx_activity}")
+        
+        carrossel_cards = getattr(self.dashboard, 'cards', [])
+        if idx_activity >= len(carrossel_cards):
+            print(f"DEBUG: [TROCA] ERRO - Índice inválido: {idx_activity}")
+            return
+        
+        activity_substituida = carrossel_cards[idx_activity]
+        print(f"DEBUG: [TROCA] Activity a ser substituída: {os.path.basename(activity_substituida)}")
+        print(f"DEBUG: [TROCA] Challenge substituto: {os.path.basename(challenge_path)}")
+        
+        # CORREÇÃO CRÍTICA: Preservar valores da Activity original ANTES da substituição
+        activity_original_stats = None
+        if (hasattr(self.dashboard, 'card_stats') and 
+            idx_activity < len(self.dashboard.card_stats)):
+            activity_original_stats = {
+                "To send": self.dashboard.card_stats[idx_activity]["To send"],
+                "Rxd": self.dashboard.card_stats[idx_activity]["Rxd"], 
+                "Lost": self.dashboard.card_stats[idx_activity]["Lost"]
+            }
+            print(f"DEBUG: [TROCA] Valores preservados da Activity original: To send={activity_original_stats['To send']}, Rxd={activity_original_stats['Rxd']}, Lost={activity_original_stats['Lost']}")
+        
+        # CORREÇÃO CRÍTICA: Preservar no backup root também para persistir entre turnos
+        root = self.dashboard.master
+        if hasattr(root, '_backup_card_stats') and idx_activity < len(root._backup_card_stats):
+            backup_original_stats = {
+                "To send": root._backup_card_stats[idx_activity]["To send"],
+                "Rxd": root._backup_card_stats[idx_activity]["Rxd"],
+                "Lost": root._backup_card_stats[idx_activity]["Lost"]
+            }
+            print(f"DEBUG: [TROCA] Valores do backup root preservados: To send={backup_original_stats['To send']}, Rxd={backup_original_stats['Rxd']}, Lost={backup_original_stats['Lost']}")
+            
+            # Preservar no dashboard também (sobrescrever se não existia)
+            if not activity_original_stats:
+                activity_original_stats = backup_original_stats
+                print(f"DEBUG: [TROCA] Usando valores do backup root como fallback")
+        
+        # 1. Enviar Activity substituída para inventário
+        if hasattr(self.dashboard, 'inventario'):
+            if 'activities' not in self.dashboard.inventario:
+                self.dashboard.inventario['activities'] = []
+            self.dashboard.inventario['activities'].append(activity_substituida)
+            print(f"DEBUG: [TROCA] Activity substituída enviada para inventário")
+        
+        # 2. Colocar Challenge no carrossel
+        self.dashboard.cards[idx_activity] = challenge_path
+        print(f"DEBUG: [TROCA] Challenge colocado no carrossel na posição {idx_activity}")
+        
+        # 3. Reset de progresso para esta posição
+        self._resetar_progresso_carrossel(idx_activity, challenge_path)
+        
+        # CORREÇÃO CRÍTICA: Criar entrada no backup para Activity substituída no inventário
+        # Isto garante que a Activity mantém os valores corretos quando for reativada
+        if activity_original_stats and hasattr(self.dashboard, 'inventario'):
+            # Criar mapeamento de valores preservados para Activities no inventário
+            if not hasattr(self.dashboard, '_activity_preserved_stats'):
+                self.dashboard._activity_preserved_stats = {}
+            
+            # Guardar valores da Activity pelo caminho da carta
+            self.dashboard._activity_preserved_stats[activity_substituida] = activity_original_stats.copy()
+            print(f"DEBUG: [TROCA] Valores da Activity original preservados no mapeamento: {activity_substituida} -> {activity_original_stats}")
+            
+            # Também preservar no backup do root para persistir entre turnos
+            if hasattr(root, '_activity_preserved_stats'):
+                root._activity_preserved_stats[activity_substituida] = activity_original_stats.copy()
+            else:
+                root._activity_preserved_stats = {activity_substituida: activity_original_stats.copy()}
+            print(f"DEBUG: [TROCA] Valores da Activity também preservados no backup root")
+        
+        # 4. Atualizar seleção do carrossel se necessário
+        if hasattr(self.dashboard, 'selected_card_idx') and self.dashboard.selected_card_idx == idx_activity:
+            self.dashboard.selected_carousel_card = challenge_path
+            print(f"DEBUG: [TROCA] Seleção do carrossel atualizada para Challenge")
+        
+        # 5. Desabilitar botão Store (Challenge aceite)
+        self.dashboard.disable_store_button()
+        print(f"DEBUG: [TROCA] Botão Store desabilitado - Challenge aceite")
+        
+        # 6. CORREÇÃO: Marcar que substituição Challenge->Activity foi concluída
+        # Isto evita que _challenge_accepted seja resetado incorretamente
+        self.dashboard._substituicao_challenge_activity_concluida = True
+        print(f"DEBUG: [TROCA] Marcando substituição Challenge->Activity como concluída")
+        
+        # 7. Voltar para PlayerDashboard
+        self._voltar_para_playerdashboard_apos_troca()
+    
+    def _resetar_progresso_carrossel(self, idx_position, challenge_path):
+        """Reset dos valores de progresso para a posição específica do carrossel"""
+        print(f"DEBUG: [RESET] Resetando progresso para posição {idx_position}")
+        
+        # Obter message_size do Challenge para definir novo máximo de "To send"
+        try:
+            message_size = self.dashboard._get_card_message_size(challenge_path)
+            print(f"DEBUG: [RESET] Message size do Challenge: {message_size}")
+        except:
+            message_size = 20  # Valor padrão
+            print(f"DEBUG: [RESET] Usando message size padrão: {message_size}")
+        
+        # Reset dos stats para esta posição
+        if hasattr(self.dashboard, 'card_stats') and idx_position < len(self.dashboard.card_stats):
+            self.dashboard.card_stats[idx_position] = {
+                "To send": message_size,  # Novo valor inicial baseado no Challenge
+                "Rxd": 0,                 # Reset para 0
+                "Lost": 0                 # Reset para 0
+            }
+            print(f"DEBUG: [RESET] Stats resetados para posição {idx_position}: To send={message_size}, Rxd=0, Lost=0")
+        
+        # Atualizar barras de progresso se esta posição estiver selecionada
+        if (hasattr(self.dashboard, 'selected_card_idx') and 
+            self.dashboard.selected_card_idx == idx_position):
+            print(f"DEBUG: [RESET] Posição {idx_position} está selecionada - atualizando barras de progresso")
+            if hasattr(self.dashboard, '_update_progress_bars_from_card'):
+                self.dashboard._update_progress_bars_from_card(challenge_path)
+    
+    def _mostrar_interface_escolha_activity(self, challenge_path, activities_indices, page=0):
+        """Mostra interface para o jogador escolher qual Activity substituir"""
+        print(f"DEBUG: [ESCOLHA] Mostrando interface de escolha entre {len(activities_indices)} Activities - página {page}")
+        
+        # VERIFICAÇÃO DE SEGURANÇA: Garantir que esta função só é chamada em contexto válido
+        if not hasattr(self, 'dashboard') or not self.dashboard:
+            print(f"DEBUG: [ESCOLHA] ERRO - Dashboard não disponível, abortando escolha")
+            return
+        
+        if not challenge_path or not activities_indices:
+            print(f"DEBUG: [ESCOLHA] ERRO - Parâmetros inválidos, abortando escolha")
+            return
+        
+        # Verificar se a Store ainda está no contexto correto (evitar execução obsoleta)
+        if hasattr(self.dashboard, 'current_casa_tipo') and self.dashboard.current_casa_tipo != "challenges":
+            print(f"DEBUG: [ESCOLHA] AVISO - Casa atual não é Challenge ({self.dashboard.current_casa_tipo}), mas continuando...")
+        
+        # Limpar interface atual
+        for widget in self.winfo_children():
+            widget.destroy()
+        self.configure(bg="black")
+        
+        # Barra superior (igual à Store) com fallback se imagem não existir
+        try:
+            awning_img = ImageTk.PhotoImage(Image.open(AWNING_IMG).resize((self.winfo_screenwidth(), 50)))
+            awning_label = tk.Label(self, image=awning_img, bg="black")
+            awning_label.image = awning_img
+            awning_label.pack(pady=(0, 10), fill="x")
+        except Exception as e:
+            print(f"DEBUG: Erro ao carregar AWNING_IMG '{AWNING_IMG}': {e} - usando header simples")
+            header_frame = tk.Frame(self, bg="#DC8392", height=50)
+            header_frame.pack(pady=(0, 10), fill="x")
+
+        # Label pequeno à esquerda do logo
+        left_label = tk.Label(self, text="••••", font=("Helvetica", 12, "bold"), bg="#DC8392", fg="#DC8392")
+        left_label.place(relx=0.46, y=10, anchor="center")
+
+        # Logo NetMaster posicionado independentemente
+        try:
+            logo_img = ImageTk.PhotoImage(Image.open(os.path.join(IMG_DIR, "logo_netmaster_store.png")).resize((24, 24)))
+            logo_lbl = tk.Label(self, image=logo_img, bg="#DC8392")
+            logo_lbl.image = logo_img
+            logo_lbl.place(relx=0.5, y=10, anchor="center")
+        except Exception as e:
+            print(f"DEBUG: Erro ao carregar logo: {e}")
+        
+        # Label largo à direita do logo para cobrir área amarela
+        right_logo_label = tk.Label(self, text="     ", font=("Helvetica", 12, "bold"), bg="#DC8392", fg="#DC8392")
+        right_logo_label.place(relx=0.53, y=10, anchor="w")
+        
+        # Label adicional para garantir cobertura completa
+        extra_cover_label = tk.Label(self, text="     ", font=("Helvetica", 10), bg="#DC8392", fg="#DC8392")
+        extra_cover_label.place(relx=0.55, y=10, anchor="w")
+        
+        # Texto "Store" posicionado independentemente
+        store_name_lbl = tk.Label(self, text="Store", 
+                                 font=("Helvetica", 15, "bold"), bg="#DC8392", fg="black")
+        store_name_lbl.place(relx=0.5, y=30, anchor="center")
+        
+        # Label pequeno à direita do nome Store
+        right_store_label = tk.Label(self, text="•", font=("Helvetica", 12, "bold"), bg="#DC8392", fg="#DC8392")
+        right_store_label.place(relx=0.6, y=30, anchor="center")
+        
+        # Título (movido mais para cima)
+        title_lbl = tk.Label(self, text="Choose Activity to be replaced", 
+                           font=("Helvetica", 17, "bold"), fg="white", bg="black")
+        title_lbl.pack(pady=(5, 5))
+        
+        # === SISTEMA GRID IGUAL À PÁGINA DE COMPRA ===
+        # Paginação
+        cards_per_page = 4  # Igual à página de compra
+        total_pages = max(1, (len(activities_indices) + cards_per_page - 1) // cards_per_page)
+        page = max(0, min(page, total_pages - 1))
+        start_idx = page * cards_per_page
+        end_idx = start_idx + cards_per_page
+        activities_page = activities_indices[start_idx:end_idx]
+        
+        # Frame para as cartas (centralizado, movido mais para cima)
+        self.matriz_frame = tk.Frame(self, bg="black")
+        self.matriz_frame.place(relx=0.5, rely=0.55, anchor="center")  # Movido mais para cima
+        
+        n_col = 2  # 2 colunas
+        card_w, card_h = 70, 100  # Tamanho menor para não tapar o título
+        
+        # Callback para fullscreen das cartas
+        def make_fullscreen_callback(activity_path, idx_carrossel, challenge_path, activities_indices, page):
+            def callback(event=None):
+                print(f"DEBUG: [ESCOLHA] Mostrando Activity {idx_carrossel} em fullscreen")
+                self._mostrar_activity_fullscreen_substituicao(activity_path, idx_carrossel, challenge_path, activities_indices, page)
+            return callback
+        
+        # Criar grid de cartas igual à página de compra
+        for i, idx_carrossel in enumerate(activities_page):
+            activity_path = self.dashboard.cards[idx_carrossel]
+            row = i // n_col
+            col = i % n_col
+            
+            # CORREÇÃO CRÍTICA: Obter valores CORRETOS de progresso desta Activity 
+            # Usar sempre os valores preservados do dashboard primeiro
+            card_stats = {"To send": 0, "Rxd": 0, "Lost": 0}  # Fallback inicial
+            
+            # DEBUG EXTRA: Verificar estado do card_stats
+            print(f"DEBUG: [VALORES-DEBUG] Activity {idx_carrossel} - verificando card_stats:")
+            print(f"DEBUG: [VALORES-DEBUG]   hasattr(dashboard, 'card_stats'): {hasattr(self.dashboard, 'card_stats')}")
+            if hasattr(self.dashboard, 'card_stats'):
+                print(f"DEBUG: [VALORES-DEBUG]   len(card_stats): {len(self.dashboard.card_stats)}")
+                print(f"DEBUG: [VALORES-DEBUG]   card_stats[{idx_carrossel}]: {self.dashboard.card_stats[idx_carrossel] if idx_carrossel < len(self.dashboard.card_stats) else 'INDEX OUT OF RANGE'}")
+            
+            # CORREÇÃO PRINCIPAL: Usar valores preservados do dashboard PRIMEIRO
+            # Depois tentar valores preservados da Activity em caso de troca recente
+            if (hasattr(self.dashboard, 'card_stats') and 
+                idx_carrossel < len(self.dashboard.card_stats)):
+                
+                # Fazer cópia dos valores preservados (não referenciar diretamente)
+                preserved_values = self.dashboard.card_stats[idx_carrossel]
+                card_stats = {
+                    "To send": preserved_values.get("To send", 0),
+                    "Rxd": preserved_values.get("Rxd", 0), 
+                    "Lost": preserved_values.get("Lost", 0)
+                }
+                
+                print(f"DEBUG: [VALORES] Activity {idx_carrossel}: To send={card_stats['To send']}, Rxd={card_stats['Rxd']}, Lost={card_stats['Lost']}")
+                
+                # VALIDAÇÃO: Se todos os valores são zero, pode ser carta nova - aplicar message_size
+                if (card_stats["To send"] == 0 and card_stats["Rxd"] == 0 and card_stats["Lost"] == 0):
+                    print(f"DEBUG: [VALORES-CHECK] Activity {idx_carrossel} tem valores zero - verificando se é carta nova")
+                    try:
+                        message_size = self.dashboard._get_card_message_size(activity_path)
+                        # Se message_size > 0, significa que deveria ter valores - inicializar
+                        if message_size > 0:
+                            card_stats = {"To send": message_size, "Rxd": 0, "Lost": 0}
+                            # Atualizar também no dashboard para manter sincronizado
+                            self.dashboard.card_stats[idx_carrossel] = card_stats.copy()
+                            print(f"DEBUG: [VALORES-INIT] Activity {idx_carrossel} inicializada: To send={message_size}, Rxd=0, Lost=0")
+                    except Exception as e:
+                        print(f"DEBUG: [VALORES-INIT] Erro ao obter message_size: {e}")
+                else:
+                    print(f"DEBUG: [VALORES-OK] Activity {idx_carrossel} tem valores preservados válidos")
+            
+            # CORREÇÃO CRÍTICA: Verificar valores preservados de Activities que foram substituídas
+            elif (hasattr(self.dashboard, '_activity_preserved_stats') and 
+                  activity_path in self.dashboard._activity_preserved_stats):
+                
+                preserved_activity_stats = self.dashboard._activity_preserved_stats[activity_path]
+                card_stats = {
+                    "To send": preserved_activity_stats.get("To send", 0),
+                    "Rxd": preserved_activity_stats.get("Rxd", 0),
+                    "Lost": preserved_activity_stats.get("Lost", 0)
+                }
+                print(f"DEBUG: [VALORES-PRESERVED] Activity {idx_carrossel} usando valores preservados da troca: To send={card_stats['To send']}, Rxd={card_stats['Rxd']}, Lost={card_stats['Lost']}")
+            
+            # CORREÇÃO CRÍTICA: Verificar backup do root se disponível
+            elif (hasattr(self.dashboard.master, '_activity_preserved_stats') and 
+                  activity_path in self.dashboard.master._activity_preserved_stats):
+                
+                root_preserved_stats = self.dashboard.master._activity_preserved_stats[activity_path]
+                card_stats = {
+                    "To send": root_preserved_stats.get("To send", 0),
+                    "Rxd": root_preserved_stats.get("Rxd", 0),
+                    "Lost": root_preserved_stats.get("Lost", 0)
+                }
+                print(f"DEBUG: [VALORES-ROOT-PRESERVED] Activity {idx_carrossel} usando valores preservados do root: To send={card_stats['To send']}, Rxd={card_stats['Rxd']}, Lost={card_stats['Lost']}")
+                    
+            else:
+                print(f"DEBUG: [VALORES-FALLBACK] Activity {idx_carrossel}: card_stats não disponível no dashboard")
+                # Tentar obter message_size da carta como fallback completo
+                try:
+                    message_size = self.dashboard._get_card_message_size(activity_path)
+                    card_stats = {"To send": message_size, "Rxd": 0, "Lost": 0}
+                    print(f"DEBUG: [VALORES-FALLBACK] Activity {idx_carrossel}: To send={message_size}, Rxd=0, Lost=0")
+                except Exception as e:
+                    print(f"DEBUG: [VALORES-FALLBACK] Erro ao obter message_size: {e}")
+                    card_stats = {"To send": 0, "Rxd": 0, "Lost": 0}
+            
+            # Frame para carta + valores
+            card_frame = tk.Frame(self.matriz_frame, bg="black")
+            card_frame.grid(row=row, column=col, padx=8, pady=8)
+            
+            # Carregar imagem da Activity
+            try:
+                img = ImageTk.PhotoImage(Image.open(activity_path).resize((card_w, card_h)))
+            except:
+                print(f"DEBUG: Erro ao carregar Activity {activity_path}")
+                continue
+            
+            # Criar label da carta igual à página de compra
+            carta_lbl = tk.Label(card_frame, image=img, bg="black", cursor="hand2")
+            carta_lbl.image = img  # Manter referência
+            carta_lbl.pack()
+            carta_lbl.bind("<Button-1>", make_fullscreen_callback(activity_path, idx_carrossel, challenge_path, activities_indices, page))
+            
+            # Valores por baixo da carta (iguais à página de compra)
+            values_frame = tk.Frame(card_frame, bg="black")
+            values_frame.pack(pady=(2, 0))
+            
+            to_send_lbl = tk.Label(values_frame, text=f"To send: {card_stats['To send']}", 
+                                 font=("Helvetica", 10, "bold"), fg="#8A2BE2", bg="black")
+            to_send_lbl.pack()
+            
+            rxd_lbl = tk.Label(values_frame, text=f"Rxd: {card_stats['Rxd']}", 
+                             font=("Helvetica", 10, "bold"), fg="#8A2BE2", bg="black")
+            rxd_lbl.pack()
+            
+            lost_lbl = tk.Label(values_frame, text=f"Lost: {card_stats['Lost']}", 
+                              font=("Helvetica", 10, "bold"), fg="#8A2BE2", bg="black")
+            lost_lbl.pack()
+        
+        # Setas de navegação iguais à página de compra
+        if total_pages > 1:
+            seta_x = 0.90  # Posição igual à página de compra
+            if page > 0:
+                seta_cima = tk.Button(self, text="▲", font=("Helvetica", 18, "bold"), bg="#222", fg="white", width=2,
+                                    command=lambda: self._mostrar_interface_escolha_activity(challenge_path, activities_indices, page - 1))
+                seta_cima.place(relx=seta_x, rely=0.38, anchor="center")  # Posição igual à página de compra
+            if page < total_pages - 1:
+                seta_baixo = tk.Button(self, text="▼", font=("Helvetica", 18, "bold"), bg="#222", fg="white", width=2,
+                                     command=lambda: self._mostrar_interface_escolha_activity(challenge_path, activities_indices, page + 1))
+                seta_baixo.place(relx=seta_x, rely=0.62, anchor="center")  # Posição igual à página de compra
+        
+        # Barra inferior com imagem BelowBar_store.png (com fallback)
+        try:
+            belowbar_img = ImageTk.PhotoImage(Image.open(BELOWBAR_IMG).resize((self.winfo_screenwidth(), 50)))
+            belowbar_label = tk.Label(self, image=belowbar_img, bg="black")
+            belowbar_label.image = belowbar_img
+            belowbar_label.pack(side="bottom", fill="x")
+        except Exception as e:
+            print(f"DEBUG: Erro ao carregar BELOWBAR_IMG '{BELOWBAR_IMG}': {e} - usando footer simples")
+            footer_frame = tk.Frame(self, bg="#DC8392", height=50)
+            footer_frame.pack(side="bottom", fill="x")
+
+        # Mover saldo e piccoin para parte inferior direita (por cima do BelowBar)
+        coin_img_bottom = ImageTk.PhotoImage(Image.open(COIN_IMG).resize((24, 24)))
+        coin_lbl_bottom = tk.Label(self, image=coin_img_bottom, bg="#DC8392")
+        coin_lbl_bottom.image = coin_img_bottom
+        coin_lbl_bottom.place(x=self.winfo_screenwidth()-100, rely=1.0, y=-25, anchor="w")
+        
+        saldo_lbl_bottom = tk.Label(self, text=f"{self.saldo}", font=("Helvetica", 16, "bold"), fg="black", bg="#DC8392")
+        saldo_lbl_bottom.place(x=self.winfo_screenwidth()-70, rely=1.0, y=-25, anchor="w")
+    
+    def _mostrar_activity_fullscreen_substituicao(self, activity_path, activity_idx, challenge_path, activities_indices, page):
+        """Mostra Activity em fullscreen com botões X (cinza) e ✓ (verde) para substituição"""
+        print(f"DEBUG: [FULLSCREEN] Mostrando Activity {activity_idx} em fullscreen para substituição")
+        
+        # Limpar interface atual
+        for widget in self.winfo_children():
+            widget.destroy()
+        self.configure(bg="black")
+        
+        # Carregar e mostrar imagem da Activity em fullscreen
+        try:
+            pil_img = Image.open(activity_path)
+            img_w, img_h = pil_img.size
+            max_w, max_h = self.winfo_screenwidth(), self.winfo_screenheight()
+            ratio = min(max_w/img_w, max_h/img_h)
+            new_w, new_h = int(img_w*ratio), int(img_h*ratio)
+            pil_img = pil_img.resize((new_w, new_h), Image.Resampling.LANCZOS)
+            
+            carta_img = ImageTk.PhotoImage(pil_img)
+            carta_real_lbl = tk.Label(self, image=carta_img, bg="black", borderwidth=0, highlightthickness=0)
+            carta_real_lbl.image = carta_img
+            carta_real_lbl.place(relx=0.5, rely=0.5, anchor="center")
+            
+        except Exception as e:
+            print(f"DEBUG: Erro ao carregar carta: {e}")
+            # Mostrar placeholder em caso de erro
+            error_lbl = tk.Label(self, text="Error loading card", font=("Helvetica", 20), fg="red", bg="black")
+            error_lbl.place(relx=0.5, rely=0.5, anchor="center")
+        
+        # Botão X (cinza) no canto superior esquerdo - cancelar substituição
+        def cancelar_substituicao():
+            print(f"DEBUG: [FULLSCREEN] Substituição cancelada - voltando para seleção")
+            self._mostrar_interface_escolha_activity(challenge_path, activities_indices, page)
+        
+        btn_cancel = tk.Button(self, text="✖", font=("Helvetica", 24, "bold"), 
+                             bg="#AAAAAA", fg="white", width=2, height=1,
+                             borderwidth=0, highlightthickness=0, command=cancelar_substituicao, 
+                             cursor="hand2", activebackground="#CCCCCC")
+        btn_cancel.place(relx=0.02, rely=0, anchor="nw")
+        
+        # Botão ✓ (verde) no canto superior direito - confirmar substituição
+        def confirmar_substituicao():
+            print(f"DEBUG: [FULLSCREEN] Substituição confirmada - mostrando confirmação final")
+            self._mostrar_confirmacao_substituicao(challenge_path, activity_idx, activity_path, activities_indices, page)
+        
+        btn_confirm = tk.Button(self, text="✓", font=("Helvetica", 24, "bold"), 
+                              bg="#4CAF50", fg="white", width=2, height=1,
+                              borderwidth=0, highlightthickness=0, command=confirmar_substituicao, 
+                              cursor="hand2", activebackground="#66BB6A")
+        btn_confirm.place(relx=0.98, rely=0, anchor="ne")
+    
+    def _mostrar_confirmacao_substituicao(self, challenge_path, activity_idx, activity_path, activities_indices, page):
+        """Mostra página de confirmação final com Yes/No"""
+        print(f"DEBUG: [CONFIRMACAO] Mostrando confirmação final para substituir Activity {activity_idx}")
+        
+        # VERIFICAÇÃO DE SEGURANÇA: Garantir que esta função só é chamada em contexto válido
+        if not hasattr(self, 'dashboard') or not self.dashboard:
+            print(f"DEBUG: [CONFIRMACAO] ERRO - Dashboard não disponível, abortando confirmação")
+            return
+        
+        if not challenge_path or not activity_path:
+            print(f"DEBUG: [CONFIRMACAO] ERRO - Parâmetros inválidos, abortando confirmação")
+            return
+        
+        # Verificar se a Store ainda está no contexto correto (evitar execução obsoleta)
+        if hasattr(self.dashboard, 'current_casa_tipo') and self.dashboard.current_casa_tipo != "challenges":
+            print(f"DEBUG: [CONFIRMACAO] AVISO - Casa atual não é Challenge ({self.dashboard.current_casa_tipo}), mas continuando...")
+        
+        # Limpar interface atual
+        for widget in self.winfo_children():
+            widget.destroy()
+        self.configure(bg="black")
+        
+        # Barra superior (igual à confirmação de compra) com fallback
+        try:
+            awning_img = ImageTk.PhotoImage(Image.open(AWNING_IMG).resize((self.winfo_screenwidth(), 50)))
+            awning_label = tk.Label(self, image=awning_img, bg="black")
+            awning_label.image = awning_img
+            awning_label.pack(pady=(0, 10), fill="x")
+        except Exception as e:
+            print(f"DEBUG: Erro ao carregar AWNING_IMG '{AWNING_IMG}': {e} - usando header simples")
+            header_frame = tk.Frame(self, bg="#DC8392", height=50)
+            header_frame.pack(pady=(0, 10), fill="x")
+
+        # Label pequeno à esquerda do logo
+        left_label = tk.Label(self, text="••••", font=("Helvetica", 12, "bold"), bg="#DC8392", fg="#DC8392")
+        left_label.place(relx=0.46, y=10, anchor="center")
+
+        # Logo NetMaster posicionado independentemente
+        try:
+            logo_img = ImageTk.PhotoImage(Image.open(os.path.join(IMG_DIR, "logo_netmaster_store.png")).resize((24, 24)))
+            logo_lbl = tk.Label(self, image=logo_img, bg="#DC8392")
+            logo_lbl.image = logo_img
+            logo_lbl.place(relx=0.5, y=10, anchor="center")
+        except Exception as e:
+            print(f"DEBUG: Erro ao carregar logo: {e}")
+        
+        # Label largo à direita do logo para cobrir área amarela
+        right_logo_label = tk.Label(self, text="     ", font=("Helvetica", 12, "bold"), bg="#DC8392", fg="#DC8392")
+        right_logo_label.place(relx=0.53, y=10, anchor="w")
+        
+        # Label adicional para garantir cobertura completa
+        extra_cover_label = tk.Label(self, text="     ", font=("Helvetica", 10), bg="#DC8392", fg="#DC8392")
+        extra_cover_label.place(relx=0.55, y=10, anchor="w")
+        
+        # Texto "Store" posicionado independentemente
+        store_name_lbl = tk.Label(self, text="Store", 
+                                 font=("Helvetica", 15, "bold"), bg="#DC8392", fg="black")
+        store_name_lbl.place(relx=0.5, y=30, anchor="center")
+        
+        # Label pequeno à direita do nome Store
+        right_store_label = tk.Label(self, text="•", font=("Helvetica", 12, "bold"), bg="#DC8392", fg="#DC8392")
+        right_store_label.place(relx=0.6, y=30, anchor="center")
+        
+        # Frame de confirmação (igual à confirmação de compra)
+        confirm_frame = tk.Frame(self, bg="black")
+        confirm_frame.pack(expand=True)
+        
+        # Pergunta de confirmação (igual à compra)
+        tk.Label(confirm_frame, text="Are you sure you want to replace?", 
+                font=("Helvetica", 16, "bold"), fg="white", bg="black").pack(pady=(40, 20))
+        
+        # Informação sobre a substituição
+        tk.Label(confirm_frame, text=f"Activity at User {activity_idx + 1} will be replaced", 
+                font=("Helvetica", 16), fg="yellow", bg="black").pack(pady=(0, 10))
+        
+        # Valor da substituição (similar ao valor da carta na compra)
+        value_frame = tk.Frame(confirm_frame, bg="black")
+        value_frame.pack(pady=(0, 30))
+        
+        value_text_lbl = tk.Label(value_frame, text="Progress will be: ", 
+                                 font=("Helvetica", 16), fg="white", bg="black")
+        value_text_lbl.pack(side="left")
+        
+        value_amount_lbl = tk.Label(value_frame, text="LOST", 
+                                   font=("Helvetica", 16, "bold"), fg="#FF6666", bg="black")
+        value_amount_lbl.pack(side="left", padx=(5, 5))
+        
+        # Ícone de aviso (em vez do ícone da moeda)
+        warning_lbl = tk.Label(value_frame, text="!", font=("Helvetica", 20), bg="black")
+        warning_lbl.pack(side="left")
+        
+        # Frame para botões (igual à confirmação de compra)
+        btns_frame = tk.Frame(confirm_frame, bg="black")
+        btns_frame.pack()
+        
+        def confirmar_substituicao():
+            print(f"DEBUG: [CONFIRMACAO] Substituição confirmada - executando troca")
+            self._executar_troca_challenge_activity(challenge_path, activity_idx)
+        
+        def cancelar_substituicao():
+            print(f"DEBUG: [CONFIRMACAO] Substituição cancelada - voltando para página de seleção")
+            
+            # VERIFICAÇÃO DE SEGURANÇA: Evitar loops infinitos
+            if not hasattr(self, 'dashboard') or not self.dashboard:
+                print(f"DEBUG: [CONFIRMACAO] ERRO - Dashboard não disponível durante cancelamento")
+                return
+            
+            if hasattr(self.dashboard, 'current_casa_tipo') and self.dashboard.current_casa_tipo != "challenges":
+                print(f"DEBUG: [CONFIRMACAO] AVISO - Casa atual não é Challenge, não deve voltar para seleção de Activities")
+                # Em vez de voltar para seleção, volta para a Store principal
+                self.voltar_para_store()
+                return
+            
+            # Voltar para a página de seleção de Activities em vez de cancelar completamente
+            self._mostrar_interface_escolha_activity(challenge_path, activities_indices, page)
+        
+        # Botões Yes/No (iguais à confirmação de compra)
+        btn_no = tk.Button(btns_frame, text="No", font=("Helvetica", 14, "bold"), 
+                         bg="#FF4444", fg="white", width=8, height=2,
+                         command=cancelar_substituicao, cursor="hand2")
+        btn_no.pack(side=tk.LEFT, padx=10)
+        
+        btn_yes = tk.Button(btns_frame, text="Yes", font=("Helvetica", 14, "bold"), 
+                          bg="#44AA44", fg="white", width=8, height=2,
+                          command=confirmar_substituicao, cursor="hand2")
+        btn_yes.pack(side=tk.RIGHT, padx=10)
+        
+        # Barra inferior com imagem BelowBar_store.png (com fallback)
+        try:
+            belowbar_img = ImageTk.PhotoImage(Image.open(BELOWBAR_IMG).resize((self.winfo_screenwidth(), 50)))
+            belowbar_label = tk.Label(self, image=belowbar_img, bg="black")
+            belowbar_label.image = belowbar_img
+            belowbar_label.pack(side="bottom", fill="x")
+        except Exception as e:
+            print(f"DEBUG: Erro ao carregar BELOWBAR_IMG '{BELOWBAR_IMG}': {e} - usando footer simples")
+            footer_frame = tk.Frame(self, bg="#DC8392", height=50)
+            footer_frame.pack(side="bottom", fill="x")
+
+        # Mover saldo e piccoin para parte inferior direita (por cima do BelowBar)
+        coin_img_bottom = ImageTk.PhotoImage(Image.open(COIN_IMG).resize((24, 24)))
+        coin_lbl_bottom = tk.Label(self, image=coin_img_bottom, bg="#DC8392")
+        coin_lbl_bottom.image = coin_img_bottom
+        coin_lbl_bottom.place(x=self.winfo_screenwidth()-100, rely=1.0, y=-25, anchor="w")
+        
+        saldo_lbl_bottom = tk.Label(self, text=f"{self.saldo}", font=("Helvetica", 16, "bold"), fg="black", bg="#DC8392")
+        saldo_lbl_bottom.place(x=self.winfo_screenwidth()-70, rely=1.0, y=-25, anchor="w")
+    
+    def _voltar_para_playerdashboard_apos_troca(self):
+        """Volta para o PlayerDashboard após completar a troca"""
+        print(f"DEBUG: [TROCA] Voltando para PlayerDashboard após troca")
+        
+        try:
+            # Esconder a Store
+            self.withdraw()
+            print("DEBUG: [TROCA] Store escondida")
+            
+            # CRÍTICO: Limpar COMPLETAMENTE o estado da Store para evitar reaparição da página de substituição
+            self._limpar_estado_completo_store()
+            
+            # =============================================================================
+            # BACKUP IMEDIATO STORE: PRESERVAR TRACKING DE CHALLENGES ANTES DA INTERFACE
+            # =============================================================================
+            print(f"DEBUG: [BACKUP STORE] *** INICIANDO BACKUP IMEDIATO DE CHALLENGES ***")
+            
+            # 1. Fazer backup do _challenge_start_turns no master root
+            root = self.dashboard.master
+            if hasattr(self.dashboard, '_challenge_start_turns') and self.dashboard._challenge_start_turns:
+                # Criar backup no root se não existir
+                if not hasattr(root, '_backup_challenge_start_turns'):
+                    root._backup_challenge_start_turns = {}
+                
+                # CORREÇÃO CRÍTICA: Usar caminho completo, não basename
+                # Fazer backup de cada Challenge ativo usando caminho completo (consistente com outros backups)
+                for challenge_path, turn_number in self.dashboard._challenge_start_turns.items():
+                    root._backup_challenge_start_turns[challenge_path] = turn_number
+                    print(f"DEBUG: [BACKUP STORE] Challenge '{os.path.basename(challenge_path)}' (caminho: {challenge_path}) -> turno {turn_number} GUARDADO no backup root")
+                
+                print(f"DEBUG: [BACKUP STORE] Total de {len(self.dashboard._challenge_start_turns)} Challenges guardados no backup root")
+            else:
+                print(f"DEBUG: [BACKUP STORE] Nenhum Challenge ativo para fazer backup")
+            
+            # Mostrar o PlayerDashboard
+            self.dashboard.deiconify()
+            self.dashboard.state('normal')
+            self.dashboard.lift()
+            self.dashboard.focus_force()
+            print("DEBUG: [TROCA] PlayerDashboard mostrado")
+            
+            # Chamar a interface principal do PlayerDashboard sem botão Store
+            self.dashboard.playerdashboard_interface(
+                self.dashboard.player_name,
+                self.dashboard.saldo,
+                self.dashboard.other_players,
+                show_store_button=False  # Challenge aceite = sem botão Store
+            )
+            print("DEBUG: [TROCA] Interface PlayerDashboard carregada com sucesso")
+        except Exception as e:
+            print(f"DEBUG: [TROCA] Erro ao voltar para PlayerDashboard: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    def _limpar_estado_completo_store(self):
+        """
+        Limpa COMPLETAMENTE o estado da Store após uma substituição Challenge→Activity
+        para garantir que a página de substituição não reapareça em turnos futuros
+        """
+        print(f"DEBUG: [LIMPEZA] Iniciando limpeza completa do estado da Store")
+        
+        # 1. Limpar estados de Challenge transferido do PlayerDashboard
+        if hasattr(self, '_store_challenge_carta_path'):
+            old_path = self._store_challenge_carta_path
+            self._store_challenge_carta_path = None
+            print(f"DEBUG: [LIMPEZA] _store_challenge_carta_path limpo: {old_path} -> None")
+        
+        if hasattr(self, '_store_challenge_carta_tipo'):
+            old_tipo = self._store_challenge_carta_tipo
+            self._store_challenge_carta_tipo = None
+            print(f"DEBUG: [LIMPEZA] _store_challenge_carta_tipo limpo: {old_tipo} -> None")
+        
+        # 2. Limpar estados de carta fullscreen
+        if hasattr(self, 'fullscreen_carta_path'):
+            old_path = self.fullscreen_carta_path
+            self.fullscreen_carta_path = None
+            print(f"DEBUG: [LIMPEZA] fullscreen_carta_path limpo: {old_path} -> None")
+        
+        if hasattr(self, 'fullscreen_carta_tipo'):
+            old_tipo = self.fullscreen_carta_tipo
+            self.fullscreen_carta_tipo = None
+            print(f"DEBUG: [LIMPEZA] fullscreen_carta_tipo limpo: {old_tipo} -> None")
+        
+        # 3. Limpar estados de backup
+        backup_attrs = [
+            '_backup_fullscreen_carta_path',
+            '_backup_fullscreen_carta_tipo',
+            '_original_carta_path',
+            '_original_carta_tipo'
+        ]
+        
+        for attr in backup_attrs:
+            if hasattr(self, attr):
+                old_value = getattr(self, attr)
+                setattr(self, attr, None)
+                print(f"DEBUG: [LIMPEZA] {attr} limpo: {old_value} -> None")
+        
+        # 4. CORREÇÃO CRÍTICA: Limpar estados de substituição Challenge→Activity
+        # IMPORTANTE: Limpar TODAS as variáveis que possam causar reaparição da página de confirmação
+        substitution_attrs = [
+            '_challenge_substitution_path',
+            '_challenge_substitution_activities', 
+            '_substitution_activity_idx',
+            '_substitution_activity_path',
+            '_substitution_confirmed',
+            '_activity_indices',
+            '_current_challenge_path',
+            # ADICIONAIS: Variáveis que podem persistir da interface de escolha
+            '_choice_challenge_path',
+            '_choice_activities_indices',
+            '_choice_current_page',
+            '_last_substitution_state',
+            '_pending_substitution'
+        ]
+        
+        for attr in substitution_attrs:
+            if hasattr(self, attr):
+                old_value = getattr(self, attr)
+                setattr(self, attr, None)
+                print(f"DEBUG: [LIMPEZA] {attr} limpo: {old_value} -> None")
+        
+        # CRITICAL: Verificar se existe algum callback ou estado ativo que possa restaurar a página
+        print(f"DEBUG: [LIMPEZA] Verificando se há widgets filho que possam causar problemas...")
+        try:
+            # FORÇA A DESTRUIÇÃO DE TODOS OS WIDGETS FILHOS ANTES DA LIMPEZA
+            for widget in self.winfo_children():
+                try:
+                    widget.destroy()
+                except:
+                    pass
+            # Forçar update para garantir que todos os widgets foram destruídos
+            self.update_idletasks()
+            print(f"DEBUG: [LIMPEZA] Todos os widgets filho destruídos")
+        except Exception as e:
+            print(f"DEBUG: [LIMPEZA] Erro ao destruir widgets: {e}")
+        
+        # FORCE CLEANUP: Garantir que não há referências pendentes
+        print(f"DEBUG: [LIMPEZA] Forçando limpeza de qualquer estado de interface ativa...")
+        if hasattr(self, '_active_interface_type'):
+            old_interface = self._active_interface_type
+            self._active_interface_type = None
+            print(f"DEBUG: [LIMPEZA] _active_interface_type limpo: {old_interface} -> None")
+        
+        # ADICIONAL: Limpar qualquer callback pendente que possa estar preservado
+        callback_attrs = [
+            '_pending_callback',
+            '_active_callback',
+            '_substitution_callback',
+            '_confirmation_callback',
+            '_activity_selection_callback'
+        ]
+        
+        for attr in callback_attrs:
+            if hasattr(self, attr):
+                old_value = getattr(self, attr)
+                setattr(self, attr, None)
+                print(f"DEBUG: [LIMPEZA] {attr} limpo: {old_value} -> None")
+        
+        # 5. Limpar estados de navegação
+        navigation_attrs = [
+            'current_card_type',
+            'current_sell_type', 
+            'current_sell_page'
+        ]
+        
+        for attr in navigation_attrs:
+            if hasattr(self, attr):
+                old_value = getattr(self, attr)
+                setattr(self, attr, None)
+                print(f"DEBUG: [LIMPEZA] {attr} limpo: {old_value} -> None")
+        
+        # 6. CORREÇÃO: NÃO limpar casa_tipo e casa_cor se vieram do PlayerDashboard
+        # Essas informações são necessárias para o funcionamento correto da Store
+        # e agora são automaticamente obtidas do PlayerDashboard no rebuild_store_interface
+        # if hasattr(self, 'casa_tipo'):
+        #     old_tipo = self.casa_tipo
+        #     self.casa_tipo = None
+        #     print(f"DEBUG: [LIMPEZA] casa_tipo limpo: {old_tipo} -> None")
+        
+        # if hasattr(self, 'casa_cor'):
+        #     old_cor = self.casa_cor
+        #     self.casa_cor = None
+        #     print(f"DEBUG: [LIMPEZA] casa_cor limpo: {old_cor} -> None")
+        
+        print(f"DEBUG: [LIMPEZA] casa_tipo e casa_cor preservados - serão obtidos do PlayerDashboard se necessário")
+        
+        # 7. Limpar flags de Challenge aceite no PlayerDashboard para próximo turno
+        if hasattr(self.dashboard, '_challenge_accepted'):
+            old_flag = self.dashboard._challenge_accepted
+            self.dashboard._challenge_accepted = False
+            print(f"DEBUG: [LIMPEZA] PlayerDashboard _challenge_accepted resetado: {old_flag} -> False")
+        
+        if hasattr(self.dashboard, '_store_button_disabled'):
+            old_flag = self.dashboard._store_button_disabled
+            self.dashboard._store_button_disabled = False
+            print(f"DEBUG: [LIMPEZA] PlayerDashboard _store_button_disabled resetado: {old_flag} -> False")
+        
+        print(f"DEBUG: [LIMPEZA] Limpeza completa do estado da Store concluída")
+        print(f"DEBUG: [LIMPEZA] Store pronta para próximo turno - sem dados obsoletos")

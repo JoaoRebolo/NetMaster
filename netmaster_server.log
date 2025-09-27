@@ -1,33 +1,45 @@
-2025-09-15 02:28:43,658 - INFO - Iniciando NetMaster Server em 0.0.0.0:8000
-2025-09-15 02:28:43,658 - INFO - Configurações:
-2025-09-15 02:28:43,658 - INFO -    - Máximo 4 jogadores por sessão
-2025-09-15 02:28:43,659 - INFO -    - Duração máxima: 30 minutos
-2025-09-15 02:28:43,659 - INFO -    - Tempo de espera para outros jogadores: 1 minuto(s)
-2025-09-15 02:28:43,659 - INFO -    - Heartbeat: 30 segundos
-2025-09-15 02:28:43,706 - INFO - server listening on 0.0.0.0:8000
-2025-09-15 02:28:43,706 - INFO - Servidor NetMaster ativo em ws://0.0.0.0:8000
-2025-09-15 02:28:43,706 - INFO - Acesso público: ws://netmaster.vps.tecnico.ulisboa.pt:8000
-2025-09-15 02:56:28,473 - INFO - server closing
-2025-09-15 02:56:28,473 - INFO - server closed
-2025-09-15 02:56:28,473 - INFO - Servidor NetMaster finalizado
-2025-09-15 02:56:35,306 - INFO - Iniciando NetMaster Server em 0.0.0.0:8000
-2025-09-15 02:56:35,306 - INFO - Configurações:
-2025-09-15 02:56:35,306 - INFO -    - Máximo 4 jogadores por sessão
-2025-09-15 02:56:35,306 - INFO -    - Duração máxima: 30 minutos
-2025-09-15 02:56:35,306 - INFO -    - Tempo de espera para outros jogadores: 1 minuto(s)
-2025-09-15 02:56:35,306 - INFO -    - Heartbeat: 30 segundos
-2025-09-15 02:56:35,316 - INFO - server listening on 0.0.0.0:8000
-2025-09-15 02:56:35,316 - INFO - Servidor NetMaster ativo em ws://0.0.0.0:8000
-2025-09-15 02:56:35,316 - INFO - Acesso público: ws://netmaster.vps.tecnico.ulisboa.pt:8000
-2025-09-15 02:59:29,780 - INFO - server closing
-2025-09-15 02:59:29,780 - INFO - server closed
-2025-09-15 02:59:29,780 - INFO - Servidor NetMaster finalizado
-2025-09-15 03:00:08,235 - INFO - Iniciando NetMaster Server em 0.0.0.0:8000
-2025-09-15 03:00:08,235 - INFO - Configurações:
-2025-09-15 03:00:08,235 - INFO -    - Máximo 4 jogadores por sessão
-2025-09-15 03:00:08,235 - INFO -    - Duração máxima: 30 minutos
-2025-09-15 03:00:08,235 - INFO -    - Tempo de espera para outros jogadores: 1 minuto(s)
-2025-09-15 03:00:08,235 - INFO -    - Heartbeat: 30 segundos
-2025-09-15 03:00:08,246 - INFO - server listening on 0.0.0.0:8000
-2025-09-15 03:00:08,246 - INFO - Servidor NetMaster ativo em ws://0.0.0.0:8000
-2025-09-15 03:00:08,246 - INFO - Acesso público: ws://netmaster.vps.tecnico.ulisboa.pt:8000
+2025-09-27 15:01:01,918 - INFO - Iniciando NetMaster Server em 0.0.0.0:8000
+2025-09-27 15:01:01,918 - INFO - Configurações:
+2025-09-27 15:01:01,918 - INFO -    - Máximo 4 jogadores por sessão
+2025-09-27 15:01:01,918 - INFO -    - Duração máxima: 30 minutos
+2025-09-27 15:01:01,918 - INFO -    - Tempo de espera para outros jogadores: 1 minuto(s)
+2025-09-27 15:01:01,918 - INFO -    - Heartbeat: 30 segundos
+2025-09-27 15:01:02,009 - INFO - server listening on 0.0.0.0:8000
+2025-09-27 15:01:02,009 - INFO - Servidor NetMaster ativo em ws://0.0.0.0:8000
+2025-09-27 15:01:02,009 - INFO - Acesso público: ws://netmaster.vps.tecnico.ulisboa.pt:8000
+2025-09-27 18:23:31,726 - INFO - Iniciando NetMaster Server em 0.0.0.0:8000
+2025-09-27 18:23:31,726 - INFO - Configurações:
+2025-09-27 18:23:31,726 - INFO -    - Máximo 4 jogadores por sessão
+2025-09-27 18:23:31,726 - INFO -    - Duração máxima: 30 minutos
+2025-09-27 18:23:31,726 - INFO -    - Tempo de espera para outros jogadores: 1 minuto(s)
+2025-09-27 18:23:31,726 - INFO -    - Heartbeat: 30 segundos
+2025-09-27 18:23:31,745 - INFO - server listening on 0.0.0.0:8000
+2025-09-27 18:23:31,745 - INFO - Servidor NetMaster ativo em ws://0.0.0.0:8000
+2025-09-27 18:23:31,745 - INFO - Acesso público: ws://netmaster.vps.tecnico.ulisboa.pt:8000
+2025-09-27 18:25:10,845 - INFO - server closing
+2025-09-27 18:25:10,845 - INFO - server closed
+2025-09-27 18:25:10,845 - INFO - Servidor NetMaster finalizado
+2025-09-27 18:26:43,337 - INFO - Iniciando NetMaster Server em 0.0.0.0:8000
+2025-09-27 18:26:43,337 - INFO - Configurações:
+2025-09-27 18:26:43,337 - INFO -    - Máximo 4 jogadores por sessão
+2025-09-27 18:26:43,337 - INFO -    - Duração máxima: 30 minutos
+2025-09-27 18:26:43,337 - INFO -    - Tempo de espera para outros jogadores: 1 minuto(s)
+2025-09-27 18:26:43,337 - INFO -    - Heartbeat: 30 segundos
+2025-09-27 18:26:43,353 - INFO - server listening on 0.0.0.0:8000
+2025-09-27 18:26:43,353 - INFO - Servidor NetMaster ativo em ws://0.0.0.0:8000
+2025-09-27 18:26:43,353 - INFO - Acesso público: ws://netmaster.vps.tecnico.ulisboa.pt:8000
+2025-09-27 18:27:06,254 - INFO - server closing
+2025-09-27 18:27:06,255 - INFO - server closed
+2025-09-27 18:27:06,255 - INFO - Servidor NetMaster finalizado
+2025-09-27 18:28:24,747 - INFO - Iniciando NetMaster Server em 0.0.0.0:8000
+2025-09-27 18:28:24,747 - INFO - Configurações:
+2025-09-27 18:28:24,747 - INFO -    - Máximo 4 jogadores por sessão
+2025-09-27 18:28:24,747 - INFO -    - Duração máxima: 30 minutos
+2025-09-27 18:28:24,747 - INFO -    - Tempo de espera para outros jogadores: 1 minuto(s)
+2025-09-27 18:28:24,747 - INFO -    - Heartbeat: 30 segundos
+2025-09-27 18:28:24,763 - INFO - server listening on 0.0.0.0:8000
+2025-09-27 18:28:24,763 - INFO - Servidor NetMaster ativo em ws://0.0.0.0:8000
+2025-09-27 18:28:24,763 - INFO - Acesso público: ws://netmaster.vps.tecnico.ulisboa.pt:8000
+2025-09-27 18:28:39,878 - INFO - server closing
+2025-09-27 18:28:39,878 - INFO - server closed
+2025-09-27 18:28:39,879 - INFO - Servidor NetMaster finalizado

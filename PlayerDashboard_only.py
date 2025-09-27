@@ -25,7 +25,7 @@ except ImportError:
         def cleanup(): pass
     GPIO = MockGPIO()
 import random
-from Store_v2 import StoreWindow
+from Store import StoreWindow
 # Importar utilitários para detecção de Raspberry Pi
 from raspberry_pi_utils import get_universal_paths, find_existing_path, get_possible_raspberry_pi_paths
 # Importar sistema de integração da base de dados
@@ -5154,7 +5154,7 @@ class PlayerDashboard(tk.Toplevel):
                         return
                     
                     # Importar Store aqui para evitar imports circulares
-                    from Store_v2 import StoreWindow
+                    from Store import StoreWindow
                     # Usar as mesmas informações da casa atual (se disponível)
                     casa_tipo = getattr(self, 'current_casa_tipo', 'neutral')
                     casa_cor = getattr(self, 'current_casa_cor', 'neutral')
@@ -7364,7 +7364,7 @@ class PlayerDashboard(tk.Toplevel):
                     
                     # Adicionar de volta à Store usando Store_v2
                     try:
-                        from Store_v2 import adicionar_carta_store
+                        from Store import adicionar_carta_store
                         adicionar_carta_store(carta_path, "events")
                         print(f"DEBUG: Event {carta_path} devolvido à Store com sucesso")
                     except ImportError:
@@ -12554,7 +12554,7 @@ class PlayerDashboard(tk.Toplevel):
             
             # Fallback: adicionar diretamente aos baralhos globais
             try:
-                from Store_v2 import baralhos
+                from Store import baralhos
                 if cor_carta not in baralhos:
                     baralhos[cor_carta] = {}
                 if "challenges" not in baralhos[cor_carta]:
@@ -12587,7 +12587,7 @@ class PlayerDashboard(tk.Toplevel):
             
             # Fallback: adicionar diretamente aos baralhos globais
             try:
-                from Store_v2 import baralhos
+                from Store import baralhos
                 if cor_carta not in baralhos:
                     baralhos[cor_carta] = {}
                 if "activities" not in baralhos[cor_carta]:
@@ -12620,7 +12620,7 @@ class PlayerDashboard(tk.Toplevel):
             
             # Fallback: adicionar diretamente aos baralhos globais da Store
             try:
-                from Store_v2 import baralhos
+                from Store import baralhos
                 if cor_carta not in baralhos:
                     baralhos[cor_carta] = {}
                 if "services" not in baralhos[cor_carta]:
@@ -12634,7 +12634,7 @@ class PlayerDashboard(tk.Toplevel):
                 print(f"DEBUG: [DEVOLVER_SERVICE] ERRO: Não foi possível importar baralhos da Store: {e}")
                 # Fallback adicional: tentar diretamente através de Store_v2
                 try:
-                    from Store_v2 import StoreWindow
+                    from Store import StoreWindow
                     # Criar instância temporária da Store para adicionar carta
                     # Nota: Isto é um fallback extremo, normalmente a store_window deve estar disponível
                     print(f"DEBUG: [DEVOLVER_SERVICE] Tentando fallback via StoreWindow direto")
@@ -23316,7 +23316,7 @@ class PlayerDashboard(tk.Toplevel):
                                     
                                     # Sincronização com baralho global
                                     try:
-                                        from Store_v2 import baralhos
+                                        from Store import baralhos
                                         if baralhos and cor_carta in baralhos and carta_tipo in baralhos[cor_carta]:
                                             if carta_path not in baralhos[cor_carta][carta_tipo]:
                                                 baralhos[cor_carta][carta_tipo].append(carta_path)
