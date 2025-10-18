@@ -4,9 +4,7 @@
 
 ### Player Dashboard
 
-#### Features
-
-##### Interface Initialization and State Management
+#### Interface Initialization and State Management
 
 ```pseudocode
 Function __init__(root, player_color, saldo, other_players, player_name):
@@ -29,6 +27,8 @@ Function __init__(root, player_color, saldo, other_players, player_name):
     self.card_database <- IntegratedCardDatabase(".")
     self.cards <- initialize_back_card_paths()
 ```
+
+##### Features
 
 ###### Transition to Gameplay
 
@@ -140,7 +140,94 @@ Function playerdashboard_interface(player_name, saldo, other_players, show_store
     progress_frame.place(relx=0.5, rely=0.75, anchor="center")
 ```
 
-###### Card Addition and Substitution Mechanism
+##### Game Phase Management System
+
+```pseudocode
+Function _criar_botao_next_phase():
+    // Create Next Phase button
+    self.next_phase_btn <- tk.Button(self, text="Next Phase",
+                                    font=("Helvetica", 16, "bold"),
+                                    bg="#A020F0", fg="white",
+                                    command=self._iniciar_next_phase,
+                                    width=12, height=2)
+    self.next_phase_btn.place(relx=0.5, rely=0.95, anchor="s")
+
+Function _iniciar_next_phase():
+    // Set phase flags
+    self._next_phase_active = True
+    self._next_phase_manually_activated = True
+    
+    // Disable store button
+    self.disable_store_button()
+    
+    // Create Final Phase button
+    self._criar_botao_final_phase()
+
+Function _iniciar_final_phase():
+    // Validate bandwidth requirements
+    if not self._has_active_bandwidth_services():
+        self._show_bandwidth_required_message_overlay()
+        return
+    
+    // Set final phase flags
+    self._final_phase_active = True
+    self._final_phase_gestao_ativa = True
+    
+    // Start packet management
+    self._iniciar_gestao_pacotes()
+
+Function end_turn():
+    // Increment turn counter
+    self._current_turn_number += 1
+    
+    // Check for expired services
+    self._verificar_services_expirados()
+    
+    // Reset phase flags
+    self._next_phase_active = False
+    self._final_phase_active = False
+    self._final_phase_gestao_ativa = False
+```
+
+##### Player Inventory Management System 
+
+```pseudocode
+Function show_inventory_page(carta_tipo):
+    // Check for Next Phase restrictions
+    if self._next_phase_active and carta_tipo in ["equipments", "services", "users"]:
+        self._disable_inventory_sales()
+    
+    // Navigate to inventory matrix display
+    self.show_inventory_matrix([carta_tipo])
+
+Function activate_card(card_type, card_path):
+    // Add to appropriate active list
+    if card_type == "users":
+        if len(self.active_users) < self.max_users:
+            self.active_users.append(card_path)
+        else:
+            return False
+    elif card_type == "equipments":
+        self.active_equipments.append(card_path)
+    elif card_type == "services":
+        self.active_services.append(card_path)
+    
+    // Update interface displays
+    self.update_active_cards_display()
+    return True
+
+Function is_card_active(card_path, card_type):
+    // Check appropriate active list
+    if card_type == "users":
+        return card_path in self.active_users
+    elif card_type == "equipments":
+        return card_path in self.active_equipments
+    elif card_type == "services":
+        return card_path in self.active_services
+    return False
+```
+
+###### Card Placement
 
 ```pseudocode
 Function adicionar_carta_carrossel(carta_path, carta_tipo):
@@ -281,52 +368,66 @@ Function _executar_troca_challenge_activity(challenge_path, activity_idx):
     self.update_card_image()
     self._select_carousel_card(activity_idx, challenge_path)
 ```
-
-###### Selection and Highlighting System
+###### Progress Tracking Implementation
 
 ```pseudocode
-Function _update_carousel_selection_highlights():
-    // Clear all existing highlights
-    for i in range(4):
-        if hasattr(self, f'carousel_card_{i}'):
-            card_widget <- getattr(self, f'carousel_card_{i}')
-            card_widget.configure(highlightthickness=0, relief="flat")
+Function update_progress_bars_for_card(card_idx):
+    // Validate card index and get current stats
+    if card_idx >= len(self.card_stats) or card_idx < 0:
+        return
     
-    // Apply highlight to selected card
-    if (hasattr(self, 'selected_card_idx') and 
-        self.selected_card_idx is not None and
-        hasattr(self, f'carousel_card_{self.selected_card_idx}')):
-        
-        selected_widget <- getattr(self, f'carousel_card_{self.selected_card_idx}')
-        
-        // Determine highlight color based on game phase
-        if hasattr(self, '_final_phase_gestao_ativa') and self._final_phase_gestao_ativa:
-            highlight_color <- "#A020F0"  // Purple for management mode
-        else:
-            highlight_color <- self.player_color_hex  // Player color
-        
-        // Apply visual highlight
-        selected_widget.configure(
-            highlightbackground=highlight_color,
-            highlightthickness=3,
-            relief="solid"
-        )
+    current_stats <- self.card_stats[card_idx]
+    
+    // Update each progress bar type
+    for stat_type in ["To send", "Rxd", "Lost"]:
+        if stat_type in self.progress_bars:
+            current_value <- current_stats.get(stat_type, 0)
+            max_value <- current_stats.get("message_size", 100)
+            
+            // Update progress bar widget
+            progress_bar <- self.progress_bars[stat_type]
+            progress_bar.configure(value=current_value, maximum=max_value)
 
-Function prev_card():
-    // Navigate to previous card in carousel
-    if self.selected_card_idx > 0:
-        self.selected_card_idx -= 1
-        self.selected_carousel_card <- self.cards[self.selected_card_idx]
-        self.update_progress_bars_for_card(self.selected_card_idx)
-        self.update_card_image()
+Function _incrementar_valor(tipo, message_size):
+    // Validate increment constraints
+    if not self._validar_entrada(tipo, message_size):
+        return False
+    
+    // Get selected card stats
+    selected_idx <- self.selected_carousel_index
+    if selected_idx is None:
+        return False
+    
+    // Update progress values
+    if tipo == "Rxd":
+        self.card_stats[selected_idx]["Rxd"] += message_size
+    elif tipo == "Lost":
+        self.card_stats[selected_idx]["Lost"] += message_size
+    
+    // Update visual display
+    self.update_progress_bars_for_card(selected_idx)
+    
+    // Check completion
+    self._verificar_completion_activity()
+    return True
 
-Function next_card():
-    // Navigate to next card in carousel
-    if self.selected_card_idx < 3:
-        self.selected_card_idx += 1
-        self.selected_carousel_card <- self.cards[self.selected_card_idx]
-        self.update_progress_bars_for_card(self.selected_card_idx)
-        self.update_card_image()
+Function _verificar_completion_activity():
+    // Get current card information
+    selected_idx <- self.selected_carousel_index
+    if selected_idx is None:
+        return
+    
+    carta_path <- self.cards[selected_idx]
+    stats <- self.card_stats[selected_idx]
+    
+    // Check if card is completed
+    to_send <- stats.get("To send", 0)
+    if to_send <= 0:
+        // Calculate reward and show completion overlay
+        dados_carta <- self._obter_dados_carta(carta_path)
+        reward <- self._calcular_reward_completion(carta_path, dados_carta, "activity", selected_idx)
+        
+        self._mostrar_overlay_completion(carta_path, dados_carta, False, selected_idx)
 ```
 
 ###### Store Access Validation and Phase Management
@@ -374,7 +475,7 @@ Function enable_store_button():
         self.store_button.configure(state="normal", bg="#FF9800")
 ```
 
-###### Direct Inventory Integration
+###### Inventory Integration
 
 ```pseudocode
 Function adicionar_carta_inventario(carta_path, carta_tipo):
@@ -454,42 +555,47 @@ Function _substituir_activity_por_challenge(idx_carrossel, carta_activity_path, 
     self._select_carousel_card(idx_carrossel, carta_challenge_path)
 ```
 
-##### Inventory System Implementation
+##### Service Expiration Management
 
 ```pseudocode
-Function show_inventory_page(carta_tipo):
-    // Check for Next Phase restrictions
-    if self._next_phase_active and carta_tipo in ["equipments", "services", "users"]:
-        self._disable_inventory_sales()
+Function _verificar_services_expirados():
+    // Find expired services
+    services_expirados <- []
     
-    // Navigate to inventory matrix display
-    self.show_inventory_matrix([carta_tipo])
-
-Function activate_card(card_type, card_path):
-    // Add to appropriate active list
-    if card_type == "users":
-        if len(self.active_users) < self.max_users:
-            self.active_users.append(card_path)
-        else:
-            return False
-    elif card_type == "equipments":
-        self.active_equipments.append(card_path)
-    elif card_type == "services":
-        self.active_services.append(card_path)
+    for carta_path in self._service_start_turns:
+        if self._is_service_expired(carta_path):
+            services_expirados.append(carta_path)
     
-    // Update interface displays
-    self.update_active_cards_display()
-    return True
+    // Show expiration overlays sequentially
+    if services_expirados:
+        self._mostrar_overlays_services_expirados_sequencial(services_expirados, index=0)
 
-Function is_card_active(card_path, card_type):
-    // Check appropriate active list
-    if card_type == "users":
-        return card_path in self.active_users
-    elif card_type == "equipments":
-        return card_path in self.active_equipments
-    elif card_type == "services":
-        return card_path in self.active_services
+Function _is_service_expired(carta_path):
+    // Get service data from database
+    service_data <- self._get_service_data_from_path(carta_path)
+    if not service_data:
+        return False
+    
+    // Check expiration based on type
+    if service_data.get('duration_type') == 'turns':
+        turns_elapsed <- self._current_turn_number - self._service_start_turns[carta_path]
+        duration_turns <- service_data.get('duration_turns', 0)
+        return turns_elapsed >= duration_turns
+    
     return False
+
+Function _processar_service_expirado_individual(carta_path):
+    // Remove from active services
+    if carta_path in self.active_services:
+        self.active_services.remove(carta_path)
+    
+    // Remove from inventory
+    if hasattr(self, 'inventario') and 'services' in self.inventario:
+        if carta_path in self.inventario['services']:
+            self.inventario['services'].remove(carta_path)
+    
+    // Cleanup tracking
+    self._cleanup_expired_service_tracking(carta_path)
 ```
 
 ##### Multiplayer Communication System
@@ -538,162 +644,9 @@ Function on_multiplayer_turn_changed(data):
         self.show_waiting_for_turn_screen(current_player_name, current_player_color)
 ```
 
-##### Service Expiration Management
 
-```pseudocode
-Function _verificar_services_expirados():
-    // Find expired services
-    services_expirados <- []
-    
-    for carta_path in self._service_start_turns:
-        if self._is_service_expired(carta_path):
-            services_expirados.append(carta_path)
-    
-    // Show expiration overlays sequentially
-    if services_expirados:
-        self._mostrar_overlays_services_expirados_sequencial(services_expirados, index=0)
 
-Function _is_service_expired(carta_path):
-    // Get service data from database
-    service_data <- self._get_service_data_from_path(carta_path)
-    if not service_data:
-        return False
-    
-    // Check expiration based on type
-    if service_data.get('duration_type') == 'turns':
-        turns_elapsed <- self._current_turn_number - self._service_start_turns[carta_path]
-        duration_turns <- service_data.get('duration_turns', 0)
-        return turns_elapsed >= duration_turns
-    
-    return False
-
-Function _processar_service_expirado_individual(carta_path):
-    // Remove from active services
-    if carta_path in self.active_services:
-        self.active_services.remove(carta_path)
-    
-    // Remove from inventory
-    if hasattr(self, 'inventario') and 'services' in self.inventario:
-        if carta_path in self.inventario['services']:
-            self.inventario['services'].remove(carta_path)
-    
-    // Cleanup tracking
-    self._cleanup_expired_service_tracking(carta_path)
-```
-
-##### Game Phase Management System
-
-```pseudocode
-Function _criar_botao_next_phase():
-    // Create Next Phase button
-    self.next_phase_btn <- tk.Button(self, text="Next Phase",
-                                    font=("Helvetica", 16, "bold"),
-                                    bg="#A020F0", fg="white",
-                                    command=self._iniciar_next_phase,
-                                    width=12, height=2)
-    self.next_phase_btn.place(relx=0.5, rely=0.95, anchor="s")
-
-Function _iniciar_next_phase():
-    // Set phase flags
-    self._next_phase_active = True
-    self._next_phase_manually_activated = True
-    
-    // Disable store button
-    self.disable_store_button()
-    
-    // Create Final Phase button
-    self._criar_botao_final_phase()
-
-Function _iniciar_final_phase():
-    // Validate bandwidth requirements
-    if not self._has_active_bandwidth_services():
-        self._show_bandwidth_required_message_overlay()
-        return
-    
-    // Set final phase flags
-    self._final_phase_active = True
-    self._final_phase_gestao_ativa = True
-    
-    // Start packet management
-    self._iniciar_gestao_pacotes()
-
-Function end_turn():
-    // Increment turn counter
-    self._current_turn_number += 1
-    
-    // Check for expired services
-    self._verificar_services_expirados()
-    
-    // Reset phase flags
-    self._next_phase_active = False
-    self._final_phase_active = False
-    self._final_phase_gestao_ativa = False
-    
-    // Navigate to next turn
-    self.show_dice_roll_screen(self.player_name, self.saldo, self.other_players)
-```
-
-###### Progress Tracking Implementation
-
-```pseudocode
-Function update_progress_bars_for_card(card_idx):
-    // Validate card index and get current stats
-    if card_idx >= len(self.card_stats) or card_idx < 0:
-        return
-    
-    current_stats <- self.card_stats[card_idx]
-    
-    // Update each progress bar type
-    for stat_type in ["To send", "Rxd", "Lost"]:
-        if stat_type in self.progress_bars:
-            current_value <- current_stats.get(stat_type, 0)
-            max_value <- current_stats.get("message_size", 100)
-            
-            // Update progress bar widget
-            progress_bar <- self.progress_bars[stat_type]
-            progress_bar.configure(value=current_value, maximum=max_value)
-
-Function _incrementar_valor(tipo, message_size):
-    // Validate increment constraints
-    if not self._validar_entrada(tipo, message_size):
-        return False
-    
-    // Get selected card stats
-    selected_idx <- self.selected_carousel_index
-    if selected_idx is None:
-        return False
-    
-    // Update progress values
-    if tipo == "Rxd":
-        self.card_stats[selected_idx]["Rxd"] += message_size
-    elif tipo == "Lost":
-        self.card_stats[selected_idx]["Lost"] += message_size
-    
-    // Update visual display
-    self.update_progress_bars_for_card(selected_idx)
-    
-    // Check completion
-    self._verificar_completion_activity()
-    return True
-
-Function _verificar_completion_activity():
-    // Get current card information
-    selected_idx <- self.selected_carousel_index
-    if selected_idx is None:
-        return
-    
-    carta_path <- self.cards[selected_idx]
-    stats <- self.card_stats[selected_idx]
-    
-    // Check if card is completed
-    to_send <- stats.get("To send", 0)
-    if to_send <= 0:
-        // Calculate reward and show completion overlay
-        dados_carta <- self._obter_dados_carta(carta_path)
-        reward <- self._calcular_reward_completion(carta_path, dados_carta, "activity", selected_idx)
-        
-        self._mostrar_overlay_completion(carta_path, dados_carta, False, selected_idx)
-```
+#### Object Recognition
 
 ##### YOLO Detection Framework
 
@@ -958,7 +911,7 @@ Function yolo_detect():
     cv2.destroyAllWindows()
 ```
 
-##### Equipment Activation and Validation Workflow Implementation
+##### Equipment Activation and Validation Workflow 
 
 ```pseudocode
 Function execute_detection_script(object_name, parent_window=None):
@@ -1283,7 +1236,7 @@ Function rebuild_store_interface():
     }
 ```
 
-##### Card Acquisition System Implementation
+##### Card Acquisition System 
 
 ```pseudocode
 Function show_buy_page():
@@ -1401,7 +1354,7 @@ Function _extrair_valor_carta(carta_path):
         return card.application_fee if card else None
 ```
 
-##### Randomized Deck Management Implementation
+##### Randomized Deck Management 
 
 ```pseudocode
 Function tirar_carta_especifica(tipo, cor):
@@ -1467,7 +1420,7 @@ Function mostrar_carta(casa_cor, tipo):
     go_btn.pack(pady=(5, 0))
 ```
 
-##### Challenge Card Integration System Implementation
+##### Challenge Card Integration System 
 
 ```pseudocode
 Function processar_casa_challenges(casa_cor):
@@ -1542,157 +1495,6 @@ Function _executar_troca_challenge_activity(challenge_path, idx_activity):
     // Disable Store button and return to dashboard
     self.dashboard.disable_store_button()
     self._voltar_para_playerdashboard_apos_troca()
-```
-
-##### Multiplayer Integration and Communication Implementation
-
-```pseudocode
-Function _enviar_carta_para_jogador(carta_path, casa_tipo, jogador_alvo):
-    // Validate target player using server broadcast data
-    cor_valida_no_broadcast <- self._verificar_cor_no_players_broadcast(jogador_alvo)
-    
-    if cor_valida_no_broadcast:
-        // Process card delivery based on target
-        if jogador_alvo == self.player_color:
-            // Self-targeting: add directly to inventory
-            tipo_inv <- casa_tipo
-            if casa_tipo == "actions":
-                tipo_inv <- "Actions"
-            elif casa_tipo == "events":
-                tipo_inv <- "Events"
-            
-            self.dashboard.adicionar_carta_inventario(carta_path, tipo_inv)
-            self._mostrar_confirmacao_envio(carta_path, casa_tipo, jogador_alvo)
-        else:
-            // Other player: store on server for later retrieval
-            self._armazenar_carta_no_servidor(carta_path, casa_tipo, jogador_alvo, None)
-            self._mostrar_confirmacao_envio(carta_path, casa_tipo, jogador_alvo)
-    else:
-        // Player not found - show error message
-        self._mostrar_confirmacao_devolucao(carta_path, casa_tipo, jogador_alvo)
-    
-    // Remove card from local deck
-    self._remover_carta_do_baralho_local(carta_path, casa_tipo)
-    self._voltar_ao_dashboard()
-
-Function _armazenar_carta_no_servidor(carta_path, tipo_carta, jogador_alvo, target_player_id):
-    netmaster_client <- __main__.netmaster_client
-    
-    // Prepare card data for server storage
-    card_id <- os.path.splitext(os.path.basename(carta_path))[0]
-    card_data <- {
-        'id': card_id,
-        'card_path': carta_path,
-        'card_type': tipo_carta.lower(),
-        'from_player': self.player_color
-    }
-    
-    // Create server message
-    message <- {
-        'type': 'store_card_for_player',
-        'sender_player_id': getattr(netmaster_client, 'player_id', 'unknown'),
-        'sender_color': self.player_color,
-        'target_player_color': jogador_alvo,
-        'target_player_id': target_player_id,
-        'card_data': card_data
-    }
-    
-    // Send via async WebSocket in separate thread
-    send_result <- [False]
-    def send_message_in_thread():
-        try:
-            asyncio.run(netmaster_client.send_message(message))
-            send_result[0] <- True
-        except Exception as e:
-            send_result[0] <- False
-    
-    thread <- threading.Thread(target=send_message_in_thread, daemon=True)
-    thread.start()
-    thread.join(timeout=5.0)
-    
-    return send_result[0]
-
-Function _verificar_cor_no_players_broadcast(cor_alvo):
-    // Check if target color exists in server broadcast data
-    if not hasattr(self, 'dashboard') or not self.dashboard:
-        return False
-    
-    if not hasattr(self.dashboard, 'session_players') or not self.dashboard.session_players:
-        return False
-    
-    // Search for color in broadcast data
-    for player_id, info in self.dashboard.session_players.items():
-        player_color <- info.get('color', '').lower()
-        is_active <- info.get('is_active', False)
-        
-        if player_color == cor_alvo.lower() and is_active:
-            return True
-    
-    return False
-```
-
-##### Transaction and Balance Management Implementation
-
-```pseudocode
-Function confirmar_venda_carta(carta_path, carta_tipo, player_dashboard):
-    // Extract card value using database or filename fallback
-    valor <- None
-    nome <- os.path.basename(carta_path)
-    
-    if carta_tipo == "activities":
-        valor <- 0  // Activities always have zero sale value
-    else:
-        // Try to extract value from filename pattern
-        match <- re.search(r'_(\d+)\.', nome)
-        if match:
-            valor <- int(match.group(1))
-        else:
-            valor <- 50  // Default value
-    
-    // Process sale transaction
-    if valor is not None and valor > 0:
-        // Update balances
-        if player_dashboard:
-            player_dashboard.saldo += valor
-            self.saldo -= valor
-        
-        // Remove from player inventory
-        if player_dashboard and hasattr(player_dashboard, 'inventario'):
-            if carta_tipo in player_dashboard.inventario:
-                if carta_path in player_dashboard.inventario[carta_tipo]:
-                    player_dashboard.inventario[carta_tipo].remove(carta_path)
-        
-        // Add back to store decks for future purchases
-        self.adicionar_carta_ao_baralho(carta_path, carta_tipo, self.player_color)
-
-Function adicionar_carta_ao_baralho(carta_path, carta_tipo, carta_cor):
-    // Add sold card back to store decks
-    if carta_cor is None:
-        carta_cor <- self.player_color
-    
-    // Ensure local deck structure exists
-    if not hasattr(self, 'cartas'):
-        self.cartas <- {}
-    
-    if carta_cor not in self.cartas:
-        self.cartas[carta_cor] <- {}
-    
-    if carta_tipo not in self.cartas[carta_cor]:
-        self.cartas[carta_cor][carta_tipo] <- []
-    
-    // Add to local deck if not already present
-    if carta_path not in self.cartas[carta_cor][carta_tipo]:
-        self.cartas[carta_cor][carta_tipo].append(carta_path)
-    
-    // Synchronize with global deck
-    global baralhos
-    if baralhos:
-        if carta_cor not in baralhos:
-            baralhos[carta_cor] <- {}
-        if carta_tipo not in baralhos[carta_cor]:
-            baralhos[carta_cor][carta_tipo] <- []
-        if carta_path not in baralhos[carta_cor][carta_tipo]:
-            baralhos[carta_cor][carta_tipo].append(carta_path)
 ```
 
 ### Cards Database
@@ -2798,7 +2600,7 @@ Function handle_client(websocket):
 
 ### Features
 
-##### Concurrent Session Management Implementation
+##### Concurrent Session Management
 
 ```pseudocode
 Function handle_create_session(client_id, websocket, data):
@@ -3090,7 +2892,7 @@ Function is_websocket_closed(websocket):
             return False
 ```
 
-##### Game State Synchronization Implementation
+##### Game State Synchronization 
 
 ```pseudocode
 Function handle_end_turn(client_id, websocket, data):
@@ -3229,7 +3031,7 @@ Function process_game_action(session, player_id, action_type, action_data, sessi
         return {"message": "Action " + action_type + " processed"}
 ```
 
-##### Server-Controlled Timer System Implementation
+##### Server-Controlled Timer System
 
 ```pseudocode
 Function start_session_timer(session_id, duration_minutes):
@@ -3400,7 +3202,7 @@ Function handle_timer_sync(client_id, websocket, data):
         print("Error processing timer_sync message: " + str(e))
 ```
 
-##### Card Distribution and Storage System Implementation
+##### Card Distribution and Storage System 
 
 ```pseudocode
 Function handle_store_card_for_player(client_id, websocket, data):
@@ -3556,7 +3358,7 @@ Function return_card_to_store(card_data, session_id):
         return False
 ```
 
-##### Session Discovery and Matching System Implementation
+##### Session Discovery and Matching  
 
 ```pseudocode
 Function handle_list_sessions(client_id, websocket, data):
@@ -3644,7 +3446,7 @@ Function filter_available_sessions():
     return available_sessions
 ```
 
-##### Resource Management and Background Tasks Implementation
+##### Resource Management and Background Tasks 
 
 ```pseudocode
 Function cleanup_expired_sessions():

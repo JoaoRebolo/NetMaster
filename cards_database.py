@@ -12,8 +12,8 @@ import re
 class UserType(Enum):
     """Tipos de utilizadores disponíveis"""
     RESIDENTIAL = "residential"
-    COMMERCIAL = "commercial"
-    INDUSTRIAL = "industrial"
+    ENTERPRISE = "enterprise"
+    ISP = "isp"
 
 class EquipmentType(Enum):
     """Tipos de equipamentos disponíveis"""
