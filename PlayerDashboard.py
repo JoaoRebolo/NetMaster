@@ -8598,6 +8598,10 @@ class PlayerDashboard(tk.Toplevel):
         print(f"DEBUG: [add_starter_cards] Base path detectado: {base_path}")
         print(f"DEBUG: [add_starter_cards] Player color: {self.player_color}")
         
+        # CORREÇÃO CRÍTICA: Verificar se player_color está correto
+        print(f"DEBUG: [add_starter_cards] Player color atual: '{self.player_color}'")
+        print(f"DEBUG: [add_starter_cards] Tipo do player_color: {type(self.player_color)}")
+        
         # Definir cartas específicas para cada tipo de inventário
         starter_cards_config = {
             "users": ["User_2.png"],
@@ -8605,214 +8609,107 @@ class PlayerDashboard(tk.Toplevel):
             "services": ["Service_1.png", "Service_2.png", "Service_5.png"],
             "activities": ["Activity_1.png"],
             "challenges": ["Challenge_1.png"]
-            # actions e events não terão cartas iniciais
         }
         
-        color_variants = []
-        if self.player_color == "blue":
-            color_variants = ["Blue", "blue", "BLUE"]
-        elif self.player_color == "green": 
-            color_variants = ["Green", "green", "GREEN"]
-        elif self.player_color == "red":
-            color_variants = ["Red", "red", "RED"]
-        elif self.player_color == "yellow":
-            color_variants = ["Yellow", "yellow", "YELLOW"]
+        # CORREÇÃO: Garantir que a cor está normalizada corretamente
+        player_color_lower = str(self.player_color).lower().strip()
+        
+        # Mapeamento correto de cores
+        if player_color_lower == "red":
+            color_variants = ["Red", "red"]
+        elif player_color_lower == "blue":
+            color_variants = ["Blue", "blue"] 
+        elif player_color_lower == "green":
+            color_variants = ["Green", "green"]
+        elif player_color_lower == "yellow":
+            color_variants = ["Yellow", "yellow"]
         else:
-            color_variants = ["Blue", "blue"]  # default
+            print(f"DEBUG: [add_starter_cards] ERRO: Cor não reconhecida: '{self.player_color}'")
+            print(f"DEBUG: [add_starter_cards] Forçando cor vermelha como fallback")
+            color_variants = ["Red", "red"]  # Fallback para vermelho
+        
+        print(f"DEBUG: [add_starter_cards] Color variants a usar: {color_variants}")
         
         # Processar cartas por cor do jogador (users, equipments, services, activities)
         for card_type, target_cards in starter_cards_config.items():
             if card_type == "challenges":
-                continue  # Challenges são processados separadamente (neutros)
+                continue  # Processar challenges separadamente
                 
-            print(f"DEBUG: [add_starter_cards] Processando tipo: {card_type}")
-            cards_found = False
+            print(f"DEBUG: [add_starter_cards] Processando {card_type}: {target_cards}")
             
-            for color_var in color_variants:
-                # Tentar estrutura do desenvolvimento local: NetMaster/Users/Residential-level/Red/
-                folder_name = card_type.capitalize()
-                path1 = os.path.join(base_path, folder_name, "Residential-level", color_var)
-                # Tentar estrutura do Raspberry Pi: /img/cartas/users/Residential-level/Red/
-                path2 = os.path.join(base_path, card_type, "Residential-level", color_var)
+            for card_filename in target_cards:
+                card_found = False
                 
-                for path_attempt, path_name in [(path1, "estrutura local"), (path2, "estrutura Raspberry Pi")]:
-                    print(f"DEBUG: [add_starter_cards] Tentando {path_name}: {path_attempt}")
+                # Testar ambas as variações de cor
+                for color_variant in color_variants:
+                    # Possíveis estruturas de pastas
+                    possible_paths = [
+                        # Estrutura desenvolvimento local
+                        os.path.join(base_path, card_type.capitalize(), "Residential-level", color_variant, card_filename),
+                        # Estrutura Raspberry Pi 
+                        os.path.join(base_path, card_type.lower(), "Residential-level", color_variant, card_filename),
+                        # Estrutura alternativa
+                        os.path.join(base_path, "cartas", card_type.lower(), "Residential-level", color_variant, card_filename)
+                    ]
                     
-                    if os.path.exists(path_attempt):
-                        try:
-                            # Procurar pelas cartas específicas
-                            for target_card in target_cards:
-                                card_path = os.path.join(path_attempt, target_card)
-                                if os.path.exists(card_path):
-                                    if card_type in ["actions", "events"]:
-                                        # Usar FIFO para actions e events
-                                        self.adicionar_carta_inventario(card_path, card_type)
-                                        print(f"DEBUG: [add_starter_cards] Carta {card_type} adicionada via FIFO: {target_card}")
-                                    else:
-                                        # Usar append direto para outros tipos
-                                        self.inventario[card_type].append(card_path)
-                                        print(f"DEBUG: [add_starter_cards] Carta inicial adicionada: {target_card} ({card_type})")
-                                else:
-                                    print(f"DEBUG: [add_starter_cards] Carta não encontrada: {target_card} em {path_attempt}")
+                    print(f"DEBUG: [add_starter_cards] Procurando {card_filename} cor {color_variant}:")
+                    for path_attempt in possible_paths:
+                        print(f"DEBUG: [add_starter_cards]   Testando: {path_attempt}")
+                        if os.path.exists(path_attempt):
+                            print(f"DEBUG: [add_starter_cards]   ✓ ENCONTRADO: {path_attempt}")
                             
-                            cards_found = True
-                            break
-                        except Exception as e:
-                            print(f"DEBUG: [add_starter_cards] Erro ao processar {path_attempt}: {e}")
-                            continue
+                            # VERIFICAÇÃO ADICIONAL: Confirmar que a carta é realmente da cor correta
+                            if color_variant.lower() in path_attempt.lower():
+                                if path_attempt not in self.inventario.get(card_type, []):
+                                    self.inventario.setdefault(card_type, []).append(path_attempt)
+                                    print(f"DEBUG: [add_starter_cards]   ✓ ADICIONADO ao inventário {card_type}")
+                                else:
+                                    print(f"DEBUG: [add_starter_cards]   - Já existe no inventário")
+                                card_found = True
+                                break
+                            else:
+                                print(f"DEBUG: [add_starter_cards]   ✗ Cor incorreta no caminho")
+                    
+                    if card_found:
+                        break
                 
-                if cards_found:
-                    break
-            
-            if not cards_found:
-                print(f"DEBUG: [add_starter_cards] NENHUMA ESTRUTURA FUNCIONOU para {card_type}")
+                if not card_found:
+                    print(f"DEBUG: [add_starter_cards]   ✗ NÃO ENCONTRADO: {card_filename} para {card_type} cor {self.player_color}")
         
-        # Processar challenges (neutros)
+        # Processar challenges (neutros) separadamente
         challenges_to_add = starter_cards_config["challenges"]
         print(f"DEBUG: [add_starter_cards] Processando challenges neutros: {challenges_to_add}")
         
-        # Tentar estrutura do desenvolvimento local: NetMaster/Challenges/Residential-level/
-        path1 = os.path.join(base_path, "Challenges", "Residential-level")
-        # Tentar estrutura do Raspberry Pi: /img/cartas/challenges/Residential-level/
-        path2 = os.path.join(base_path, "challenges", "Residential-level")
-        
-        challenges_found = False
-        for path_attempt, path_name in [(path1, "estrutura local"), (path2, "estrutura Raspberry Pi")]:
-            print(f"DEBUG: [add_starter_cards] Tentando challenges {path_name}: {path_attempt}")
+        for challenge_filename in challenges_to_add:
+            # Tentar estrutura do desenvolvimento local e Raspberry Pi
+            possible_challenge_paths = [
+                os.path.join(base_path, "Challenges", "Residential-level", challenge_filename),
+                os.path.join(base_path, "challenges", "Residential-level", challenge_filename),
+                os.path.join(base_path, "cartas", "challenges", "Residential-level", challenge_filename)
+            ]
             
-            if os.path.exists(path_attempt):
-                try:
-                    # Procurar pelas cartas específicas de challenge
-                    for target_card in challenges_to_add:
-                        card_path = os.path.join(path_attempt, target_card)
-                        if os.path.exists(card_path):
-                            self.inventario["challenges"].append(card_path)
-                            print(f"DEBUG: [add_starter_cards] Challenge inicial adicionado: {target_card}")
-                        else:
-                            print(f"DEBUG: [add_starter_cards] Challenge não encontrado: {target_card} em {path_attempt}")
-                    
-                    challenges_found = True
+            challenge_found = False
+            for path_attempt in possible_challenge_paths:
+                print(f"DEBUG: [add_starter_cards] Testando challenge: {path_attempt}")
+                if os.path.exists(path_attempt):
+                    print(f"DEBUG: [add_starter_cards] ✓ ENCONTRADO challenge: {path_attempt}")
+                    if path_attempt not in self.inventario.get("challenges", []):
+                        self.inventario.setdefault("challenges", []).append(path_attempt)
+                        print(f"DEBUG: [add_starter_cards] ✓ Challenge adicionado ao inventário")
+                    challenge_found = True
                     break
-                except Exception as e:
-                    print(f"DEBUG: [add_starter_cards] Erro ao processar challenges {path_attempt}: {e}")
-                    continue
+            
+            if not challenge_found:
+                print(f"DEBUG: [add_starter_cards] ✗ Challenge não encontrado: {challenge_filename}")
         
-        if not challenges_found:
-            print(f"DEBUG: [add_starter_cards] NENHUMA ESTRUTURA FUNCIONOU para challenges")
-        
-        print(f"DEBUG: [PlayerDashboard] Resumo do inventário após cartas iniciais específicas:")
+        print(f"DEBUG: [PlayerDashboard] Resumo final do inventário:")
         for tipo, cartas in self.inventario.items():
             print(f"DEBUG: [PlayerDashboard]   {tipo}: {len(cartas)} cartas")
-            if cartas:
+            if tipo == "equipments":
                 for carta in cartas:
-                    print(f"DEBUG: [PlayerDashboard]     - {os.path.basename(carta)}")
+                    print(f"DEBUG: [PlayerDashboard]     - {os.path.basename(carta)} -> {carta}")
         
-        print("DEBUG: [PlayerDashboard] Cartas iniciais específicas adicionadas com sucesso!")
-        
-    def _get_card_message_size(self, carta_path):
-        base_path = detect_player_inventory_base_dir()
-        
-        # CORREÇÃO: Incluir a cor do jogador no caminho do Equipment_2.png
-        player_color_capitalized = self.player_color.capitalize()  # red -> Red, blue -> Blue, etc.
-        equipment_2_path = os.path.join(base_path, "Equipments", "Residential-level", player_color_capitalized, "Equipment_2.png")
-        
-        print(f"DEBUG: [PlayerDashboard] Tentando adicionar Equipment_2.png para cor {player_color_capitalized}")
-        print(f"DEBUG: [PlayerDashboard] Caminho completo: {equipment_2_path}")
-        
-        # Verificar se o arquivo existe e adicionar ao inventário se não estiver já lá
-        equipment_2_final_path = None
-        if os.path.exists(equipment_2_path):
-            if equipment_2_path not in self.inventario["equipments"]:
-                self.inventario["equipments"].append(equipment_2_path)
-                print(f"DEBUG: [PlayerDashboard] SUCCESS: Equipment_2.png adicionada ao inventário: {equipment_2_path}")
-                equipment_2_final_path = equipment_2_path
-            else:
-                print(f"DEBUG: [PlayerDashboard] Equipment_2.png já estava no inventário")
-                equipment_2_final_path = equipment_2_path
-        else:
-            print(f"DEBUG: [PlayerDashboard] Equipment_2.png não encontrada em: {equipment_2_path}")
-            # Fallback: tentar outros caminhos possíveis incluindo variações de cor
-            fallback_paths = [
-                os.path.join(base_path, "Equipments", "Residential-level", "Equipment_2.png"),  # Sem cor
-                os.path.join(base_path, "equipments", "Residential-level", player_color_capitalized, "Equipment_2.png"),  # Minúscula
-                os.path.join(os.path.dirname(__file__), "Equipments", "Residential-level", player_color_capitalized, "Equipment_2.png"),
-                os.path.join(os.path.dirname(__file__), "equipments", "Residential-level", player_color_capitalized, "Equipment_2.png")
-            ]
-            
-            for fallback_path in fallback_paths:
-                print(f"DEBUG: [PlayerDashboard] Testando fallback: {fallback_path}")
-                if os.path.exists(fallback_path):
-                    if fallback_path not in self.inventario["equipments"]:
-                        self.inventario["equipments"].append(fallback_path)
-                        print(f"DEBUG: [PlayerDashboard] SUCCESS: Equipment_2.png adicionada via fallback: {fallback_path}")
-                        equipment_2_final_path = fallback_path
-                        break
-                    else:
-                        print(f"DEBUG: [PlayerDashboard] Equipment_2.png já estava no inventário (fallback)")
-                        equipment_2_final_path = fallback_path
-                        break
-        
-        # Equipment_2.png adicionada ao inventário mas NÃO ativada automaticamente
-        # O jogador deve ativar manualmente para usar REMOVE ROUTER
-        if equipment_2_final_path:
-            print(f"DEBUG: [PlayerDashboard] SUCCESS: Equipment_2.png adicionada ao inventário: {os.path.basename(equipment_2_final_path)}")
-            print(f"DEBUG: [PlayerDashboard] WARNING: Equipment_2.png deve ser ativada manualmente para usar REMOVE ROUTER")
-        else:
-            print(f"DEBUG: [PlayerDashboard] WARNING: Equipment_2.png não foi encontrada - REMOVE ROUTER não funcionará")
-        
-        # Adicionar Equipment_10.png especificamente ao inventário
-        equipment_10_path = os.path.join(base_path, "Equipments", "Residential-level", player_color_capitalized, "Equipment_10.png")
-        
-        print(f"DEBUG: [PlayerDashboard] Tentando adicionar Equipment_10.png para cor {player_color_capitalized}")
-        print(f"DEBUG: [PlayerDashboard] Caminho completo: {equipment_10_path}")
-        
-        # Verificar se o arquivo existe e adicionar ao inventário se não estiver já lá
-        equipment_10_final_path = None
-        if os.path.exists(equipment_10_path):
-            if equipment_10_path not in self.inventario["equipments"]:
-                self.inventario["equipments"].append(equipment_10_path)
-                print(f"DEBUG: [PlayerDashboard] SUCCESS: Equipment_10.png adicionada ao inventário: {equipment_10_path}")
-                equipment_10_final_path = equipment_10_path
-            else:
-                print(f"DEBUG: [PlayerDashboard] Equipment_10.png já estava no inventário")
-                equipment_10_final_path = equipment_10_path
-        else:
-            print(f"DEBUG: [PlayerDashboard] Equipment_10.png não encontrada em: {equipment_10_path}")
-            # Fallback: tentar outros caminhos possíveis incluindo variações de cor
-            fallback_paths_10 = [
-                os.path.join(base_path, "Equipments", "Residential-level", "Equipment_10.png"),  # Sem cor
-                os.path.join(base_path, "equipments", "Residential-level", player_color_capitalized, "Equipment_10.png"),  # Minúscula
-                os.path.join(os.path.dirname(__file__), "Equipments", "Residential-level", player_color_capitalized, "Equipment_10.png"),
-                os.path.join(os.path.dirname(__file__), "equipments", "Residential-level", player_color_capitalized, "Equipment_10.png")
-            ]
-            
-            for fallback_path in fallback_paths_10:
-                print(f"DEBUG: [PlayerDashboard] Testando fallback Equipment_10: {fallback_path}")
-                if os.path.exists(fallback_path):
-                    if fallback_path not in self.inventario["equipments"]:
-                        self.inventario["equipments"].append(fallback_path)
-                        print(f"DEBUG: [PlayerDashboard] SUCCESS: Equipment_10.png adicionada via fallback: {fallback_path}")
-                        equipment_10_final_path = fallback_path
-                        break
-                    else:
-                        print(f"DEBUG: [PlayerDashboard] Equipment_10.png já estava no inventário (fallback)")
-                        equipment_10_final_path = fallback_path
-                        break
-        
-        # Equipment_10.png adicionada ao inventário mas NÃO ativada automaticamente
-        # O jogador pode ativar manualmente para usar LINK UPGRADE
-        if equipment_10_final_path:
-            print(f"DEBUG: [PlayerDashboard] SUCCESS: Equipment_10.png adicionada ao inventário: {os.path.basename(equipment_10_final_path)}")
-            print(f"DEBUG: [PlayerDashboard] INFO: Equipment_10.png disponível para LINK UPGRADE")
-        else:
-            print(f"DEBUG: [PlayerDashboard] WARNING: Equipment_10.png não foi encontrada - LINK UPGRADE pode não funcionar")
-        
-        # CORREÇÃO CRÍTICA: NÃO ativar Events automaticamente durante inicialização
-        # O tracking será criado apenas quando o Event for realmente ativado
-        if self.inventario.get("events"):
-            print("DEBUG: [add_starter_cards] Events encontrados no inventário")
-            print("DEBUG: [add_starter_cards] [WARNING]  Events NÃO serão ativados automaticamente")
-            print("DEBUG: [add_starter_cards] ✓  Tracking será criado quando Event for ativado no jogo")
+        print("DEBUG: [PlayerDashboard] Cartas iniciais adicionadas com verificação de cor!")
     
     def _get_card_message_size(self, carta_path):
         """
